@@ -214,6 +214,7 @@ impl Game {
         loser: PlayerId,
         events: &mut Vec<Event>,
     ) {
+        self.count_overthrow(winner, loser);
         let base = i16::from(self.taste.battle);
         let amount = if self.dominant == Some(loser) {
             base * 2
@@ -270,6 +271,7 @@ impl Game {
         };
         self.dominant = crowned;
         events.push(Event::Crowned { player: crowned });
+        self.count_dawn();
         if let Some(d) = crowned {
             // The Crown draws the guard's eye (§6.1).
             self.add_threat(d, 1, events);

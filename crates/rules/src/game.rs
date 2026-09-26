@@ -271,6 +271,11 @@ pub enum Event {
         guard_score: Score,
         target_score: Score,
     },
+    /// The match is over.
+    Victory {
+        player: PlayerId,
+        condition: victory::Condition,
+    },
 
     // Hidden information below (draws, traps, choices) goes to every
     // listener for now; the server will filter it per player (§17.1).
@@ -416,6 +421,8 @@ pub enum RuleError {
     /// Only window choices are accepted until it closes.
     WindowOpen,
     NoWindow,
+    /// Someone has won; the match takes no more intents.
+    GameOver,
     AlreadyChose,
     NotInHand,
     WrongTiming,
@@ -443,6 +450,7 @@ impl std::fmt::Display for RuleError {
             }
             RuleError::WindowOpen => write!(f, "a reaction window is open"),
             RuleError::NoWindow => write!(f, "no reaction window to pass in"),
+            RuleError::GameOver => write!(f, "the match is over"),
             RuleError::AlreadyChose => write!(f, "already chose in this window"),
             RuleError::NotInHand => write!(f, "card is not in hand"),
             RuleError::WrongTiming => write!(f, "card cannot be played now"),
@@ -496,6 +504,11 @@ pub struct Game {
     /// Per player, what they did since the last dusk.
     deeds: Vec<Vec<style::Deed>>,
     guard: Option<guard::Guard>,
+    /// Victory conditions (§10): open to all, and one secret per player.
+    open: Vec<victory::Condition>,
+    secrets: Vec<victory::Condition>,
+    progress: Vec<victory::Progress>,
+    winner: Option<(PlayerId, victory::Condition)>,
     log: Vec<Event>,
 }
 
@@ -520,6 +533,7 @@ impl Game {
         // Gods start light or mid, never dark (§14).
         let stages = God::ALL.map(|_| rng.below(2) as u8);
         let taste = style::Taste::draw(&mut rng);
+        let (open, secrets) = victory::draw(&mut rng, setup.champions.len());
         let slice = cards::match_slice(&mut rng);
         let defs: Vec<DefId> = slice
             .iter()
@@ -563,6 +577,10 @@ impl Game {
             taste,
             deeds: vec![Vec::new(); champions_len],
             guard: None,
+            open,
+            secrets,
+            progress: vec![victory::Progress::default(); champions_len],
+            winner: None,
             log: Vec::new(),
         };
 
@@ -898,6 +916,9 @@ impl Game {
     // ---- Applying intents ----
 
     pub fn apply(&mut self, player: PlayerId, intent: Intent) -> Result<Vec<Event>, RuleError> {
+        if self.winner.is_some() {
+            return Err(RuleError::GameOver);
+        }
         if self.champion(player).is_none() {
             return Err(RuleError::UnknownPlayer);
         }
@@ -917,6 +938,7 @@ impl Game {
                 Intent::Pass | Intent::Burn { .. } => return Err(RuleError::NoWindow),
             }
         }
+        self.check_victory(&mut events);
         self.log.extend(events.iter().cloned());
         Ok(events)
     }
@@ -1688,10 +1710,12 @@ impl Game {
 mod battle;
 mod guard;
 mod style;
+mod victory;
 mod world;
 pub use battle::Score;
 pub use guard::{GUARD_DICE, GUARD_RELIEF, GUARD_STEPS, Guard};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
+pub use victory::{Check, CheckKind, Condition, OPEN_COUNT};
 pub use world::{Pantheon, STAGE_THRESHOLD, STAGES, TRISHNA_DRIFT};
 
 #[cfg(test)]

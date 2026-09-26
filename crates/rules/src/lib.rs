@@ -19,9 +19,10 @@ pub mod cards;
 
 pub use cards::{CardDef, CardId, CardKind, DefId, Effect, TargetRule, Timing};
 pub use game::{
-    BodyVerb, Champion, Character, Deed, Event, Fighter, GUARD_DICE, GUARD_RELIEF, GUARD_STEPS,
-    GUARD_THRESHOLD, Game, Guard, Intent, PlayerId, RuleError, STAGE_THRESHOLD, STAGES, Score,
-    Setup, StyleReason, Target, Taste, TasteKind, TimeOfDay, Trap, Window, WindowKind,
+    BodyVerb, Champion, Character, Check, CheckKind, Condition, Deed, Event, Fighter, GUARD_DICE,
+    GUARD_RELIEF, GUARD_STEPS, GUARD_THRESHOLD, Game, Guard, Intent, PlayerId, RuleError,
+    STAGE_THRESHOLD, STAGES, Score, Setup, StyleReason, Target, Taste, TasteKind, TimeOfDay, Trap,
+    Window, WindowKind,
 };
 pub use gods::{Element, God};
 pub use hexx::Hex;

@@ -147,3 +147,58 @@ pub fn taste_parts(kind: necromy_rules::TasteKind) -> (&'static str, &'static st
     let full = taste(kind);
     full.split_once(": ").unwrap_or((full, ""))
 }
+
+/// Name and explanation of a victory condition (§10).
+pub fn condition(c: necromy_rules::Condition) -> (String, String) {
+    use necromy_rules::Condition;
+    match c {
+        Condition::Registry { regions } => (
+            "Реестр".into(),
+            format!("Держи поселение или храм в {regions} краях из пяти."),
+        ),
+        Condition::GodLimit => (
+            "Предел бога".into(),
+            "Служи одному богу фанатично (благосклонность к нему 8+, вектор длиной 0,6+), пока он в тёмной стадии.".into(),
+        ),
+        Condition::Fusion => (
+            "Слияние".into(),
+            "Служи двум соседним по кругу богам (к каждому 8+, вместе 60% твоей благосклонности), и ни один не в светлой стадии.".into(),
+        ),
+        Condition::MiddlePath { dawns } => (
+            "Срединный путь".into(),
+            format!("Благосклонность 10+ поровну у центра пентаграммы, ни один бог не тёмный, {dawns} рассвета подряд."),
+        ),
+        Condition::Overthrow { wins } => (
+            "Свержение".into(),
+            format!("Победи Доминирующего в бою {wins} раза."),
+        ),
+        Condition::FirstAtTable { round } => (
+            "Первый на столе".into(),
+            format!("Начиная с раунда {round}, будь единственным лидером по Стилю."),
+        ),
+        Condition::Wager { dawns } => (
+            "Пари Ахамара".into(),
+            format!("Носи Венец {dawns} рассветов подряд."),
+        ),
+    }
+}
+
+pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
+    use necromy_rules::CheckKind;
+    match kind {
+        CheckKind::RegionsHeld => "края с владениями",
+        CheckKind::TopFavor => "благосклонность к главному богу",
+        CheckKind::SecondFavor => "к слабейшему из пары",
+        CheckKind::PairShare => "доля пары, %",
+        CheckKind::TotalFavor => "вся благосклонность",
+        CheckKind::Fanaticism => "фанатизм, %",
+        CheckKind::Balance => "близость к центру, %",
+        CheckKind::GodStage => "стадия главного бога",
+        CheckKind::PairNotLight => "боги пары не в свете",
+        CheckKind::GodsNotDark => "боги не во тьме",
+        CheckKind::Streak => "рассветов подряд",
+        CheckKind::Overthrows => "побед над Доминирующим",
+        CheckKind::Round => "раунд",
+        CheckKind::StyleLead => "единственный лидер по Стилю",
+    }
+}

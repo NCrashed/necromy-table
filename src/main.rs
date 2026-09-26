@@ -8,6 +8,7 @@ mod play;
 mod stats;
 mod token;
 mod turn_ui;
+mod victory_ui;
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
@@ -38,6 +39,7 @@ fn main() {
             stats::StatsPlugin,
             battle_ui::BattleUiPlugin,
             turn_ui::TurnUiPlugin,
+            victory_ui::VictoryUiPlugin,
         ))
         .add_plugins(AutoScreenshotPlugin)
         .add_systems(Startup, setup_scene)
@@ -110,6 +112,7 @@ fn auto_screenshot(
         Ok("guard") => game.game.guard().is_some() && !dice.busy(),
         Ok("hit") => game.incoming_result.is_some(),
         Ok("myturn") => game.is_human_turn(),
+        Ok("victory") => game.game.winner().is_some() && !dice.busy(),
         Ok("incoming") => matches!(
             game.game.window().map(|w| w.kind),
             Some(necromy_rules::WindowKind::Target { target, .. }) if target == game.human

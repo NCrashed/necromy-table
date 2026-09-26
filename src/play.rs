@@ -415,6 +415,13 @@ impl Match {
                 format!("{} падает и просыпается дома.", self.name(*player))
             }
             Event::DeckReshuffled => "Колода перемешана.".into(),
+            Event::Victory { player, condition } => {
+                format!(
+                    "Победа: {} — {}.",
+                    self.name(*player),
+                    names::condition(*condition).0
+                )
+            }
             Event::Claimed { player, hex, .. } => {
                 let what = match self.game.board().tile(*hex).map(|t| t.terrain) {
                     Some(Terrain::Temple) => "храм",
@@ -769,6 +776,9 @@ fn run_bots(
     dice: Res<DiceShow>,
     tokens: Query<&Token>,
 ) {
+    if game.game.winner().is_some() {
+        return;
+    }
     if tokens.iter().any(Token::is_walking) || dice.busy() {
         return;
     }
