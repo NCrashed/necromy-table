@@ -4,11 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["crates/rules", "crates/dice"]
+members = ["crates/rules", "crates/dice", "crates/oracle"]
 
 [dependencies]
 necromy-rules = { path = "crates/rules" }
 necromy-dice = { path = "crates/dice" }
+necromy-oracle = { path = "crates/oracle" }
 bevy = "0.19"
 bevy_sprite3d = "9"
 bevy_spritesheet_animation = "7"

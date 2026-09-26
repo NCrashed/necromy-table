@@ -3647,6 +3647,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "necromy-oracle"
+version = "0.1.0"
+dependencies = [
+ "necromy-rules",
+ "serde_json",
+]
+
+[[package]]
 name = "necromy-rules"
 version = "0.1.0"
 dependencies = [
@@ -3664,6 +3672,7 @@ dependencies = [
  "bevy_spritesheet_animation",
  "hexx",
  "necromy-dice",
+ "necromy-oracle",
  "necromy-rules",
 ]
 

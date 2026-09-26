@@ -120,6 +120,8 @@ pub enum Intent {
         god: God,
         kind: wish::WishKind,
         target: Option<PlayerId>,
+        /// A model's reading of a free-text wish; `None` for a prepared one.
+        said: Option<wish::Said>,
     },
     /// The Dominant at dawn: make no wish (the Wager wants this, §10).
     RefuseWish,
@@ -294,6 +296,7 @@ pub enum Event {
         kind: wish::WishKind,
         target: Option<PlayerId>,
         grade: u8,
+        said: Option<wish::Said>,
     },
     TerrainChanged {
         hex: Hex,
@@ -1013,7 +1016,12 @@ impl Game {
             }
             let mut events = Vec::new();
             match intent {
-                Intent::Wish { god, kind, target } => {
+                Intent::Wish {
+                    god,
+                    kind,
+                    target,
+                    said,
+                } => {
                     let fits = match target {
                         Some(t) => kind.needs_target() && t != player && self.champion(t).is_some(),
                         None => !kind.needs_target(),
@@ -1021,7 +1029,7 @@ impl Game {
                     if !fits {
                         return Err(RuleError::InvalidWish);
                     }
-                    self.grant_wish(player, god, kind, target, &mut events);
+                    self.grant_wish(player, god, kind, target, said, &mut events);
                 }
                 Intent::RefuseWish => {
                     self.wish_due = None;
@@ -1842,7 +1850,7 @@ pub use guard::{GUARD_DICE, GUARD_RELIEF, GUARD_STEPS, Guard};
 pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
 pub use victory::{Check, CheckKind, Condition, OPEN_COUNT};
-pub use wish::{WishKind, god_terrain, taste_for};
+pub use wish::{Said, WishKind, god_terrain, taste_for};
 pub use world::{Pantheon, STAGE_THRESHOLD, STAGES, TRISHNA_DRIFT};
 
 #[cfg(test)]

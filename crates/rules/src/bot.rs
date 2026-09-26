@@ -296,5 +296,10 @@ fn wish(game: &Game, player: PlayerId) -> Intent {
             .max_by_key(|&p| (game.style(p), p.0))
             .expect("a rival")
     });
-    Intent::Wish { god, kind, target }
+    Intent::Wish {
+        god,
+        kind,
+        target,
+        said: None,
+    }
 }

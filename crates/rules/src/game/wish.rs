@@ -17,6 +17,20 @@ use super::{Event, Game, PlayerId};
 use crate::board::Terrain;
 use crate::gods::God;
 
+/// What a model made of a free-text wish (§7.1): the words, its grade and
+/// the god's answer. Carried in the intent, so a replay needs no model.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Said {
+    /// The wish as the player wrote it.
+    pub text: String,
+    /// The model's grade, 0..=3, before the rules' own limits.
+    pub grade: u8,
+    /// The god's answer, in character.
+    pub speech: String,
+    /// One line on why the grade.
+    pub reason: String,
+}
+
 /// Prepared wishes: what the Dominant can ask for offline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WishKind {
@@ -126,9 +140,19 @@ impl Game {
         god: God,
         kind: WishKind,
         target: Option<PlayerId>,
+        said: Option<Said>,
         events: &mut Vec<Event>,
     ) {
-        let grade = self.wish_grade(god, kind);
+        // A model judges the words; the rules still hold crude wishes at 0 and
+        // make a repeated wish worth less (§7.4, §7.5).
+        let grade = match &said {
+            Some(_) if kind.is_crude() => 0,
+            Some(s) => {
+                let repeat = u8::from(self.asked.contains(&(god, kind)));
+                s.grade.min(3).saturating_sub(repeat)
+            }
+            None => self.wish_grade(god, kind),
+        };
         self.asked.push((god, kind));
         self.wish_due = None;
         events.push(Event::WishGranted {
@@ -137,6 +161,7 @@ impl Game {
             kind,
             target,
             grade,
+            said,
         });
         // Asking is an offering too.
         self.offer(Some(player), god, 1, events);

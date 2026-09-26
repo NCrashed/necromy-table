@@ -1474,6 +1474,7 @@ fn the_dominant_owes_a_wish_before_play_goes_on() {
             god: God::Bhava,
             kind: WishKind::Land,
             target: None,
+            said: None,
         },
     )
     .unwrap();
@@ -1495,6 +1496,7 @@ fn gods_grade_by_nature_and_novelty() {
             god: God::Bhava,
             kind: WishKind::Land,
             target: None,
+            said: None,
         },
     )
     .unwrap();
@@ -1518,6 +1520,7 @@ fn a_wish_without_style_comes_with_a_curse() {
                 god: God::Trishna,
                 kind: WishKind::Fortune,
                 target: None,
+                said: None,
             },
         )
         .unwrap();
@@ -1581,6 +1584,7 @@ fn weaken_needs_a_rival_and_passes_wards() {
                 god: God::Ahamar,
                 kind: WishKind::Weaken,
                 target: None,
+                said: None,
             },
         ),
         Err(RuleError::InvalidWish)
@@ -1592,6 +1596,7 @@ fn weaken_needs_a_rival_and_passes_wards() {
                 god: God::Ahamar,
                 kind: WishKind::Weaken,
                 target: Some(me),
+                said: None,
             },
         ),
         Err(RuleError::InvalidWish)
@@ -1604,6 +1609,7 @@ fn weaken_needs_a_rival_and_passes_wards() {
             god: God::Ahamar,
             kind: WishKind::Weaken,
             target: Some(foe),
+            said: None,
         },
     )
     .unwrap();
@@ -1626,6 +1632,7 @@ fn every_god_twists_the_wish() {
             god: God::Ahamar,
             kind: WishKind::Land,
             target: None,
+            said: None,
         },
     )
     .unwrap();
@@ -1642,6 +1649,7 @@ fn every_god_twists_the_wish() {
                 god: God::Maya,
                 kind: WishKind::Peace,
                 target: None,
+                said: None,
             },
         )
         .unwrap();

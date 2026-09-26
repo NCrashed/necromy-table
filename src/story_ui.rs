@@ -24,7 +24,9 @@ impl Plugin for StoryUiPlugin {
         app.add_systems(Startup, spawn)
             .add_systems(
                 Update,
-                (rebuild_lines, rebuild_voice).run_if(resource_changed::<Match>),
+                (rebuild_lines, rebuild_voice).run_if(
+                    resource_changed::<Match>.or_else(resource_changed::<crate::oracle::Voices>),
+                ),
             )
             .add_systems(Update, expire_voice);
     }
@@ -133,6 +135,7 @@ fn rebuild_lines(
 fn rebuild_voice(
     mut commands: Commands,
     game: Res<Match>,
+    voices: Res<crate::oracle::Voices>,
     art: Res<StatArt>,
     font: Res<UiFont>,
     panel: Single<(Entity, &mut Visibility), With<VoicePanel>>,
@@ -180,7 +183,14 @@ fn rebuild_voice(
     commands.entity(head).add_children(&[icon, who]);
     let voice = commands
         .spawn((
-            Text::new(format!("«{}»", names::line_voice(line.kind))),
+            // The model's words when they have come, the template until then.
+            Text::new(format!(
+                "«{}»",
+                voices
+                    .lines
+                    .get(&line.id)
+                    .map_or(names::line_voice(line.kind), String::as_str)
+            )),
             font.text(13.0),
             TextColor(VOICE),
             Node {

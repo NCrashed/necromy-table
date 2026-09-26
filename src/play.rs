@@ -83,6 +83,8 @@ pub struct WishReply {
     pub player: PlayerId,
     /// `None` when the Dominant refused to wish.
     pub wish: Option<(God, necromy_rules::WishKind, u8)>,
+    /// The model's reading, for a wish written in free words.
+    pub said: Option<necromy_rules::Said>,
     pub lines: Vec<String>,
 }
 
@@ -188,14 +190,16 @@ impl Match {
         self.game.window().is_none() && self.game.current_player() == self.human
     }
 
-    /// The game is waiting on the human, on their turn or in a window.
     /// Dev aid: with autoplay, `NECROMY_SCREENSHOT_WHEN=wishpanel` stops at the
-    /// human's wish so its panel can be captured.
+    /// human's wish so its panel can be captured, and `NECROMY_WISH` stops
+    /// there so the wish can be written (`wish_ui::dev_wish`).
     pub fn paused_for_wish_panel(&self) -> bool {
         self.game.wish_due() == Some(self.human)
-            && std::env::var("NECROMY_SCREENSHOT_WHEN").is_ok_and(|w| w == "wishpanel")
+            && (std::env::var("NECROMY_SCREENSHOT_WHEN").is_ok_and(|w| w == "wishpanel")
+                || std::env::var("NECROMY_WISH").is_ok())
     }
 
+    /// The game is waiting on the human, on their turn or in a window.
     pub fn human_awaited(&self) -> bool {
         self.game.awaiting().contains(&self.human)
     }
@@ -223,11 +227,13 @@ impl Match {
                     god,
                     kind,
                     grade,
+                    said,
                     ..
                 } => {
                     wished = Some(WishReply {
                         player: *player,
                         wish: Some((*god, *kind, *grade)),
+                        said: said.clone(),
                         lines: Vec::new(),
                     });
                 }
@@ -235,6 +241,7 @@ impl Match {
                     wished = Some(WishReply {
                         player: *player,
                         wish: None,
+                        said: None,
                         lines: Vec::new(),
                     });
                 }
@@ -806,6 +813,10 @@ fn keys(
     mut game: ResMut<Match>,
     mut selection: ResMut<Selection>,
 ) {
+    // While the human writes a wish, the keyboard is the wish's.
+    if game.game.wish_due() == Some(game.human) {
+        return;
+    }
     if keys.just_pressed(KeyCode::Escape) {
         selection.card = None;
     }

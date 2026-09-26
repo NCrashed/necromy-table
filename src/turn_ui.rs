@@ -286,7 +286,8 @@ fn rebuild_action(
                     false,
                 )
             }
-            None if game.is_human_turn() => (
+            // The wish panel has the centre while the human wishes.
+            None if game.is_human_turn() && g.wish_due() != Some(human) => (
                 "Твой ход".to_string(),
                 "светлая клетка — идти, красная — напасть, карта из руки — сыграть",
                 Some((ActionButton::EndTurn, "Конец хода\n(пробел)")),

@@ -1,0 +1,9 @@
+[package]
+name = "necromy-oracle"
+version = "0.1.0"
+edition = "2024"
+description = "The gods' voice: prompts and a small client for a local llama-server (docs/design.md §7.6, §8.6)."
+
+[dependencies]
+necromy-rules = { path = "../rules" }
+serde_json = "1"

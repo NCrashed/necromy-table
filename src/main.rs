@@ -4,6 +4,7 @@ mod dice;
 mod hud;
 mod icons;
 mod names;
+mod oracle;
 mod play;
 mod stats;
 mod story_ui;
@@ -42,6 +43,7 @@ fn main() {
             battle_ui::BattleUiPlugin,
             turn_ui::TurnUiPlugin,
             victory_ui::VictoryUiPlugin,
+            oracle::OraclePlugin,
             wish_ui::WishUiPlugin,
             story_ui::StoryUiPlugin,
         ))
@@ -118,6 +120,8 @@ fn auto_screenshot(
         Ok("myturn") => game.is_human_turn(),
         Ok("victory") => game.game.winner().is_some() && !dice.busy(),
         Ok("reply") => game.wish_reply.is_some() && !dice.busy(),
+        // The human's own words, judged by the model (`NECROMY_WISH`).
+        Ok("heard") => game.wish_reply.as_ref().is_some_and(|r| r.said.is_some()),
         Ok("told") => game.told.is_some() && game.wish_reply.is_none() && !dice.busy(),
         Ok("wishpanel") => game.game.wish_due() == Some(game.human),
         Ok("incoming") => matches!(
