@@ -94,6 +94,7 @@ impl Game {
     ) {
         self.move_points -= cost;
         events.push(Event::BattleStarted { attacker, defender });
+        self.last_fight = self.round;
         // Attacking is loud (§6.5).
         self.add_threat(attacker, 1, events);
         self.record_deed(attacker, super::style::Deed::Attacked);

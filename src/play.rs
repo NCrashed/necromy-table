@@ -18,7 +18,7 @@ use crate::token::Token;
 /// Seat the human plays until there is a champion select screen.
 const HUMAN_GOD: God = God::Trishna;
 const BOT_STEP_SECS: f32 = 0.35;
-const FEED_LINES: usize = 12;
+const FEED_LINES: usize = 9;
 
 pub struct PlayPlugin;
 
@@ -66,9 +66,24 @@ pub struct Match {
     pub incoming_result: Option<IncomingResult>,
     /// Bumped for every new `incoming_result`.
     pub incoming_serial: u32,
+    /// The last wish and the god's answer, shown for a moment (§7).
+    pub wish_reply: Option<WishReply>,
+    /// Bumped for every new `wish_reply`.
+    pub wish_serial: u32,
+    /// The last story line told to the human, for its voice popup (§8).
+    pub told: Option<necromy_rules::Line>,
+    pub told_serial: u32,
     /// Feed lines that would spoil dice still rolling on screen.
     held: Vec<String>,
     holding: bool,
+}
+
+/// A wish and what came of it.
+pub struct WishReply {
+    pub player: PlayerId,
+    /// `None` when the Dominant refused to wish.
+    pub wish: Option<(God, necromy_rules::WishKind, u8)>,
+    pub lines: Vec<String>,
 }
 
 /// A card that was aimed at the human, and its outcome in words.
@@ -157,6 +172,10 @@ impl Match {
             battle: None,
             incoming_result: None,
             incoming_serial: 0,
+            wish_reply: None,
+            wish_serial: 0,
+            told: None,
+            told_serial: 0,
             held: Vec::new(),
             holding: false,
         };
@@ -170,6 +189,13 @@ impl Match {
     }
 
     /// The game is waiting on the human, on their turn or in a window.
+    /// Dev aid: with autoplay, `NECROMY_SCREENSHOT_WHEN=wishpanel` stops at the
+    /// human's wish so its panel can be captured.
+    pub fn paused_for_wish_panel(&self) -> bool {
+        self.game.wish_due() == Some(self.human)
+            && std::env::var("NECROMY_SCREENSHOT_WHEN").is_ok_and(|w| w == "wishpanel")
+    }
+
     pub fn human_awaited(&self) -> bool {
         self.game.awaiting().contains(&self.human)
     }
@@ -181,9 +207,43 @@ impl Match {
     }
 
     fn record(&mut self, events: &[Event]) {
+        // A wish in this batch, and the lines of what it did.
+        let mut wished: Option<WishReply> = None;
         // Outcome of a card aimed at the human, gathered from this batch.
         let mut hit: Option<IncomingResult> = None;
         for event in events {
+            if let Some(w) = wished.as_mut()
+                && let Some(line) = self.describe(event)
+            {
+                w.lines.push(line);
+            }
+            match event {
+                Event::WishGranted {
+                    player,
+                    god,
+                    kind,
+                    grade,
+                    ..
+                } => {
+                    wished = Some(WishReply {
+                        player: *player,
+                        wish: Some((*god, *kind, *grade)),
+                        lines: Vec::new(),
+                    });
+                }
+                Event::WishRefused { player } => {
+                    wished = Some(WishReply {
+                        player: *player,
+                        wish: None,
+                        lines: Vec::new(),
+                    });
+                }
+                Event::LineTold { line } if line.owner == self.human => {
+                    self.told = Some(*line);
+                    self.told_serial += 1;
+                }
+                _ => {}
+            }
             if let Some(line) = self.outcome_line(event, &hit)
                 && let Some(h) = hit.as_mut()
             {
@@ -286,6 +346,10 @@ impl Match {
                 }
             }
         }
+        if let Some(w) = wished {
+            self.wish_reply = Some(w);
+            self.wish_serial += 1;
+        }
         if let Some(mut h) = hit {
             if h.lines.is_empty() {
                 h.lines.push("без последствий".into());
@@ -312,6 +376,19 @@ impl Match {
         self.feed.drain(..excess);
     }
 
+    /// "даёт Тришне": the seat's name in the dative.
+    pub fn name_dative(&self, player: PlayerId) -> String {
+        let god = self
+            .game
+            .champion(player)
+            .map_or("?", |c| names::god_dative(c.god));
+        if player == self.human {
+            format!("{god} (тебе)")
+        } else {
+            god.to_string()
+        }
+    }
+
     pub fn name(&self, player: PlayerId) -> String {
         let god = self
             .game
@@ -334,7 +411,7 @@ impl Match {
             Event::RoundStarted { round, time, .. } => {
                 format!("— раунд {round}: {} —", time_name(*time))
             }
-            Event::Dawn { .. } => "Рассвет. (Здесь будут желания.)".into(),
+            Event::Dawn { .. } => "Рассвет.".into(),
             Event::Dusk { .. } => "Закат. (Здесь проснутся боги.)".into(),
             Event::TurnStarted { player, .. } => format!("Ход: {}", self.name(*player)),
             Event::CorpseAppeared { .. } => "На доске появилось тело.".into(),
@@ -415,6 +492,74 @@ impl Match {
                 format!("{} падает и просыпается дома.", self.name(*player))
             }
             Event::DeckReshuffled => "Колода перемешана.".into(),
+            Event::LineTold { line } => format!(
+                "{} даёт {} линию «{}» до раунда {}.",
+                names::god(line.god),
+                self.name_dative(line.owner),
+                names::line_title(line.kind),
+                line.deadline
+            ),
+            Event::LineDone { line } => format!(
+                "{}: линия «{}» исполнена, +{} Стиля.",
+                self.name(line.owner),
+                names::line_title(line.kind),
+                line.style
+            ),
+            Event::LineFailed { line } => format!(
+                "{}: линия «{}» провалена{}.",
+                self.name(line.owner),
+                names::line_title(line.kind),
+                if line.stake > 0 {
+                    format!(", −{} Стиля", line.stake)
+                } else {
+                    String::new()
+                }
+            ),
+            Event::WorldStirred { stir } => names::world_stir(*stir).into(),
+            Event::WishDue { player } => format!("{} загадывает желание…", self.name(*player)),
+            Event::WishRefused { player } => {
+                format!("{} отказывается от желания.", self.name(*player))
+            }
+            Event::WishGranted {
+                player,
+                god,
+                kind,
+                grade,
+                ..
+            } => format!(
+                "{} просит {}: «{}». Оценка {grade}/3.",
+                self.name(*player),
+                names::god_accusative(*god),
+                names::wish(*kind)
+            ),
+            Event::TerrainChanged { terrain, .. } => {
+                format!(
+                    "Земля становится: {}.",
+                    names::terrain(*terrain).0.to_lowercase()
+                )
+            }
+            Event::CardDissolved { player, card } => {
+                format!(
+                    "Майя растворяет «{}» у {}.",
+                    self.card_name(*card),
+                    self.name(*player)
+                )
+            }
+            Event::CurseLaid { player, god } => format!(
+                "Проклятие {} на {}: −1 здоровья каждый ход.",
+                names::god_genitive(*god),
+                self.name(*player)
+            ),
+            Event::CurseBit { player, god } => format!(
+                "Проклятие {} жжёт {}.",
+                names::god_genitive(*god),
+                self.name(*player)
+            ),
+            Event::CurseLifted { player, god } => format!(
+                "Проклятие {} снято с {}.",
+                names::god_genitive(*god),
+                self.name(*player)
+            ),
             Event::Victory { player, condition } => {
                 format!(
                     "Победа: {} — {}.",
@@ -449,10 +594,7 @@ impl Match {
                 format!("{}: Угроза {:+} ({total}).", self.name(*player), delta)
             }
             Event::Crowned { player: Some(p) } => {
-                format!(
-                    "Венец у {}: желание за ним. (Желания — позже.)",
-                    self.name(*p)
-                )
+                format!("Венец у {}: желание за ним.", self.name(*p))
             }
             Event::Crowned { player: None } => "Венец ни у кого: стол спорный.".into(),
             Event::GuardSpawned { target, .. } => {
@@ -792,6 +934,9 @@ fn run_bots(
     else {
         return;
     };
+    if player == human && game.paused_for_wish_panel() {
+        return;
+    }
     if !clock.0.tick(time.delta()).just_finished() {
         return;
     }

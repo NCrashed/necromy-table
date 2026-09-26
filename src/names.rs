@@ -86,6 +86,7 @@ pub fn deed(deed: necromy_rules::Deed) -> String {
         Deed::Body(BodyVerb::Seed) => "сеять в мёртвом".into(),
         Deed::Attacked => "нападать первым".into(),
         Deed::Fought => "драться".into(),
+        Deed::Won => "побеждать в бою".into(),
         Deed::Prayed => "молиться в храмах".into(),
         Deed::Claimed => "занимать поселения и храмы".into(),
     }
@@ -108,6 +109,8 @@ pub fn style_reason(reason: necromy_rules::StyleReason) -> &'static str {
         StyleReason::Battle => "бой",
         StyleReason::Manner => "верность манере",
         StyleReason::Oath => "нарушенная клятва",
+        StyleReason::Wish => "оценку желания",
+        StyleReason::Story => "сюжет",
     }
 }
 
@@ -178,7 +181,7 @@ pub fn condition(c: necromy_rules::Condition) -> (String, String) {
         ),
         Condition::Wager { dawns } => (
             "Пари Ахамара".into(),
-            format!("Носи Венец {dawns} рассветов подряд."),
+            format!("Носи Венец {dawns} рассветов подряд и на последнем откажись от желания: выиграй ставку и не бери корону."),
         ),
     }
 }
@@ -200,5 +203,149 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::Overthrows => "побед над Доминирующим",
         CheckKind::Round => "раунд",
         CheckKind::StyleLead => "единственный лидер по Стилю",
+        CheckKind::RefusedAt => "отказ от желания на рассвете №",
+    }
+}
+
+/// How the Dominant phrases a prepared wish.
+pub fn wish(kind: necromy_rules::WishKind) -> &'static str {
+    use necromy_rules::WishKind;
+    match kind {
+        WishKind::Strength => "Дай мне силы",
+        WishKind::Weaken => "Пусть мой соперник ослабнет",
+        WishKind::Land => "Пусть земля отзовётся мне",
+        WishKind::Dead => "Пусть мёртвые послужат мне",
+        WishKind::Peace => "Уйми шум вокруг меня",
+        WishKind::Fortune => "Дай мне богатства",
+        WishKind::Doom => "Дай мне победу",
+    }
+}
+
+/// What a god likes to be asked, as a hint in the wish panel.
+pub fn god_likes(god: God) -> &'static str {
+    match god {
+        God::Trishna => {
+            "Любит просьбы о силе и о мёртвых, тишина её скучает. Дарит — и растит свой голод."
+        }
+        God::Ahamar => {
+            "Любит просьбы о земле и суде над соперником, мёртвые для него — бумаги. Записывает долг: +Угроза."
+        }
+        God::Maya => {
+            "Любит просьбы о тишине и о слабости соперника, не любит просьбы о силе. Растворяет карту из руки."
+        }
+        God::Zaga => {
+            "Любит просьбы о тишине и покое мёртвых, не любит просьбы о силе. Берёт плату Духом."
+        }
+        God::Bhava => "Любит просьбы о земле и о силе, не любит вред. Растит рощу и у соперника.",
+    }
+}
+
+/// The god's answer, by grade (§7.4).
+pub fn god_speech(god: God, grade: u8) -> &'static str {
+    match (god, grade) {
+        (God::Trishna, 0) => "Ты просишь, как голодный — и получишь, как голодный.",
+        (God::Trishna, 1) => "Бери. Только не удивляйся, что захочется ещё.",
+        (God::Trishna, 2) => "Вот это аппетит! Угощайся.",
+        (God::Trishna, _) => "Ах, какой пир ты мне принёс. Держи — и приходи снова.",
+        (God::Ahamar, 0) => "Без ставки, без правил. Исполню — и впишу тебя в долговую книгу.",
+        (God::Ahamar, 1) => "Принято. Условия запомнены.",
+        (God::Ahamar, 2) => "Достойная ставка. Порядок на твоей стороне.",
+        (God::Ahamar, _) => "Вот игрок, который играет на себя. Уважаю.",
+        (God::Maya, 0) => "Ты держишься за то, что тает у тебя в руках.",
+        (God::Maya, 1) => "Будет. Но не таким, каким ты это держал.",
+        (God::Maya, 2) => "Красиво. Пусть расцветёт — и опадёт в свой срок.",
+        (God::Maya, _) => "Ты почти отпустил. Возьми этот цветок.",
+        (God::Zaga, 0) => "Хотение ради хотения. Цепь затянется туже.",
+        (God::Zaga, 1) => "Одно желание — ценой другого.",
+        (God::Zaga, 2) => "Ты просишь меньше, чем мог бы. Это слышно.",
+        (God::Zaga, _) => "Тишина. Как отзвучавшая нота.",
+        (God::Bhava, 0) => "Растёт всё. И то, чего ты не просил.",
+        (God::Bhava, 1) => "Прорастёт. Где захочет.",
+        (God::Bhava, 2) => "Земля слышит тебя.",
+        (God::Bhava, _) => "Ты не тронул — и вот, всё зелено.",
+    }
+}
+
+/// "просит Тришну": the god's name in the accusative.
+pub fn god_accusative(god: God) -> &'static str {
+    match god {
+        God::Bhava => "Бхаву",
+        God::Trishna => "Тришну",
+        God::Zaga => "Загу",
+        God::Ahamar => "Ахамара",
+        God::Maya => "Майю",
+    }
+}
+
+/// Story lines (§8): title, and the god's words when telling it.
+pub fn line_title(kind: necromy_rules::LineKind) -> &'static str {
+    use necromy_rules::LineKind;
+    match kind {
+        LineKind::Pilgrimage => "Паломничество",
+        LineKind::Tithe => "Десятина",
+        LineKind::Spoils => "Трофей",
+        LineKind::NewLand => "Новые земли",
+        LineKind::TheDeadCall => "Мёртвые зовут",
+        LineKind::QuietCrown => "Тихий Венец",
+        LineKind::Trial => "Испытание Венца",
+    }
+}
+
+pub fn line_voice(kind: necromy_rules::LineKind) -> &'static str {
+    use necromy_rules::LineKind;
+    match kind {
+        LineKind::Pilgrimage => "Приди в мой храм, пока дорога открыта.",
+        LineKind::Tithe => "Ты забыл обо мне. Поднеси мне — и я вспомню тебя.",
+        LineKind::Spoils => "Хочется крови? Возьми её в бою — получишь больше.",
+        LineKind::NewLand => "Земля без хозяина — беспорядок. Займи её.",
+        LineKind::TheDeadCall => "Мёртвые ждут, что ты с ними сделаешь.",
+        LineKind::QuietCrown => "Ставка: удержи Венец до срока, не обнажая меча.",
+        LineKind::Trial => "Докажи, что Венец твой: выиграй бой до срока.",
+    }
+}
+
+/// What a line asks, with progress where it has one.
+pub fn line_goal(line: &necromy_rules::Line, g: &necromy_rules::Game) -> String {
+    use necromy_rules::Goal;
+    match line.goal {
+        Goal::ReachHex(hex) => {
+            let region = g
+                .board()
+                .tile(hex)
+                .and_then(|t| t.region)
+                .map_or("центр".to_string(), |god| {
+                    format!("край {}", god_genitive(god))
+                });
+            format!("дойди до храма ({region}, подсвечен)")
+        }
+        Goal::Offer { god, amount, from } => format!(
+            "поднеси {}: {}/{amount}",
+            god_dative(god),
+            g.favor(line.owner, god).saturating_sub(from).min(amount)
+        ),
+        Goal::WinBattle => "выиграй бой".into(),
+        Goal::Claim => "займи поселение или храм".into(),
+        Goal::Body => "сыграй карту на тело".into(),
+        Goal::AvoidBattle => "не участвуй в боях".into(),
+    }
+}
+
+/// "поднеси Тришне": the god's name in the dative.
+pub fn god_dative(god: God) -> &'static str {
+    match god {
+        God::Bhava => "Бхаве",
+        God::Trishna => "Тришне",
+        God::Zaga => "Заге",
+        God::Ahamar => "Ахамару",
+        God::Maya => "Майе",
+    }
+}
+
+pub fn world_stir(stir: necromy_rules::WorldStir) -> &'static str {
+    use necromy_rules::WorldStir;
+    match stir {
+        WorldStir::RisingDead => "На столе тихо — и мёртвые поднимаются у центра.",
+        WorldStir::Overgrowth => "На столе тихо — и чаща разрастается сама.",
+        WorldStir::Unrest => "На столе тихо — и по королевству ползёт тревога: всем +1 Угрозы.",
     }
 }

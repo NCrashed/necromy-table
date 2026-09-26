@@ -242,10 +242,12 @@ pub enum StatIcon {
     Night,
     /// The table's taste (§6.4): a goblet.
     Taste,
+    /// A god's curse from a wish without style (§7.4).
+    Curse,
 }
 
 impl StatIcon {
-    pub const ALL: [StatIcon; 13] = [
+    pub const ALL: [StatIcon; 14] = [
         StatIcon::Health,
         StatIcon::Spirit,
         StatIcon::Might,
@@ -259,6 +261,7 @@ impl StatIcon {
         StatIcon::Day,
         StatIcon::Night,
         StatIcon::Taste,
+        StatIcon::Curse,
     ];
 }
 
@@ -371,6 +374,15 @@ pub fn stat_icon(icon: StatIcon) -> Image {
             c.rect(7, 8, 8, 12, DEEP_GOLD);
             c.rect(4, 13, 11, 14, GOLD);
             c.rect(4, 3, 11, 3, ROOF);
+        }
+        StatIcon::Curse => {
+            c.disc(8, 7, 5, BONE);
+            c.rect(6, 11, 10, 14, BONE);
+            c.rect(5, 6, 6, 8, DARK);
+            c.rect(10, 6, 11, 8, DARK);
+            c.set(8, 10, DARK);
+            c.set(7, 13, DARK);
+            c.set(9, 13, DARK);
         }
         StatIcon::Rooted => {
             for (cx, cy) in [(5, 6), (10, 10)] {

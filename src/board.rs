@@ -95,6 +95,8 @@ enum Lit {
     Attack,
     /// Under the mouse.
     Hover,
+    /// The goal of one of the human's story lines.
+    Quest,
 }
 
 fn spawn_board(
@@ -215,6 +217,15 @@ fn sync_tiles(
             Target::None => None,
         })
         .collect();
+    // Pilgrimage temples of the human's lines glow (§8).
+    let quests: Vec<Hex> = game
+        .game
+        .lines_of(game.human)
+        .filter_map(|l| match l.goal {
+            necromy_rules::Goal::ReachHex(h) => Some(h),
+            _ => None,
+        })
+        .collect();
     for (tile, material) in &tiles {
         let Some(rules_tile) = game.game.board().tile(tile.0) else {
             continue;
@@ -223,6 +234,8 @@ fn sync_tiles(
             Lit::Target
         } else if attackable.contains(&tile.0) {
             Lit::Attack
+        } else if quests.contains(&tile.0) {
+            Lit::Quest
         } else if reachable.contains_key(&tile.0) {
             Lit::Reach
         } else if hovered.0 == Some(tile.0) {
@@ -326,6 +339,7 @@ fn tile_color(tile: &RulesTile, lit: Lit, stage: Option<u8>) -> Color {
             Lit::Target => c * 0.3 + [1.0, 0.78, 0.25][i] * 0.7,
             Lit::Attack => c * 0.3 + [0.95, 0.25, 0.2][i] * 0.7,
             Lit::Hover => c + (1.0 - c) * 0.25,
+            Lit::Quest => c * 0.4 + [0.75, 0.55, 1.0][i] * 0.6,
         }
     });
     Color::srgb(r, g, b)

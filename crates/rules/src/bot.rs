@@ -8,10 +8,16 @@
 use hexx::Hex;
 
 use crate::cards::{CardId, Effect};
-use crate::game::{Game, Intent, PlayerId, Target, TimeOfDay, WindowKind};
+use crate::game::{
+    Condition, Game, Goal, Intent, PlayerId, Target, TimeOfDay, WindowKind, WishKind,
+};
+use crate::gods::God;
 use necromy_dice::Face;
 
 pub fn choose(game: &Game, player: PlayerId) -> Intent {
+    if game.wish_due() == Some(player) {
+        return wish(game, player);
+    }
     match game.window() {
         Some(window) => respond(game, player, window.kind),
         None if game.current_player() == player => own_turn(game, player),
@@ -122,13 +128,27 @@ fn burn(game: &Game, player: PlayerId) -> Intent {
     Intent::Burn { cards }
 }
 
-/// Attack a neighbour we are at least as healthy and strong as.
+/// Attack a neighbour we are at least as healthy and strong as. The Dominant
+/// is everyone's target (§6.1): worth a fight even when a little stronger.
 fn attack(game: &Game, player: PlayerId) -> Option<Intent> {
     let me = game.champion(player)?;
-    game.attackable().into_iter().find_map(|hex| {
-        let foe = game.champion(game.occupant(hex)?)?;
-        (me.hp >= foe.hp && me.might >= foe.might).then_some(Intent::Move { to: hex })
-    })
+    // Holding a quiet-crown wager: no fights.
+    if game.lines_of(player).any(|l| l.goal == Goal::AvoidBattle) {
+        return None;
+    }
+    let mut targets: Vec<(bool, Hex)> = game
+        .attackable()
+        .into_iter()
+        .filter_map(|hex| {
+            let who = game.occupant(hex)?;
+            let foe = game.champion(who)?;
+            let crowned = game.dominant() == Some(who);
+            let slack = u8::from(crowned);
+            (me.hp + slack >= foe.hp && me.might + slack >= foe.might).then_some((crowned, hex))
+        })
+        .collect();
+    targets.sort_by_key(|&(crowned, h)| (!crowned, h.x(), h.y()));
+    targets.first().map(|&(_, to)| Intent::Move { to })
 }
 
 /// A damaging or rooting card at the weakest rival in reach (or `only`).
@@ -196,11 +216,19 @@ fn walk(game: &Game, player: PlayerId) -> Intent {
         return Intent::EndTurn;
     };
     let target = game
-        .board()
-        .corpses()
-        .map(|(hex, _)| hex)
-        .filter(|&hex| game.occupant(hex).is_none_or(|p| p == player))
-        .min_by_key(|&hex| (me.hex.unsigned_distance_to(hex), hex.x(), hex.y()))
+        .lines_of(player)
+        .find_map(|l| match l.goal {
+            // A pilgrimage beats any corpse.
+            Goal::ReachHex(hex) => Some(hex),
+            _ => None,
+        })
+        .or_else(|| {
+            game.board()
+                .corpses()
+                .map(|(hex, _)| hex)
+                .filter(|&hex| game.occupant(hex).is_none_or(|p| p == player))
+                .min_by_key(|&hex| (me.hex.unsigned_distance_to(hex), hex.x(), hex.y()))
+        })
         .unwrap_or(Hex::ZERO);
     if target == me.hex {
         return Intent::EndTurn;
@@ -238,4 +266,35 @@ fn is_body(effect: Effect) -> bool {
             | Effect::BodyRest
             | Effect::BodySeed
     )
+}
+
+/// The Dominant's wish: the best-graded plain wish, from its own patron when
+/// tied; at the leader in Style when it needs a rival. A bot holding the
+/// Wager refuses once the streak is long enough.
+fn wish(game: &Game, player: PlayerId) -> Intent {
+    if let Some(Condition::Wager { dawns }) = game.secret(player)
+        && game.checks(player, Condition::Wager { dawns })[0].met()
+    {
+        return Intent::RefuseWish;
+    }
+    let patron = game.champion(player).map(|c| c.god);
+    let mut best: Option<(u8, bool, God, WishKind)> = None;
+    for god in God::ALL {
+        for kind in WishKind::ALL.into_iter().filter(|k| !k.is_crude()) {
+            let score = (game.wish_grade(god, kind), Some(god) == patron);
+            if best.is_none_or(|(g, p, _, _)| score > (g, p)) {
+                best = Some((score.0, score.1, god, kind));
+            }
+        }
+    }
+    let Some((_, _, god, kind)) = best else {
+        return Intent::RefuseWish;
+    };
+    let target = kind.needs_target().then(|| {
+        game.players()
+            .filter(|&p| p != player)
+            .max_by_key(|&p| (game.style(p), p.0))
+            .expect("a rival")
+    });
+    Intent::Wish { god, kind, target }
 }

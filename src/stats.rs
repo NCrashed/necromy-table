@@ -57,7 +57,7 @@ pub struct StatArt {
     /// Die faces as icons.
     pub faces: HashMap<necromy_rules::Face, Handle<Image>>,
     /// Element icons per god (`God::index`).
-    gods: [Handle<Image>; 5],
+    pub gods: [Handle<Image>; 5],
     offering: Handle<Image>,
 }
 
@@ -392,7 +392,8 @@ fn stat_sheet(
     rows.push(r);
 
     // States.
-    if c.ward.is_some() || c.rooted {
+    let curses = g.curses(player);
+    if c.ward.is_some() || c.rooted || !curses.is_empty() {
         let r = row(commands);
         if let Some(ward) = c.ward {
             let i = icon_node(commands, art.wards[ward.index()].clone(), 24.0, true);
@@ -408,6 +409,17 @@ fn stat_sheet(
         if c.rooted {
             let i = icon_node(commands, art.icon(StatIcon::Rooted), 24.0, true);
             let t = label(commands, font, "скован", 12.0, false);
+            commands.entity(r).add_children(&[i, t]);
+        }
+        for god in curses {
+            let i = icon_node(commands, art.icon(StatIcon::Curse), 24.0, true);
+            let t = label(
+                commands,
+                font,
+                &format!("проклятие {}", names::god_genitive(*god)),
+                12.0,
+                false,
+            );
             commands.entity(r).add_children(&[i, t]);
         }
         rows.push(r);

@@ -6,9 +6,11 @@ mod icons;
 mod names;
 mod play;
 mod stats;
+mod story_ui;
 mod token;
 mod turn_ui;
 mod victory_ui;
+mod wish_ui;
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
@@ -40,6 +42,8 @@ fn main() {
             battle_ui::BattleUiPlugin,
             turn_ui::TurnUiPlugin,
             victory_ui::VictoryUiPlugin,
+            wish_ui::WishUiPlugin,
+            story_ui::StoryUiPlugin,
         ))
         .add_plugins(AutoScreenshotPlugin)
         .add_systems(Startup, setup_scene)
@@ -113,6 +117,9 @@ fn auto_screenshot(
         Ok("hit") => game.incoming_result.is_some(),
         Ok("myturn") => game.is_human_turn(),
         Ok("victory") => game.game.winner().is_some() && !dice.busy(),
+        Ok("reply") => game.wish_reply.is_some() && !dice.busy(),
+        Ok("told") => game.told.is_some() && game.wish_reply.is_none() && !dice.busy(),
+        Ok("wishpanel") => game.game.wish_due() == Some(game.human),
         Ok("incoming") => matches!(
             game.game.window().map(|w| w.kind),
             Some(necromy_rules::WindowKind::Target { target, .. }) if target == game.human

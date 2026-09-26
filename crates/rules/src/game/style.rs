@@ -25,6 +25,8 @@ pub enum Deed {
     Attacked,
     /// Took part in a battle, either side.
     Fought,
+    /// Won a battle (dealt more than it took).
+    Won,
     Prayed,
     Claimed,
 }
@@ -131,6 +133,10 @@ pub enum StyleReason {
     Battle,
     Manner,
     Oath,
+    /// The wish's grade (§7.4).
+    Wish,
+    /// A story line done or failed (§8).
+    Story,
 }
 
 /// Threat at which the royal guard comes out (§6.5).
@@ -204,6 +210,7 @@ impl Game {
 
     pub(super) fn record_deed(&mut self, player: PlayerId, deed: Deed) {
         self.deeds[player.0 as usize].push(deed);
+        self.pending_story.push((player, deed));
     }
 
     /// The winner of a battle takes Style from the loser; from the Dominant,
@@ -215,6 +222,7 @@ impl Game {
         events: &mut Vec<Event>,
     ) {
         self.count_overthrow(winner, loser);
+        self.record_deed(winner, Deed::Won);
         let base = i16::from(self.taste.battle);
         let amount = if self.dominant == Some(loser) {
             base * 2
@@ -272,6 +280,10 @@ impl Game {
         self.dominant = crowned;
         events.push(Event::Crowned { player: crowned });
         self.count_dawn();
+        if let Some(d) = crowned {
+            self.wish_due = Some(d);
+            events.push(Event::WishDue { player: d });
+        }
         if let Some(d) = crowned {
             // The Crown draws the guard's eye (§6.1).
             self.add_threat(d, 1, events);

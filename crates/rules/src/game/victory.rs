@@ -30,8 +30,8 @@ pub enum Condition {
     Overthrow { wins: u8 },
     /// Most Style at the dawn of this round.
     FirstAtTable { round: u32 },
-    /// Wear the Crown this many dawns in a row. (Refusing the wish comes
-    /// with wishes, §7.)
+    /// Wear the Crown this many dawns in a row, then refuse the wish at the
+    /// last of them (§6, §7): winning the bet and turning down the crown.
     Wager { dawns: u8 },
 }
 
@@ -62,6 +62,8 @@ pub enum CheckKind {
     Round,
     /// 1 if you lead in Style right now.
     StyleLead,
+    /// Refused the wish at a dawn with this many crowns in a row.
+    RefusedAt,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,6 +107,8 @@ pub struct Progress {
     pub crown_streak: u8,
     pub middle_streak: u8,
     pub overthrows: u8,
+    /// Crown streak at the last refused wish (the Wager, §10).
+    pub refused_at: u8,
 }
 
 /// Draws this match's conditions: open ones, then one secret per player of
@@ -218,11 +222,18 @@ impl Game {
                     check(CheckKind::StyleLead, leads, 1),
                 ]
             }
-            Condition::Wager { dawns } => vec![check(
-                CheckKind::Streak,
-                u16::from(progress.crown_streak),
-                u16::from(dawns),
-            )],
+            Condition::Wager { dawns } => vec![
+                check(
+                    CheckKind::Streak,
+                    u16::from(progress.crown_streak),
+                    u16::from(dawns),
+                ),
+                check(
+                    CheckKind::RefusedAt,
+                    u16::from(progress.refused_at),
+                    u16::from(dawns),
+                ),
+            ],
         }
     }
 

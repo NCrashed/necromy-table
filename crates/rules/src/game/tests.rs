@@ -35,6 +35,9 @@ impl Game {
 
     /// Everyone still owed a choice passes.
     fn pass_all(&mut self) {
+        if let Some(d) = self.wish_due {
+            self.apply(d, Intent::RefuseWish).unwrap();
+        }
         while self.window.is_some() {
             let p = self.awaiting()[0];
             self.apply(p, Intent::Pass).unwrap();
@@ -1440,4 +1443,383 @@ fn bot_matches_end_in_many_ways() {
         "only {} kinds of victory in 60 matches",
         kinds.len()
     );
+}
+
+// ---- Wishes (§7) ----
+
+use crate::game::WishKind;
+
+/// Crowns `me` at a dawn and returns the events.
+fn crown(g: &mut Game, me: PlayerId) -> Vec<Event> {
+    let mut ev = Vec::new();
+    g.add_style(me, 5, StyleReason::Territory, &mut ev);
+    g.dawn(&mut ev);
+    ev
+}
+
+#[test]
+fn the_dominant_owes_a_wish_before_play_goes_on() {
+    let (mut g, me, foe) = duel(3);
+    let ev = crown(&mut g, me);
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::WishDue { player } if *player == me))
+    );
+    assert_eq!(g.awaiting(), vec![me]);
+    assert_eq!(g.apply(foe, Intent::Pass), Err(RuleError::WishPending));
+    assert_eq!(g.apply(me, Intent::EndTurn), Err(RuleError::WishPending));
+    g.apply(
+        me,
+        Intent::Wish {
+            god: God::Bhava,
+            kind: WishKind::Land,
+            target: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(g.wish_due(), None);
+}
+
+#[test]
+fn gods_grade_by_nature_and_novelty() {
+    let (mut g, me, foe) = duel(3);
+    // Bhava loves land; first time asked: 1 + 1 + 1.
+    assert_eq!(g.wish_grade(God::Bhava, WishKind::Land), 3);
+    // Bhava dislikes harm: 1 − 1 + 1.
+    assert_eq!(g.wish_grade(God::Bhava, WishKind::Weaken), 1);
+    assert_eq!(g.wish_grade(God::Trishna, WishKind::Fortune), 0, "crude");
+    crown(&mut g, me);
+    g.apply(
+        me,
+        Intent::Wish {
+            god: God::Bhava,
+            kind: WishKind::Land,
+            target: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        g.wish_grade(God::Bhava, WishKind::Land),
+        1,
+        "the gods remember"
+    );
+    let _ = foe;
+}
+
+#[test]
+fn a_wish_without_style_comes_with_a_curse() {
+    let (mut g, me, _) = duel(3);
+    crown(&mut g, me);
+    let style = g.style(me);
+    let events = g
+        .apply(
+            me,
+            Intent::Wish {
+                god: God::Trishna,
+                kind: WishKind::Fortune,
+                target: None,
+            },
+        )
+        .unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::WishGranted { grade: 0, .. }))
+    );
+    // Two Style of riches, one lost for the lack of style.
+    assert_eq!(g.style(me), style + 1);
+    assert_eq!(g.curses(me), &[God::Trishna]);
+}
+
+#[test]
+fn curses_bite_until_the_quenching_element_lifts_them() {
+    let (mut g, me, _) = duel(3);
+    g.curses[me.0 as usize].push(God::Trishna);
+    g.champ_mut(me).body = 9;
+    g.champ_mut(me).hp = 9;
+    while g.current_player() == me {
+        g.end_turn_and_settle();
+    }
+    while g.current_player() != me {
+        g.end_turn_and_settle();
+    }
+    assert_eq!(
+        g.champion(me).unwrap().hp,
+        8,
+        "one bite at the start of the turn"
+    );
+    // Water quenches fire: a Maya card lifts Trishna's curse.
+    let hand = g.give(me, "Бирюзовый оберег");
+    g.champ_mut(me).spirit_points = 1;
+    let events = g
+        .apply(
+            me,
+            Intent::Play {
+                card: hand,
+                target: Target::Champion(me),
+            },
+        )
+        .unwrap();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::CurseLifted {
+            god: God::Trishna,
+            ..
+        }
+    )));
+    assert!(g.curses(me).is_empty());
+}
+
+#[test]
+fn weaken_needs_a_rival_and_passes_wards() {
+    let (mut g, me, foe) = duel(3);
+    crown(&mut g, me);
+    assert_eq!(
+        g.apply(
+            me,
+            Intent::Wish {
+                god: God::Ahamar,
+                kind: WishKind::Weaken,
+                target: None,
+            },
+        ),
+        Err(RuleError::InvalidWish)
+    );
+    assert_eq!(
+        g.apply(
+            me,
+            Intent::Wish {
+                god: God::Ahamar,
+                kind: WishKind::Weaken,
+                target: Some(me),
+            },
+        ),
+        Err(RuleError::InvalidWish)
+    );
+    g.champ_mut(foe).ward = Some(Element::Water);
+    let hp = g.champion(foe).unwrap().hp;
+    g.apply(
+        me,
+        Intent::Wish {
+            god: God::Ahamar,
+            kind: WishKind::Weaken,
+            target: Some(foe),
+        },
+    )
+    .unwrap();
+    assert!(
+        g.champion(foe).unwrap().hp < hp
+            || g.champion(foe).unwrap().hp == g.champion(foe).unwrap().body
+    );
+    assert!(g.champion(foe).unwrap().rooted);
+}
+
+#[test]
+fn every_god_twists_the_wish() {
+    // Ahamar writes a debt: Threat.
+    let (mut g, me, _) = duel(3);
+    crown(&mut g, me);
+    let threat = g.threat(me);
+    g.apply(
+        me,
+        Intent::Wish {
+            god: God::Ahamar,
+            kind: WishKind::Land,
+            target: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(g.threat(me), threat + 1);
+
+    // Maya takes a card from the hand.
+    let (mut g, me, _) = duel(3);
+    g.give(me, "Бинт");
+    crown(&mut g, me);
+    let events = g
+        .apply(
+            me,
+            Intent::Wish {
+                god: God::Maya,
+                kind: WishKind::Peace,
+                target: None,
+            },
+        )
+        .unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::CardDissolved { .. }))
+    );
+    assert!(g.hand(me).is_empty());
+}
+
+#[test]
+fn the_wager_is_won_by_refusing_the_crowned_wish() {
+    let (mut g, me, _) = duel(3);
+    g.open = vec![];
+    g.secrets = vec![Condition::Wager { dawns: 2 }; 5];
+    crown(&mut g, me);
+    g.apply(me, Intent::RefuseWish).unwrap();
+    assert_eq!(g.winner(), None, "one dawn is not the bet");
+    let mut ev = Vec::new();
+    g.dawn(&mut ev);
+    let events = g.apply(me, Intent::RefuseWish).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::Victory { player, .. } if *player == me))
+    );
+}
+
+#[test]
+fn bots_wish_in_many_ways() {
+    let mut kinds = std::collections::HashSet::new();
+    let mut gods = std::collections::HashSet::new();
+    for seed in 0..20 {
+        let (mut g, _) = Game::new(Setup {
+            seed,
+            champions: God::ALL.to_vec(),
+        });
+        for _ in 0..3000 {
+            if g.winner().is_some() {
+                break;
+            }
+            let p = g.awaiting()[0];
+            let intent = crate::bot::choose(&g, p);
+            g.apply(p, intent).unwrap();
+        }
+        for e in g.log() {
+            if let Event::WishGranted { god, kind, .. } = e {
+                kinds.insert(*kind);
+                gods.insert(*god);
+            }
+        }
+    }
+    assert!(kinds.len() >= 4, "bots asked only {kinds:?}");
+    assert!(gods.len() >= 4, "bots asked only {gods:?}");
+}
+
+// ---- The storyteller (§8) ----
+
+use crate::game::{Goal, LineKind, MAX_OPEN};
+
+fn line(g: &mut Game, owner: PlayerId, kind: LineKind, goal: Goal, stake: u8) -> u32 {
+    g.next_line += 1;
+    let id = g.next_line;
+    g.lines.push(crate::game::Line {
+        id,
+        owner,
+        god: God::Ahamar,
+        kind,
+        goal,
+        deadline: g.round + 4,
+        style: 2,
+        stake,
+    });
+    id
+}
+
+#[test]
+fn dusk_tells_lines_to_those_lagging_within_limits() {
+    let (mut g, _) = Game::new(five());
+    // Nobody lags at the start; lines come once the table spreads out.
+    for _ in 0..600 {
+        if g.winner().is_some() {
+            break;
+        }
+        let p = g.awaiting()[0];
+        let intent = crate::bot::choose(&g, p);
+        g.apply(p, intent).unwrap();
+    }
+    assert!(g.log().iter().any(|e| matches!(e, Event::LineTold { .. })));
+    for p in g.players() {
+        assert!(g.lines_of(p).count() <= MAX_OPEN);
+    }
+}
+
+#[test]
+fn a_pilgrimage_ends_at_the_temple() {
+    let (mut g, me, _) = duel(3);
+    let temple = g.board().temple_of(God::Maya);
+    line(&mut g, me, LineKind::Pilgrimage, Goal::ReachHex(temple), 0);
+    let style = g.style(me);
+    g.place(me, temple);
+    let events = g.apply(me, Intent::EndTurn).unwrap();
+    assert!(events.iter().any(|e| matches!(e, Event::LineDone { .. })));
+    assert_eq!(g.style(me), style + 2);
+    assert_eq!(g.lines_of(me).count(), 0);
+}
+
+#[test]
+fn spoils_are_won_in_battle() {
+    let (mut g, me, foe) = duel(3);
+    line(&mut g, me, LineKind::Spoils, Goal::WinBattle, 0);
+    let mut ev = Vec::new();
+    g.battle_style(me, foe, &mut ev);
+    g.settle_story(&mut ev);
+    assert!(ev.iter().any(|e| matches!(e, Event::LineDone { .. })));
+}
+
+#[test]
+fn a_quiet_crown_breaks_on_a_fight_and_holds_to_its_deadline() {
+    let (mut g, me, foe) = duel(1);
+    line(&mut g, me, LineKind::QuietCrown, Goal::AvoidBattle, 2);
+    let mut ev = Vec::new();
+    g.add_style(me, 5, StyleReason::Territory, &mut ev);
+    let events = g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    assert!(events.iter().any(|e| matches!(e, Event::LineFailed { .. })));
+    assert_eq!(g.style(me), 3, "the stake is lost");
+    let _ = foe;
+
+    let (mut g, me, _) = duel(4);
+    line(&mut g, me, LineKind::QuietCrown, Goal::AvoidBattle, 2);
+    g.lines[0].deadline = g.round;
+    let mut ev = Vec::new();
+    g.storyteller(&mut ev);
+    assert!(
+        ev.iter().any(|e| matches!(e, Event::LineDone { .. })),
+        "kept quiet to the end"
+    );
+}
+
+#[test]
+fn a_quiet_board_stirs() {
+    let (mut g, _, _) = duel(4);
+    g.round = 10;
+    g.last_fight = 0;
+    let mut ev = Vec::new();
+    g.storyteller(&mut ev);
+    assert!(ev.iter().any(|e| matches!(e, Event::WorldStirred { .. })));
+    assert_eq!(g.last_fight, 10, "one stir, then the calm counts again");
+}
+
+#[test]
+fn bots_live_their_lines() {
+    let (mut done, mut told) = (0, 0);
+    for seed in 0..20 {
+        let (mut g, _) = Game::new(Setup {
+            seed,
+            champions: God::ALL.to_vec(),
+        });
+        for _ in 0..3000 {
+            if g.winner().is_some() {
+                break;
+            }
+            let p = g.awaiting()[0];
+            let intent = crate::bot::choose(&g, p);
+            g.apply(p, intent).unwrap();
+        }
+        told += g
+            .log()
+            .iter()
+            .filter(|e| matches!(e, Event::LineTold { .. }))
+            .count();
+        done += g
+            .log()
+            .iter()
+            .filter(|e| matches!(e, Event::LineDone { .. }))
+            .count();
+    }
+    assert!(told > 20, "only {told} lines told");
+    assert!(done * 5 >= told, "only {done} of {told} lines done");
 }

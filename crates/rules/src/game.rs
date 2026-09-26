@@ -114,6 +114,15 @@ pub enum Intent {
     Burn {
         cards: Vec<CardId>,
     },
+    /// The Dominant at dawn: ask `god` for `kind`, at `target` if the wish
+    /// needs a rival (§7).
+    Wish {
+        god: God,
+        kind: wish::WishKind,
+        target: Option<PlayerId>,
+    },
+    /// The Dominant at dawn: make no wish (the Wager wants this, §10).
+    RefuseWish,
     /// In a window: play nothing.
     Pass,
 }
@@ -271,6 +280,56 @@ pub enum Event {
         guard_score: Score,
         target_score: Score,
     },
+    /// Dawn: the Dominant owes a wish before play goes on.
+    WishDue {
+        player: PlayerId,
+    },
+    WishRefused {
+        player: PlayerId,
+    },
+    /// The god heard; its effects follow as ordinary events.
+    WishGranted {
+        player: PlayerId,
+        god: God,
+        kind: wish::WishKind,
+        target: Option<PlayerId>,
+        grade: u8,
+    },
+    TerrainChanged {
+        hex: Hex,
+        terrain: Terrain,
+    },
+    /// Maya took a card from the hand.
+    CardDissolved {
+        player: PlayerId,
+        card: CardId,
+    },
+    CurseLaid {
+        player: PlayerId,
+        god: God,
+    },
+    CurseBit {
+        player: PlayerId,
+        god: God,
+    },
+    CurseLifted {
+        player: PlayerId,
+        god: God,
+    },
+    /// A god tells a story line (§8).
+    LineTold {
+        line: story::Line,
+    },
+    LineDone {
+        line: story::Line,
+    },
+    LineFailed {
+        line: story::Line,
+    },
+    /// A quiet board moved by itself.
+    WorldStirred {
+        stir: story::WorldStir,
+    },
     /// The match is over.
     Victory {
         player: PlayerId,
@@ -423,6 +482,10 @@ pub enum RuleError {
     NoWindow,
     /// Someone has won; the match takes no more intents.
     GameOver,
+    /// The Dominant must wish or refuse first.
+    WishPending,
+    /// Not a wish this player can make now (not theirs, or a bad target).
+    InvalidWish,
     AlreadyChose,
     NotInHand,
     WrongTiming,
@@ -451,6 +514,8 @@ impl std::fmt::Display for RuleError {
             RuleError::WindowOpen => write!(f, "a reaction window is open"),
             RuleError::NoWindow => write!(f, "no reaction window to pass in"),
             RuleError::GameOver => write!(f, "the match is over"),
+            RuleError::WishPending => write!(f, "the Dominant is making a wish"),
+            RuleError::InvalidWish => write!(f, "invalid wish"),
             RuleError::AlreadyChose => write!(f, "already chose in this window"),
             RuleError::NotInHand => write!(f, "card is not in hand"),
             RuleError::WrongTiming => write!(f, "card cannot be played now"),
@@ -509,6 +574,19 @@ pub struct Game {
     secrets: Vec<victory::Condition>,
     progress: Vec<victory::Progress>,
     winner: Option<(PlayerId, victory::Condition)>,
+    /// The Dominant owes a wish (§7).
+    wish_due: Option<PlayerId>,
+    /// Every wish granted so far: the gods remember (§7.5).
+    asked: Vec<(God, wish::WishKind)>,
+    /// Per player, the gods whose curse they carry.
+    curses: Vec<Vec<God>>,
+    /// Open story lines (§8).
+    lines: Vec<story::Line>,
+    next_line: u32,
+    /// Round of the last battle or guard strike.
+    last_fight: u32,
+    /// Deeds since the last story check.
+    pending_story: Vec<(PlayerId, style::Deed)>,
     log: Vec<Event>,
 }
 
@@ -581,6 +659,13 @@ impl Game {
             secrets,
             progress: vec![victory::Progress::default(); champions_len],
             winner: None,
+            wish_due: None,
+            asked: Vec::new(),
+            curses: vec![Vec::new(); champions_len],
+            lines: Vec::new(),
+            next_line: 0,
+            last_fight: 0,
+            pending_story: Vec::new(),
             log: Vec::new(),
         };
 
@@ -657,6 +742,9 @@ impl Game {
 
     /// Players the game is waiting on right now.
     pub fn awaiting(&self) -> Vec<PlayerId> {
+        if let Some(d) = self.wish_due {
+            return vec![d];
+        }
         match &self.window {
             Some(w) => w
                 .eligible
@@ -919,6 +1007,35 @@ impl Game {
         if self.winner.is_some() {
             return Err(RuleError::GameOver);
         }
+        if let Some(dominant) = self.wish_due {
+            if player != dominant {
+                return Err(RuleError::WishPending);
+            }
+            let mut events = Vec::new();
+            match intent {
+                Intent::Wish { god, kind, target } => {
+                    let fits = match target {
+                        Some(t) => kind.needs_target() && t != player && self.champion(t).is_some(),
+                        None => !kind.needs_target(),
+                    };
+                    if !fits {
+                        return Err(RuleError::InvalidWish);
+                    }
+                    self.grant_wish(player, god, kind, target, &mut events);
+                }
+                Intent::RefuseWish => {
+                    self.wish_due = None;
+                    let streak = self.progress[player.0 as usize].crown_streak;
+                    self.progress[player.0 as usize].refused_at = streak;
+                    events.push(Event::WishRefused { player });
+                }
+                _ => return Err(RuleError::WishPending),
+            }
+            self.settle_story(&mut events);
+            self.check_victory(&mut events);
+            self.log.extend(events.iter().cloned());
+            return Ok(events);
+        }
         if self.champion(player).is_none() {
             return Err(RuleError::UnknownPlayer);
         }
@@ -936,8 +1053,10 @@ impl Game {
                     self.play_own(player, card, target, &mut events)?
                 }
                 Intent::Pass | Intent::Burn { .. } => return Err(RuleError::NoWindow),
+                Intent::Wish { .. } | Intent::RefuseWish => return Err(RuleError::InvalidWish),
             }
         }
+        self.settle_story(&mut events);
         self.check_victory(&mut events);
         self.log.extend(events.iter().cloned());
         Ok(events)
@@ -1096,6 +1215,7 @@ impl Game {
             }
             Intent::Burn { .. } => return Err(RuleError::WrongTiming),
             Intent::Move { .. } | Intent::EndTurn => return Err(RuleError::WindowOpen),
+            Intent::Wish { .. } | Intent::RefuseWish => return Err(RuleError::InvalidWish),
         };
         let window = self.window.as_mut().expect("still open");
         window.choices.insert(player, choice);
@@ -1281,6 +1401,7 @@ impl Game {
                 events,
             );
             self.record_deed(caster, style::Deed::Played(element));
+            self.lift_curse(caster, element, events);
             // Zaga is the one god whose cards quiet a champion down (§6.5).
             if element == Element::Earth {
                 self.add_threat(caster, -1, events);
@@ -1608,6 +1729,7 @@ impl Game {
                 events.push(Event::Dusk { round: self.round });
                 self.dusk(events);
                 self.judge_the_day(events);
+                self.storyteller(events);
             }
             self.start_round(events);
         } else {
@@ -1656,6 +1778,7 @@ impl Game {
             player,
             move_points: self.move_points,
         });
+        self.bite_curses(player, events);
         let champ = &self.champions[player.0 as usize];
         if champ.spirit_points < champ.spirit {
             self.gain_spirit(player, 1, events);
@@ -1709,14 +1832,29 @@ impl Game {
 
 mod battle;
 mod guard;
+mod story;
 mod style;
 mod victory;
+mod wish;
 mod world;
 pub use battle::Score;
 pub use guard::{GUARD_DICE, GUARD_RELIEF, GUARD_STEPS, Guard};
+pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
 pub use victory::{Check, CheckKind, Condition, OPEN_COUNT};
+pub use wish::{WishKind, god_terrain, taste_for};
 pub use world::{Pantheon, STAGE_THRESHOLD, STAGES, TRISHNA_DRIFT};
 
 #[cfg(test)]
 mod tests;
+
+impl Game {
+    /// Deeds of this intent move story lines; states (a hex reached, favour
+    /// gained) are checked after them.
+    fn settle_story(&mut self, events: &mut Vec<Event>) {
+        for (player, deed) in std::mem::take(&mut self.pending_story) {
+            self.story_deed(player, deed, events);
+        }
+        self.check_lines(events);
+    }
+}

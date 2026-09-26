@@ -96,6 +96,7 @@ impl Game {
 
     fn guard_strike(&mut self, target: PlayerId, events: &mut Vec<Event>) {
         events.push(Event::GuardStruck { target });
+        self.last_fight = self.round;
         self.battles += 1;
         self.offer(None, God::Trishna, 1, events);
         let g_faces = self.roll(Fighter::Guard, false, GUARD_DICE, Vec::new(), events);
