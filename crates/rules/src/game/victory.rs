@@ -132,9 +132,9 @@ impl Game {
         &self.open
     }
 
-    /// A player's secret condition. The server will send it only to them.
+    /// A player's secret condition; `None` in a view that hides it.
     pub fn secret(&self, player: PlayerId) -> Option<Condition> {
-        self.secrets.get(player.0 as usize).copied()
+        self.secrets.get(player.0 as usize).copied().flatten()
     }
 
     /// The winner and the condition they met, once the match is over.

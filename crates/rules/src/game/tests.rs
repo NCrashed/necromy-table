@@ -1316,7 +1316,7 @@ fn conditions_are_drawn_open_and_secret() {
 fn meeting_a_condition_wins_and_stops_the_match() {
     let (mut g, me, foe) = duel(3);
     g.open = vec![Condition::Registry { regions: 2 }];
-    g.secrets = vec![Condition::Overthrow { wins: 99 }; 5];
+    g.secrets = vec![Some(Condition::Overthrow { wins: 99 }); 5];
     let settlements: Vec<Hex> = [God::Bhava, God::Maya]
         .iter()
         .map(|&god| {
@@ -1665,7 +1665,7 @@ fn every_god_twists_the_wish() {
 fn the_wager_is_won_by_refusing_the_crowned_wish() {
     let (mut g, me, _) = duel(3);
     g.open = vec![];
-    g.secrets = vec![Condition::Wager { dawns: 2 }; 5];
+    g.secrets = vec![Some(Condition::Wager { dawns: 2 }); 5];
     crown(&mut g, me);
     g.apply(me, Intent::RefuseWish).unwrap();
     assert_eq!(g.winner(), None, "one dawn is not the bet");

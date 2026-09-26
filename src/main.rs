@@ -4,7 +4,6 @@ mod dice;
 mod hud;
 mod icons;
 mod names;
-mod oracle;
 mod play;
 mod stats;
 mod story_ui;
@@ -43,7 +42,6 @@ fn main() {
             battle_ui::BattleUiPlugin,
             turn_ui::TurnUiPlugin,
             victory_ui::VictoryUiPlugin,
-            oracle::OraclePlugin,
             wish_ui::WishUiPlugin,
             story_ui::StoryUiPlugin,
         ))

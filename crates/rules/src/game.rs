@@ -339,8 +339,8 @@ pub enum Event {
         condition: victory::Condition,
     },
 
-    // Hidden information below (draws, traps, choices) goes to every
-    // listener for now; the server will filter it per player (§17.1).
+    // Hidden information below (draws, traps, choices): a table sends each
+    // seat its own version through `Game::event_for` (§17.1).
     CardDrawn {
         player: PlayerId,
         card: CardId,
@@ -574,7 +574,8 @@ pub struct Game {
     guard: Option<guard::Guard>,
     /// Victory conditions (§10): open to all, and one secret per player.
     open: Vec<victory::Condition>,
-    secrets: Vec<victory::Condition>,
+    /// `None` where a view hides someone else's secret (`view_for`).
+    secrets: Vec<Option<victory::Condition>>,
     progress: Vec<victory::Progress>,
     winner: Option<(PlayerId, victory::Condition)>,
     /// The Dominant owes a wish (§7).
@@ -659,7 +660,7 @@ impl Game {
             deeds: vec![Vec::new(); champions_len],
             guard: None,
             open,
-            secrets,
+            secrets: secrets.into_iter().map(Some).collect(),
             progress: vec![victory::Progress::default(); champions_len],
             winner: None,
             wish_due: None,
@@ -1843,6 +1844,7 @@ mod guard;
 mod story;
 mod style;
 mod victory;
+mod view;
 mod wish;
 mod world;
 pub use battle::Score;

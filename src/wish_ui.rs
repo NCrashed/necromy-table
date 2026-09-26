@@ -17,7 +17,6 @@ use necromy_rules::{God, Intent, PlayerId, WishKind};
 
 use crate::hud::{INK, PANEL, UiFont};
 use crate::names;
-use crate::oracle::{Hearing, OracleLink, OracleOnline, Voices};
 use crate::play::Match;
 use crate::stats::{self, StatArt};
 
@@ -38,18 +37,12 @@ impl Plugin for WishUiPlugin {
             .add_systems(Update, (dev_wish, type_wish, buttons))
             .add_systems(
                 Update,
-                rebuild_panel.after(type_wish).after(buttons).run_if(
-                    resource_changed::<Match>
-                        .or_else(resource_changed::<WishDraft>)
-                        .or_else(resource_changed::<OracleOnline>)
-                        .or_else(resource_changed::<OracleLink>)
-                        .or_else(resource_changed::<Hearing>),
-                ),
+                rebuild_panel
+                    .after(type_wish)
+                    .after(buttons)
+                    .run_if(resource_changed::<Match>.or_else(resource_changed::<WishDraft>)),
             )
-            .add_systems(
-                Update,
-                rebuild_reply.run_if(resource_changed::<Match>.or_else(resource_changed::<Voices>)),
-            )
+            .add_systems(Update, rebuild_reply.run_if(resource_changed::<Match>))
             .add_systems(Update, (expire_reply, listening_dots));
     }
 }
@@ -159,12 +152,12 @@ fn text_block(
 }
 
 /// Is the human writing a wish right now (panel up, free words, not sent)?
-fn writing(game: &Match, draft: &WishDraft, link: &OracleLink) -> bool {
+fn writing(game: &Match, draft: &WishDraft) -> bool {
     game.game.wish_due() == Some(game.human)
         && !(game.autoplay && !game.paused_for_wish_panel())
-        && link.online()
+        && game.oracle.online
         && !draft.prepared
-        && link.judging().is_none()
+        && game.oracle.listening.is_none()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -172,8 +165,6 @@ fn rebuild_panel(
     mut commands: Commands,
     game: Res<Match>,
     draft: Res<WishDraft>,
-    link: Res<OracleLink>,
-    hearing: Res<Hearing>,
     art: Res<StatArt>,
     font: Res<UiFont>,
     panel: Single<(Entity, &mut Visibility), With<WishPanel>>,
@@ -186,7 +177,7 @@ fn rebuild_panel(
         return;
     }
     visibility.set_if_neq(Visibility::Inherited);
-    let free = link.online() && !draft.prepared;
+    let free = game.oracle.online && !draft.prepared;
 
     let frame = commands
         .spawn((
@@ -222,7 +213,7 @@ fn rebuild_panel(
     rows.push(title);
 
     // The god is thinking: show the words and wait.
-    if let Some(god) = link.judging() {
+    if let Some(god) = game.oracle.listening {
         let words = text_block(
             &mut commands,
             &font,
@@ -250,7 +241,7 @@ fn rebuild_panel(
         "Бог исполнит по-своему. Изощрённое желание вознаграждается Стилем, грубое исполнится урезанно и с проклятием."
     };
     rows.push(text_block(&mut commands, &font, hint, 12.0, DIM));
-    if let Some(why) = &hearing.failed {
+    if let Some(why) = &game.oracle.failed {
         rows.push(text_block(
             &mut commands,
             &font,
@@ -400,7 +391,7 @@ fn rebuild_panel(
     };
     let make = button(&mut commands, &font, WishButton::Make, make_label, ready);
     commands.entity(actions).add_child(make);
-    if link.online() {
+    if game.oracle.online {
         let (switch, label) = if free {
             (true, "Заготовки")
         } else {
@@ -424,7 +415,7 @@ fn rebuild_panel(
     );
     commands.entity(actions).add_child(refuse);
     rows.push(actions);
-    if !link.online() {
+    if !game.oracle.online {
         rows.push(text_block(
             &mut commands,
             &font,
@@ -454,13 +445,8 @@ fn rebuild_panel(
 /// Dev aid: `NECROMY_WISH=<god index>:<words>` writes the human's first wish
 /// once the gods' voice is up, e.g. `NECROMY_WISH="1:накорми меня перед боем"`
 /// with `NECROMY_AUTOPLAY=1 NECROMY_SCREENSHOT_WHEN=reply`.
-fn dev_wish(
-    mut done: Local<bool>,
-    mut draft: ResMut<WishDraft>,
-    mut link: ResMut<OracleLink>,
-    game: Res<Match>,
-) {
-    if *done || !writing(&game, &draft, &link) {
+fn dev_wish(mut done: Local<bool>, mut draft: ResMut<WishDraft>, mut game: ResMut<Match>) {
+    if *done || !writing(&game, &draft) {
         return;
     }
     *done = true;
@@ -479,18 +465,16 @@ fn dev_wish(
     };
     draft.god = Some(god);
     draft.text = text.clone();
-    link.ask_wish(&game, god, &text);
+    game.wish_in_words(god, &text);
 }
 
 /// Keys go into the wish while the human writes one; Enter sends it.
 fn type_wish(
     mut keys: MessageReader<KeyboardInput>,
     mut draft: ResMut<WishDraft>,
-    mut link: ResMut<OracleLink>,
-    mut hearing: ResMut<Hearing>,
-    game: Res<Match>,
+    mut game: ResMut<Match>,
 ) {
-    if !writing(&game, &draft, &link) {
+    if !writing(&game, &draft) {
         keys.clear();
         return;
     }
@@ -506,9 +490,8 @@ fn type_wish(
                 if let Some(god) = draft.god
                     && !draft.text.trim().is_empty()
                 {
-                    hearing.failed = None;
                     let text = draft.text.clone();
-                    link.ask_wish(&game, god, &text);
+                    game.wish_in_words(god, &text);
                 }
             }
             _ => {
@@ -526,8 +509,6 @@ fn type_wish(
 fn buttons(
     pressed: Query<(&Interaction, &WishButton), Changed<Interaction>>,
     mut draft: ResMut<WishDraft>,
-    mut link: ResMut<OracleLink>,
-    mut hearing: ResMut<Hearing>,
     mut game: ResMut<Match>,
 ) {
     for (interaction, button) in &pressed {
@@ -547,11 +528,10 @@ fn buttons(
             WishButton::Prepared(on) => draft.prepared = on,
             WishButton::Make => {
                 let Some(god) = draft.god else { continue };
-                if link.online() && !draft.prepared {
-                    if !draft.text.trim().is_empty() && link.judging().is_none() {
-                        hearing.failed = None;
+                if game.oracle.online && !draft.prepared {
+                    if !draft.text.trim().is_empty() && game.oracle.listening.is_none() {
                         let text = draft.text.clone();
-                        link.ask_wish(&game, god, &text);
+                        game.wish_in_words(god, &text);
                     }
                     continue;
                 }
@@ -580,7 +560,7 @@ fn buttons(
     }
     // A wish that went through clears the draft for the next dawn.
     let done = game.game.wish_due() != Some(game.human)
-        && link.judging().is_none()
+        && game.oracle.listening.is_none()
         && (!draft.text.is_empty() || draft.god.is_some());
     if done {
         *draft = WishDraft::default();
@@ -601,7 +581,6 @@ fn listening_dots(time: Res<Time>, mut texts: Query<(&Listening, &mut Text)>) {
 fn rebuild_reply(
     mut commands: Commands,
     game: Res<Match>,
-    voices: Res<Voices>,
     art: Res<StatArt>,
     font: Res<UiFont>,
     panel: Single<(Entity, &mut Visibility), With<ReplyPanel>>,
@@ -682,7 +661,7 @@ fn rebuild_reply(
                 .as_ref()
                 .map(|s| s.speech.clone())
                 .filter(|s| !s.is_empty())
-                .or_else(|| voices.wishes.get(&game.wish_serial).cloned())
+                .or_else(|| game.oracle.wish_voices.get(&reply.serial).cloned())
                 .unwrap_or_else(|| names::god_speech(god, grade).to_string());
             rows.push(block(
                 &mut commands,

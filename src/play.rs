@@ -1,13 +1,19 @@
 //! Runs a local match: one human seat, bots on the rest (docs/design.md §19).
 //!
-//! The client only sends intents to the rules core and redraws from its
-//! state. Later the same intents go to the dedicated server instead (§17).
+//! The match lives on a table (`necromy-host`) in this same process, as it
+//! will on the dedicated server (§17.3): the client sends it intents and
+//! redraws from the view it sends back, which holds only what the human may
+//! know. Intents are checked against that view first, so a refusal comes at
+//! once and in words.
+
+use std::collections::HashMap;
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use necromy_host::{Config, FromTable, OracleNews, Seat, Table, ToTable};
 use necromy_rules::{
-    CardId, Event, Fighter, Game, God, Intent, PlayerId, RuleError, Score, Setup, Target, Terrain,
-    TimeOfDay, WindowKind, bot,
+    CardId, Event, Fighter, Game, God, Intent, PlayerId, RuleError, Score, Target, Terrain,
+    TimeOfDay, WindowKind,
 };
 
 use crate::board::{self, Board};
@@ -17,7 +23,6 @@ use crate::token::Token;
 
 /// Seat the human plays until there is a champion select screen.
 const HUMAN_GOD: God = God::Trishna;
-const BOT_STEP_SECS: f32 = 0.35;
 const FEED_LINES: usize = 9;
 
 pub struct PlayPlugin;
@@ -37,20 +42,29 @@ impl Plugin for PlayPlugin {
         app.insert_resource(Match::new(seed))
             .init_resource::<Selection>()
             .init_resource::<IncomingCountdown>()
-            .insert_resource(BotClock(Timer::from_seconds(
-                BOT_STEP_SECS,
-                TimerMode::Repeating,
-            )))
             .add_systems(
                 Update,
-                (click_board, keys, auto_pass, run_bots, drop_stale_selection),
+                (
+                    drive_table,
+                    click_board,
+                    keys,
+                    auto_pass,
+                    drop_stale_selection,
+                ),
             );
     }
 }
 
 #[derive(Resource)]
 pub struct Match {
+    /// The match as the human sees it (`Game::view_for`), after the last update.
     pub game: Game,
+    table: Table,
+    /// The table's last update, and the last one the screen has shown.
+    serial: u32,
+    shown: u32,
+    /// The gods' voice as the table reports it.
+    pub oracle: OracleState,
     pub human: PlayerId,
     /// Accepted steps not yet picked up by the token animation.
     pub steps: Vec<(PlayerId, necromy_rules::Hex)>,
@@ -78,9 +92,26 @@ pub struct Match {
     holding: bool,
 }
 
+/// What the table told about the gods' voice.
+#[derive(Default)]
+pub struct OracleState {
+    /// The model answers: wishes can be written in free words.
+    pub online: bool,
+    /// The god thinking about the human's wish.
+    pub listening: Option<God>,
+    /// Why the last free-words wish was not heard.
+    pub failed: Option<String>,
+    /// The model's words for wishes, by the table's update serial.
+    pub wish_voices: HashMap<u32, String>,
+    /// The model's words for story lines, by line id.
+    pub line_voices: HashMap<u32, String>,
+}
+
 /// A wish and what came of it.
 pub struct WishReply {
     pub player: PlayerId,
+    /// The table's update it came in; its god's words are keyed by it.
+    pub serial: u32,
     /// `None` when the Dominant refused to wish.
     pub wish: Option<(God, necromy_rules::WishKind, u8)>,
     /// The model's reading, for a wish written in free words.
@@ -163,13 +194,44 @@ impl Match {
                 .position(|&g| g == HUMAN_GOD)
                 .expect("human god is seated") as u8,
         );
-        let (game, events) = Game::new(Setup { seed, champions });
+        let autoplay = std::env::var_os("NECROMY_AUTOPLAY").is_some();
+        let seats = (0..champions.len() as u8)
+            .map(|i| match PlayerId(i) {
+                p if p != human => Seat::Bot,
+                _ if autoplay => Seat::Autoplay {
+                    wish_by_hand: wish_by_hand(),
+                },
+                _ => Seat::Human,
+            })
+            .collect();
+        // Clients never learn it; here the client is its own server.
+        let salt = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos() as u64)
+            ^ seed.rotate_left(17);
+        let oracle = necromy_oracle::addr_from_env();
+        info!("gods' voice: llama-server at {oracle} (NECROMY_ORACLE to change)");
+        let mut table = Table::new(Config {
+            seed,
+            champions,
+            seats,
+            salt,
+            oracle: Some(oracle),
+        });
+        let first = table.drain(human);
+        let Some(FromTable::Update { view, .. }) = first.first() else {
+            unreachable!("a table greets every watched seat with its view");
+        };
         let mut m = Match {
-            game,
+            game: (**view).clone(),
+            table,
+            serial: 0,
+            shown: 0,
+            oracle: OracleState::default(),
             human,
             steps: Vec::new(),
             feed: Vec::new(),
-            autoplay: std::env::var_os("NECROMY_AUTOPLAY").is_some(),
+            autoplay,
             throws: Vec::new(),
             battle: None,
             incoming_result: None,
@@ -181,7 +243,7 @@ impl Match {
             held: Vec::new(),
             holding: false,
         };
-        m.record(&events);
+        m.receive(first);
         m
     }
 
@@ -194,9 +256,7 @@ impl Match {
     /// human's wish so its panel can be captured, and `NECROMY_WISH` stops
     /// there so the wish can be written (`wish_ui::dev_wish`).
     pub fn paused_for_wish_panel(&self) -> bool {
-        self.game.wish_due() == Some(self.human)
-            && (std::env::var("NECROMY_SCREENSHOT_WHEN").is_ok_and(|w| w == "wishpanel")
-                || std::env::var("NECROMY_WISH").is_ok())
+        self.game.wish_due() == Some(self.human) && wish_by_hand()
     }
 
     /// The game is waiting on the human, on their turn or in a window.
@@ -204,10 +264,62 @@ impl Match {
         self.game.awaiting().contains(&self.human)
     }
 
+    /// Send the human's intent to the table. It is checked against the view
+    /// first; the table's answer arrives before this returns (the table is
+    /// local), so the view is already up to date.
     pub fn act(&mut self, player: PlayerId, intent: Intent) -> Result<(), RuleError> {
-        let events = self.game.apply(player, intent)?;
-        self.record(&events);
+        debug_assert_eq!(player, self.human, "the client acts only for its seat");
+        self.game.clone().apply(player, intent.clone())?;
+        self.table.submit(player, ToTable::Act(intent));
+        self.pump();
         Ok(())
+    }
+
+    /// Hand the human's wish in free words to `god`; the table asks the model.
+    pub fn wish_in_words(&mut self, god: God, text: &str) {
+        self.oracle.failed = None;
+        let human = self.human;
+        self.table.submit(
+            human,
+            ToTable::Wish {
+                god,
+                text: text.to_string(),
+            },
+        );
+        self.pump();
+    }
+
+    fn pump(&mut self) {
+        let messages = self.table.drain(self.human);
+        self.receive(messages);
+    }
+
+    fn receive(&mut self, messages: Vec<FromTable>) {
+        for message in messages {
+            match message {
+                FromTable::Update {
+                    serial,
+                    events,
+                    view,
+                } => {
+                    self.game = *view;
+                    self.serial = serial;
+                    self.record(&events);
+                }
+                FromTable::Rejected(err) => self.feed.push(format!("Нельзя: {}.", reason(err))),
+                FromTable::Oracle(news) => match news {
+                    OracleNews::Online(online) => self.oracle.online = online,
+                    OracleNews::Listening(god) => self.oracle.listening = god,
+                    OracleNews::NotHeard(why) => self.oracle.failed = Some(why),
+                    OracleNews::WishVoice { serial, text } => {
+                        self.oracle.wish_voices.insert(serial, text);
+                    }
+                    OracleNews::LineVoice { line, text } => {
+                        self.oracle.line_voices.insert(line, text);
+                    }
+                },
+            }
+        }
     }
 
     fn record(&mut self, events: &[Event]) {
@@ -232,6 +344,7 @@ impl Match {
                 } => {
                     wished = Some(WishReply {
                         player: *player,
+                        serial: self.serial,
                         wish: Some((*god, *kind, *grade)),
                         said: said.clone(),
                         lines: Vec::new(),
@@ -240,6 +353,7 @@ impl Match {
                 Event::WishRefused { player } => {
                     wished = Some(WishReply {
                         player: *player,
+                        serial: self.serial,
                         wish: None,
                         said: None,
                         lines: Vec::new(),
@@ -901,7 +1015,8 @@ fn auto_pass(
     if game.game.battle_dice(game.human).is_some() && !game.game.hand(game.human).is_empty() {
         return;
     }
-    if game.game.playable(game.human).is_empty() {
+    // Under autoplay the table's bot answers for the seat.
+    if game.game.playable(game.human).is_empty() && !game.autoplay {
         let human = game.human;
         let _ = game.act(human, Intent::Pass);
     }
@@ -919,48 +1034,35 @@ fn drop_stale_selection(game: Res<Match>, mut selection: ResMut<Selection>) {
     }
 }
 
-#[derive(Resource)]
-struct BotClock(Timer);
+/// Dev aid: autoplay leaves the human's wish to the wish panel, for
+/// `NECROMY_SCREENSHOT_WHEN=wishpanel` and `NECROMY_WISH` (`wish_ui::dev_wish`).
+fn wish_by_hand() -> bool {
+    std::env::var("NECROMY_SCREENSHOT_WHEN").is_ok_and(|w| w == "wishpanel")
+        || std::env::var("NECROMY_WISH").is_ok()
+}
 
-fn run_bots(
+/// Time passes at the table and what it sends is shown. The table hears when
+/// the screen has caught up (tokens walked, dice rolled), so bots do not run
+/// ahead of what the human could see.
+fn drive_table(
     time: Res<Time>,
-    mut clock: ResMut<BotClock>,
     mut game: ResMut<Match>,
     dice: Res<DiceShow>,
     tokens: Query<&Token>,
 ) {
-    if game.game.winner().is_some() {
-        return;
+    // Only a message from the table is a change worth redrawing for.
+    let m = game.bypass_change_detection();
+    let human = m.human;
+    let idle = !dice.busy() && !tokens.iter().any(Token::is_walking);
+    if idle && m.shown < m.serial {
+        m.shown = m.serial;
+        let serial = m.serial;
+        m.table.submit(human, ToTable::Shown(serial));
     }
-    if tokens.iter().any(Token::is_walking) || dice.busy() {
-        return;
-    }
-    let human = game.human;
-    let autoplay = game.autoplay;
-    let Some(player) = game
-        .game
-        .awaiting()
-        .into_iter()
-        .find(|&p| autoplay || p != human)
-    else {
-        return;
-    };
-    if player == human && game.paused_for_wish_panel() {
-        return;
-    }
-    if !clock.0.tick(time.delta()).just_finished() {
-        return;
-    }
-    let intent = bot::choose(&game.game, player);
-    if let Err(err) = game.act(player, intent.clone()) {
-        // A bot that cannot act must not stall the table.
-        warn!("bot {player:?} {intent:?} rejected: {err}");
-        let fallback = if game.game.window().is_some() {
-            Intent::Pass
-        } else {
-            Intent::EndTurn
-        };
-        let _ = game.act(player, fallback);
+    m.table.tick(time.delta_secs());
+    let messages = m.table.drain(human);
+    if !messages.is_empty() {
+        game.receive(messages);
     }
 }
 

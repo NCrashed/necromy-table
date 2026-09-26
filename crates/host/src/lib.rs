@@ -1,0 +1,495 @@
+//! The authoritative table (docs/design.md §17).
+//!
+//! A [`Table`] owns one match: the whole `Game`, the bots on their seats,
+//! and the gods' voice. Seats send it [`ToTable`] messages and read back
+//! [`FromTable`] ones; every seat hears only what its player may know
+//! (`Game::view_for`). Nothing here knows about sockets or Bevy: the single
+//! player game runs a table in its own process (§17.3), the dedicated
+//! server runs the same table behind a transport.
+//!
+//! Pacing: bots act one step at a time, and only once every watching seat
+//! has shown the last change (dice rolled, tokens walked) or a timeout ran
+//! out, so a slow screen never holds the table for long.
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+use necromy_oracle::{Job, Oracle, prompt};
+use necromy_rules::{Event, Game, God, Intent, PlayerId, RuleError, Setup, bot};
+
+/// Seconds between two bot steps.
+pub const BOT_STEP_SECS: f32 = 0.35;
+/// Longest wait for a seat to show a change before bots go on without it.
+pub const SHOW_TIMEOUT_SECS: f32 = 12.0;
+/// Seconds between health probes of the model.
+const PROBE_SECS: u64 = 5;
+/// Cosmetic voice jobs are skipped while this many already wait.
+const MAX_QUEUED_VOICES: usize = 2;
+
+/// Who plays a seat.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Seat {
+    /// A person, through a client.
+    Human,
+    Bot,
+    /// Dev aid: a bot plays for a client that watches the seat. With
+    /// `wish_by_hand` the bot leaves this seat's wish to the client.
+    Autoplay {
+        wish_by_hand: bool,
+    },
+}
+
+impl Seat {
+    /// A client watches this seat and gets its view.
+    pub fn watched(self) -> bool {
+        self != Seat::Bot
+    }
+}
+
+pub struct Config {
+    pub seed: u64,
+    pub champions: Vec<God>,
+    /// One per champion.
+    pub seats: Vec<Seat>,
+    /// Randomness clients must not know; it hides cards in their views.
+    pub salt: u64,
+    /// `llama-server` address for the gods' voice, `None` for templates only.
+    pub oracle: Option<String>,
+}
+
+/// A seat's message to the table.
+#[derive(Clone, Debug)]
+pub enum ToTable {
+    Act(Intent),
+    /// The Dominant's wish in their own words, for the model to judge.
+    Wish {
+        god: God,
+        text: String,
+    },
+    /// The seat has shown everything up to this update.
+    Shown(u32),
+}
+
+/// The table's message to a seat.
+#[derive(Clone, Debug)]
+pub enum FromTable {
+    /// What changed and the state after it, as this seat sees them.
+    Update {
+        serial: u32,
+        events: Vec<Event>,
+        view: Box<Game>,
+    },
+    /// The seat's intent broke the rules; nothing changed.
+    Rejected(RuleError),
+    Oracle(OracleNews),
+}
+
+/// News of the gods' voice.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OracleNews {
+    /// Whether the model answers; wishes in free words need it.
+    Online(bool),
+    /// A god is thinking about this seat's wish, or stopped.
+    Listening(Option<God>),
+    /// The wish could not be heard; the seat may try again.
+    NotHeard(String),
+    /// A god's words for the wish granted in update `serial`.
+    WishVoice { serial: u32, text: String },
+    /// A god's words for a story line.
+    LineVoice { line: u32, text: String },
+}
+
+enum Purpose {
+    Wish {
+        seat: PlayerId,
+        god: God,
+        text: String,
+    },
+    WishVoice {
+        serial: u32,
+    },
+    LineVoice {
+        owner: PlayerId,
+        line: u32,
+    },
+}
+
+struct Voice {
+    oracle: Oracle,
+    online: Arc<AtomicBool>,
+    told_online: bool,
+    next_id: u64,
+    /// In send order.
+    pending: Vec<(u64, Purpose)>,
+}
+
+pub struct Table {
+    game: Game,
+    seats: Vec<Seat>,
+    salt: u64,
+    serial: u32,
+    /// Per seat, the last update it has shown.
+    shown: Vec<u32>,
+    /// Seconds since the last update.
+    since_update: f32,
+    /// Seconds since the last bot step.
+    since_bot: f32,
+    outbox: Vec<Vec<FromTable>>,
+    voice: Option<Voice>,
+}
+
+impl Table {
+    pub fn new(config: Config) -> Table {
+        assert_eq!(
+            config.seats.len(),
+            config.champions.len(),
+            "a seat per champion"
+        );
+        let (game, events) = Game::new(Setup {
+            seed: config.seed,
+            champions: config.champions,
+        });
+        let voice = config.oracle.map(|addr| {
+            let online = Arc::new(AtomicBool::new(false));
+            {
+                let (addr, online) = (addr.clone(), online.clone());
+                std::thread::Builder::new()
+                    .name("oracle-probe".into())
+                    .spawn(move || {
+                        loop {
+                            online.store(necromy_oracle::alive(&addr), Ordering::Relaxed);
+                            std::thread::sleep(Duration::from_secs(PROBE_SECS));
+                        }
+                    })
+                    .expect("spawn the oracle probe");
+            }
+            Voice {
+                oracle: Oracle::spawn(addr),
+                online,
+                told_online: false,
+                next_id: 0,
+                pending: Vec::new(),
+            }
+        });
+        let n = config.seats.len();
+        let mut table = Table {
+            game,
+            seats: config.seats,
+            salt: config.salt,
+            serial: 0,
+            shown: vec![0; n],
+            since_update: 0.0,
+            since_bot: 0.0,
+            outbox: vec![Vec::new(); n],
+            voice,
+        };
+        table.broadcast(&events);
+        table
+    }
+
+    /// The whole match. Only the host may read it: clients get views.
+    pub fn game(&self) -> &Game {
+        &self.game
+    }
+
+    pub fn seats(&self) -> &[Seat] {
+        &self.seats
+    }
+
+    /// Messages waiting for `seat`, oldest first.
+    pub fn drain(&mut self, seat: PlayerId) -> Vec<FromTable> {
+        self.outbox
+            .get_mut(seat.0 as usize)
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
+    pub fn submit(&mut self, seat: PlayerId, message: ToTable) {
+        let Some(kind) = self.seats.get(seat.0 as usize).copied() else {
+            return;
+        };
+        if !kind.watched() {
+            return;
+        }
+        match message {
+            ToTable::Act(intent) => {
+                if let Err(err) = self.act(seat, intent) {
+                    self.send(seat, FromTable::Rejected(err));
+                }
+            }
+            ToTable::Wish { god, text } => self.ask_wish(seat, god, text),
+            ToTable::Shown(serial) => {
+                let s = &mut self.shown[seat.0 as usize];
+                *s = (*s).max(serial.min(self.serial));
+            }
+        }
+    }
+
+    /// Time passes: the model's answers come in, bots take their steps.
+    pub fn tick(&mut self, dt: f32) {
+        self.since_update += dt;
+        self.since_bot += dt;
+        self.hear();
+        self.run_bots();
+    }
+
+    fn act(&mut self, player: PlayerId, intent: Intent) -> Result<(), RuleError> {
+        let events = self.game.apply(player, intent)?;
+        self.broadcast(&events);
+        self.ask_voices(&events);
+        Ok(())
+    }
+
+    fn send(&mut self, seat: PlayerId, message: FromTable) {
+        if let Some(out) = self.outbox.get_mut(seat.0 as usize) {
+            out.push(message);
+        }
+    }
+
+    fn next_salt(&mut self) -> u64 {
+        // SplitMix64 over the table's own salt: fresh for every view.
+        self.salt = self.salt.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.salt;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    fn broadcast(&mut self, events: &[Event]) {
+        self.serial += 1;
+        self.since_update = 0.0;
+        for i in 0..self.seats.len() {
+            if !self.seats[i].watched() {
+                continue;
+            }
+            let seat = PlayerId(i as u8);
+            let salt = self.next_salt();
+            let view = self.game.view_for(Some(seat), salt);
+            let events = events
+                .iter()
+                .map(|e| Game::event_for(&view, Some(seat), e))
+                .collect();
+            let serial = self.serial;
+            self.send(
+                seat,
+                FromTable::Update {
+                    serial,
+                    events,
+                    view: Box::new(view),
+                },
+            );
+        }
+    }
+
+    fn everyone_has_shown(&self) -> bool {
+        self.since_update >= SHOW_TIMEOUT_SECS
+            || self
+                .seats
+                .iter()
+                .zip(&self.shown)
+                .all(|(seat, &shown)| !seat.watched() || shown >= self.serial)
+    }
+
+    fn run_bots(&mut self) {
+        if self.game.winner().is_some()
+            || self.since_bot < BOT_STEP_SECS
+            || !self.everyone_has_shown()
+        {
+            return;
+        }
+        let wish_due = self.game.wish_due();
+        let Some(player) =
+            self.game
+                .awaiting()
+                .into_iter()
+                .find(|&p| match self.seats[p.0 as usize] {
+                    Seat::Bot => true,
+                    Seat::Autoplay { wish_by_hand } => !(wish_by_hand && wish_due == Some(p)),
+                    Seat::Human => false,
+                })
+        else {
+            return;
+        };
+        self.since_bot = 0.0;
+        let intent = bot::choose(&self.game, player);
+        if self.act(player, intent).is_err() {
+            // A bot that cannot act must not stall the table.
+            let fallback = if self.game.window().is_some() {
+                Intent::Pass
+            } else {
+                Intent::EndTurn
+            };
+            let _ = self.act(player, fallback);
+        }
+    }
+
+    // ---- The gods' voice ----
+
+    fn job(&mut self, purpose: Purpose, job: impl FnOnce(u64) -> Job) {
+        let Some(voice) = self.voice.as_mut() else {
+            return;
+        };
+        voice.next_id += 1;
+        let id = voice.next_id;
+        voice.pending.push((id, purpose));
+        voice.oracle.send(job(id));
+    }
+
+    fn online(&self) -> bool {
+        self.voice
+            .as_ref()
+            .is_some_and(|v| v.online.load(Ordering::Relaxed))
+    }
+
+    fn ask_wish(&mut self, seat: PlayerId, god: God, text: String) {
+        let refuse = if self.game.wish_due() != Some(seat) {
+            Some("сейчас не время желаний")
+        } else if !self.online() {
+            Some("голос богов не отвечает")
+        } else if self.voice.as_ref().is_some_and(|v| {
+            v.pending
+                .iter()
+                .any(|(_, p)| matches!(p, Purpose::Wish { .. }))
+        }) {
+            Some("бог ещё слушает прежнее")
+        } else {
+            None
+        };
+        if let Some(why) = refuse {
+            self.send(seat, FromTable::Oracle(OracleNews::NotHeard(why.into())));
+            return;
+        }
+        let (messages, schema) = prompt::wish(&self.game, seat, god, &text);
+        self.job(Purpose::Wish { seat, god, text }, |id| Job {
+            id,
+            messages,
+            schema: Some(schema),
+            max_tokens: 300,
+            temperature: 0.6,
+        });
+        self.send(seat, FromTable::Oracle(OracleNews::Listening(Some(god))));
+    }
+
+    /// New wishes without words and new lines for people get a god's voice,
+    /// while the model is up and not buried in work.
+    fn ask_voices(&mut self, events: &[Event]) {
+        if !self.online() {
+            return;
+        }
+        let serial = self.serial;
+        for event in events {
+            let queued = self.voice.as_ref().map_or(usize::MAX, |v| {
+                v.pending
+                    .iter()
+                    .filter(|(_, p)| !matches!(p, Purpose::Wish { .. }))
+                    .count()
+            });
+            if queued >= MAX_QUEUED_VOICES {
+                return;
+            }
+            match event {
+                Event::WishGranted {
+                    player,
+                    god,
+                    kind,
+                    grade,
+                    said: None,
+                    ..
+                } => {
+                    let messages = prompt::wish_speech(&self.game, *player, *god, *kind, *grade);
+                    self.job(Purpose::WishVoice { serial }, |id| voice_job(id, messages));
+                }
+                Event::LineTold { line } if self.seats[line.owner.0 as usize].watched() => {
+                    let messages = prompt::line_voice(&self.game, line);
+                    let purpose = Purpose::LineVoice {
+                        owner: line.owner,
+                        line: line.id,
+                    };
+                    self.job(purpose, |id| voice_job(id, messages));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn hear(&mut self) {
+        let Some(voice) = self.voice.as_mut() else {
+            return;
+        };
+        let online = voice.online.load(Ordering::Relaxed);
+        let changed = online != voice.told_online;
+        voice.told_online = online;
+        let mut answers = Vec::new();
+        while let Some(answer) = voice.oracle.poll() {
+            if let Some(i) = voice.pending.iter().position(|(id, _)| *id == answer.id) {
+                answers.push((voice.pending.remove(i).1, answer.result));
+            }
+        }
+        if changed {
+            for i in 0..self.seats.len() {
+                self.send(
+                    PlayerId(i as u8),
+                    FromTable::Oracle(OracleNews::Online(online)),
+                );
+            }
+        }
+        for (purpose, result) in answers {
+            match (purpose, result) {
+                (Purpose::Wish { seat, god, text }, result) => {
+                    self.send(seat, FromTable::Oracle(OracleNews::Listening(None)));
+                    let heard =
+                        result
+                            .map_err(|_| "бог не ответил".to_string())
+                            .and_then(|reply| {
+                                prompt::read_wish(&self.game, seat, &text, &reply)
+                                    .map_err(|_| "бог ответил невнятно".to_string())
+                            });
+                    let outcome = heard.and_then(|(kind, target, said)| {
+                        let intent = Intent::Wish {
+                            god,
+                            kind,
+                            target,
+                            said: Some(said),
+                        };
+                        self.act(seat, intent)
+                            .map_err(|err| format!("бог не смог исполнить: {err}"))
+                    });
+                    if let Err(why) = outcome {
+                        self.send(seat, FromTable::Oracle(OracleNews::NotHeard(why)));
+                    }
+                }
+                (Purpose::WishVoice { serial }, Ok(text)) => {
+                    let news = OracleNews::WishVoice {
+                        serial,
+                        text: text.trim().to_string(),
+                    };
+                    for i in 0..self.seats.len() {
+                        self.send(PlayerId(i as u8), FromTable::Oracle(news.clone()));
+                    }
+                }
+                (Purpose::LineVoice { owner, line }, Ok(text)) => {
+                    let news = OracleNews::LineVoice {
+                        line,
+                        text: text.trim().to_string(),
+                    };
+                    self.send(owner, FromTable::Oracle(news));
+                }
+                (_, Err(_)) => {}
+            }
+        }
+    }
+}
+
+fn voice_job(id: u64, messages: Vec<necromy_oracle::Message>) -> Job {
+    Job {
+        id,
+        messages,
+        schema: None,
+        max_tokens: 90,
+        temperature: 0.8,
+    }
+}
+
+#[cfg(test)]
+mod tests;

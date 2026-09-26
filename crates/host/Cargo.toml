@@ -1,0 +1,9 @@
+[package]
+name = "necromy-host"
+version = "0.1.0"
+edition = "2024"
+description = "The authoritative table: one match, its bots, its gods' voice, and what each seat may see (docs/design.md §17)."
+
+[dependencies]
+necromy-rules = { path = "../rules" }
+necromy-oracle = { path = "../oracle" }
