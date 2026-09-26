@@ -11,9 +11,10 @@ nix develop
 cargo run --features dev
 ```
 
-You play Trishna (red) against four bots. Click a lit hex to walk, click a
-card to play it (then a gold hex to aim; right click cancels), P to pass in a
-reaction window, Space to end the turn. `NECROMY_SEED=<n>` replays a board; rules tests: `cargo test -p necromy-rules`.
+You play Trishna (red) against four bots. Click a lit hex to walk, a red hex
+to attack, a card to play it (then a gold hex to aim; right click cancels).
+In a battle click cards to burn and press Enter to throw. P passes in a
+reaction window, Space ends the turn. `NECROMY_SEED=<n>` replays a board; rules tests: `cargo test -p necromy-rules`.
 
 ## Concept art (GPT Image)
 

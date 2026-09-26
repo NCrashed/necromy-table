@@ -6,11 +6,12 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use necromy_rules::{
-    CardId, Event, Game, God, Intent, PlayerId, RuleError, Setup, Target, TimeOfDay, WindowKind,
-    bot,
+    CardId, Event, Fighter, Game, God, Intent, PlayerId, RuleError, Score, Setup, Target, Terrain,
+    TimeOfDay, WindowKind, bot,
 };
 
-use crate::board::Board;
+use crate::board::{self, Board};
+use crate::dice::DiceShow;
 use crate::names;
 use crate::token::Token;
 
@@ -35,6 +36,7 @@ impl Plugin for PlayPlugin {
 
         app.insert_resource(Match::new(seed))
             .init_resource::<Selection>()
+            .init_resource::<IncomingCountdown>()
             .insert_resource(BotClock(Timer::from_seconds(
                 BOT_STEP_SECS,
                 TimerMode::Repeating,
@@ -55,12 +57,84 @@ pub struct Match {
     pub feed: Vec<String>,
     /// Dev aid (`NECROMY_AUTOPLAY`): a bot plays the human seat too.
     pub autoplay: bool,
+    /// Throws not yet picked up by the dice show.
+    pub throws: Vec<ThrowView>,
+    /// The battle on screen, from its start until the dice show ends.
+    pub battle: Option<BattleInfo>,
+    /// The last card that hit the human and what it did, shown for a moment
+    /// after its Target window closed.
+    pub incoming_result: Option<IncomingResult>,
+    /// Bumped for every new `incoming_result`.
+    pub incoming_serial: u32,
+    /// Feed lines that would spoil dice still rolling on screen.
+    held: Vec<String>,
+    holding: bool,
+}
+
+/// A card that was aimed at the human, and its outcome in words.
+pub struct IncomingResult {
+    pub caster: PlayerId,
+    pub card: CardId,
+    pub lines: Vec<String>,
+}
+
+/// What the battle panel shows about the current fight.
+pub struct BattleInfo {
+    /// `None` for the royal guard.
+    pub attacker: Option<PlayerId>,
+    pub defender: PlayerId,
+    /// Faces from burned cards: attacker, defender.
+    pub burned: [Vec<necromy_rules::Face>; 2],
+    /// Attacker and defender scores once the battle resolved.
+    pub scores: Option<(Score, Score)>,
+    /// Health before and after the blows, per side, for sides that were hit.
+    pub hp: [Option<(u8, u8)>; 2],
+    /// The side fell and woke at home.
+    pub fell: [bool; 2],
+}
+
+impl BattleInfo {
+    fn new(attacker: Option<PlayerId>, defender: PlayerId) -> Self {
+        BattleInfo {
+            attacker,
+            defender,
+            burned: [Vec::new(), Vec::new()],
+            scores: None,
+            hp: [None, None],
+            fell: [false, false],
+        }
+    }
+
+    /// 0 for the attacker, 1 for the defender, `None` for bystanders.
+    fn side_of(&self, player: PlayerId) -> Option<usize> {
+        if player == self.defender {
+            Some(1)
+        } else if Some(player) == self.attacker {
+            Some(0)
+        } else {
+            None
+        }
+    }
+
+    fn side(&self, player: PlayerId) -> usize {
+        usize::from(player == self.defender)
+    }
+}
+
+pub struct ThrowView {
+    /// 0 for the attacker's tray, 1 for the defender's.
+    pub side: usize,
+    pub seed: u64,
+    pub count: u8,
+    pub faces: Vec<necromy_rules::Face>,
 }
 
 /// The card the human picked and is now aiming.
 #[derive(Resource, Default)]
 pub struct Selection {
     pub card: Option<CardId>,
+    /// Cards marked to burn in the open Battle window.
+    pub burn: Vec<CardId>,
 }
 
 impl Match {
@@ -79,6 +153,12 @@ impl Match {
             steps: Vec::new(),
             feed: Vec::new(),
             autoplay: std::env::var_os("NECROMY_AUTOPLAY").is_some(),
+            throws: Vec::new(),
+            battle: None,
+            incoming_result: None,
+            incoming_serial: 0,
+            held: Vec::new(),
+            holding: false,
         };
         m.record(&events);
         m
@@ -101,19 +181,133 @@ impl Match {
     }
 
     fn record(&mut self, events: &[Event]) {
+        // Outcome of a card aimed at the human, gathered from this batch.
+        let mut hit: Option<IncomingResult> = None;
         for event in events {
+            if let Some(line) = self.outcome_line(event, &hit)
+                && let Some(h) = hit.as_mut()
+            {
+                h.lines.push(line);
+            }
+            if let Event::WindowClosed {
+                kind:
+                    WindowKind::Target {
+                        caster,
+                        target,
+                        card,
+                    },
+                ..
+            } = event
+                && *target == self.human
+            {
+                hit = Some(IncomingResult {
+                    caster: *caster,
+                    card: *card,
+                    lines: Vec::new(),
+                });
+            }
             match event {
                 Event::Moved { player, to, .. } => self.steps.push((*player, *to)),
                 Event::Blinked { player, to, .. } => self.steps.push((*player, *to)),
                 Event::ChampionFell {
                     player, respawn, ..
-                } => self.steps.push((*player, *respawn)),
+                } => {
+                    self.steps.push((*player, *respawn));
+                    if let Some(b) = self.battle.as_mut().filter(|b| b.scores.is_some())
+                        && let Some(side) = b.side_of(*player)
+                    {
+                        b.fell[side] = true;
+                    }
+                }
+                Event::BattleStarted { attacker, defender } => {
+                    self.battle = Some(BattleInfo::new(Some(*attacker), *defender));
+                }
+                Event::GuardStruck { target } => {
+                    self.battle = Some(BattleInfo::new(None, *target));
+                }
+                Event::Burned { player, faces, .. } => {
+                    if let Some(b) = self.battle.as_mut() {
+                        let side = b.side(*player);
+                        b.burned[side] = faces.clone();
+                    }
+                }
+                Event::BattleResolved {
+                    attacker_score,
+                    defender_score,
+                    ..
+                } => {
+                    if let Some(b) = self.battle.as_mut() {
+                        b.scores = Some((*attacker_score, *defender_score));
+                    }
+                }
+                Event::GuardResolved {
+                    guard_score,
+                    target_score,
+                    ..
+                } => {
+                    if let Some(b) = self.battle.as_mut() {
+                        b.scores = Some((*guard_score, *target_score));
+                    }
+                }
+                // Blows of the battle on screen: remember health before and after.
+                Event::Damaged { player, amount, hp } => {
+                    if let Some(b) = self.battle.as_mut().filter(|b| b.scores.is_some())
+                        && let Some(side) = b.side_of(*player)
+                    {
+                        let before = b.hp[side].map_or(hp + amount, |(before, _)| before);
+                        b.hp[side] = Some((before, *hp));
+                    }
+                }
+                Event::DiceThrown {
+                    fighter,
+                    seed,
+                    count,
+                    faces,
+                } => {
+                    let defender = self.battle.as_ref().map(|b| b.defender);
+                    let side = usize::from(
+                        matches!(fighter, Fighter::Champion(p) if Some(*p) == defender),
+                    );
+                    self.throws.push(ThrowView {
+                        side,
+                        seed: *seed,
+                        count: *count,
+                        faces: faces.clone(),
+                    });
+                    self.holding = true;
+                }
                 _ => {}
             }
             if let Some(line) = self.describe(event) {
-                self.feed.push(line);
+                if self.holding {
+                    self.held.push(line);
+                } else {
+                    self.feed.push(line);
+                }
             }
         }
+        if let Some(mut h) = hit {
+            if h.lines.is_empty() {
+                h.lines.push("без последствий".into());
+            }
+            self.incoming_result = Some(h);
+            self.incoming_serial += 1;
+        }
+        let excess = self.feed.len().saturating_sub(FEED_LINES);
+        self.feed.drain(..excess);
+    }
+
+    /// The battle panel closes: the fight is told in the feed.
+    pub fn end_battle_view(&mut self) {
+        self.battle = None;
+        self.release_feed();
+    }
+
+    /// The dice show is over: what happened can be told now.
+    pub fn release_feed(&mut self) {
+        self.holding = false;
+        let held = std::mem::take(&mut self.held);
+        self.feed.extend(held);
         let excess = self.feed.len().saturating_sub(FEED_LINES);
         self.feed.drain(..excess);
     }
@@ -221,6 +415,91 @@ impl Match {
                 format!("{} падает и просыпается дома.", self.name(*player))
             }
             Event::DeckReshuffled => "Колода перемешана.".into(),
+            Event::Claimed { player, hex, .. } => {
+                let what = match self.game.board().tile(*hex).map(|t| t.terrain) {
+                    Some(Terrain::Temple) => "храм",
+                    Some(Terrain::Table) => "Стол Ахамара",
+                    _ => "поселение",
+                };
+                format!("{} занимает {what}.", self.name(*player))
+            }
+            Event::StyleChanged {
+                player,
+                delta,
+                total,
+                reason,
+            } => format!(
+                "{}: {:+} Стиля за {} ({total}).",
+                self.name(*player),
+                delta,
+                names::style_reason(*reason)
+            ),
+            Event::ThreatChanged {
+                player,
+                delta,
+                total,
+            } => {
+                format!("{}: Угроза {:+} ({total}).", self.name(*player), delta)
+            }
+            Event::Crowned { player: Some(p) } => {
+                format!(
+                    "Венец у {}: желание за ним. (Желания — позже.)",
+                    self.name(*p)
+                )
+            }
+            Event::Crowned { player: None } => "Венец ни у кого: стол спорный.".into(),
+            Event::GuardSpawned { target, .. } => {
+                format!("Королевская гвардия выходит за {}!", self.name(*target))
+            }
+            Event::GuardLeft { .. } => "Гвардия уходит: на столе тихо.".into(),
+            Event::GuardStruck { target } => format!("Гвардия бьёт {}!", self.name(*target)),
+            Event::GuardResolved {
+                target,
+                guard_score: gs,
+                target_score: ts,
+            } => format!(
+                "Итог удара гвардии: ударов {}, щитов {}; {} — ударов {}, щитов {}.",
+                gs.hits,
+                gs.shields,
+                self.name(*target),
+                ts.hits,
+                ts.shields
+            ),
+            Event::StageChanged { god, stage } => format!(
+                "{} переходит в стадию «{}».",
+                names::god(*god),
+                names::stage(*god, *stage)
+            ),
+            Event::BattleStarted { attacker, defender } => {
+                format!(
+                    "{} нападает на {}!",
+                    self.name(*attacker),
+                    self.name(*defender)
+                )
+            }
+            Event::Burned { player, faces, .. } => format!(
+                "{} сжигает карты: {}.",
+                self.name(*player),
+                faces
+                    .iter()
+                    .map(|f| names::face(*f))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Event::BattleResolved {
+                attacker,
+                defender,
+                attacker_score: a,
+                defender_score: d,
+            } => format!(
+                "Итог боя: {} — ударов {}, щитов {}; {} — ударов {}, щитов {}.",
+                self.name(*attacker),
+                a.hits,
+                a.shields,
+                self.name(*defender),
+                d.hits,
+                d.shields
+            ),
             _ => return None,
         })
     }
@@ -246,6 +525,9 @@ pub fn window_name(m: &Match, kind: WindowKind) -> String {
             m.game.def(card).name,
             m.name(target)
         ),
+        WindowKind::Battle { attacker, defender } => {
+            format!("бой: {} против {}", m.name(attacker), m.name(defender))
+        }
         WindowKind::End { player } => format!("{} заканчивает ход", m.name(player)),
     }
 }
@@ -253,6 +535,18 @@ pub fn window_name(m: &Match, kind: WindowKind) -> String {
 /// Plays `card` for the human with the only sensible target, or starts
 /// aiming it. Called by the hand UI.
 pub fn pick_card(m: &mut Match, selection: &mut Selection, card: CardId) {
+    if let Some(max) = m.game.battle_dice(m.human)
+        && m.human_awaited()
+    {
+        if let Some(i) = selection.burn.iter().position(|&c| c == card) {
+            selection.burn.remove(i);
+        } else if selection.burn.len() < max as usize {
+            selection.burn.push(card);
+        } else {
+            m.feed.push(format!("Сжечь можно не больше {max} карт."));
+        }
+        return;
+    }
     if selection.card == Some(card) {
         selection.card = None;
         return;
@@ -293,7 +587,7 @@ fn reason(err: RuleError) -> String {
 fn click_board(
     mouse: Res<ButtonInput<MouseButton>>,
     window: Single<&Window, With<PrimaryWindow>>,
-    camera: Single<(&Camera, &GlobalTransform)>,
+    camera: Single<(&Camera, &GlobalTransform), With<crate::TableCamera>>,
     buttons: Query<&Interaction, With<Button>>,
     board: Res<Board>,
     mut game: ResMut<Match>,
@@ -310,17 +604,11 @@ fn click_board(
     if buttons.iter().any(|i| *i != Interaction::None) {
         return;
     }
-    let Some(cursor) = window.cursor_position() else {
-        return;
-    };
     let (camera, cam_transform) = *camera;
-    let Ok(ray) = camera.viewport_to_world(cam_transform, cursor) else {
+    let radius = game.game.board().radius();
+    let Some(hex) = board::cursor_hex(&window, camera, cam_transform, &board, radius) else {
         return;
     };
-    let Some(dist) = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)) else {
-        return;
-    };
-    let hex = board.world_to_hex(ray.get_point(dist));
 
     if let Some(card) = selection.card {
         let targets = game.game.targets(game.human, card);
@@ -337,6 +625,13 @@ fn click_board(
         return;
     }
 
+    if game.is_human_turn() && game.game.attackable().contains(&hex) {
+        let human = game.human;
+        if let Err(err) = game.act(human, Intent::Move { to: hex }) {
+            warn!("attack rejected: {err}");
+        }
+        return;
+    }
     if !game.is_human_turn() {
         return;
     }
@@ -366,14 +661,33 @@ fn keys(
         selection.card = None;
     }
     let human = game.human;
+    // Space with a card aimed at you: go on without waiting (a pass).
+    let aimed_at_me = matches!(
+        game.game.window().map(|w| w.kind),
+        Some(WindowKind::Target { target, .. }) if target == human
+    );
+    if keys.just_pressed(KeyCode::Space) && aimed_at_me && game.human_awaited() {
+        selection.card = None;
+        let _ = game.act(human, Intent::Pass);
+        return;
+    }
     if keys.any_just_pressed([KeyCode::Space, KeyCode::Enter])
         && game.is_human_turn()
         && let Err(err) = game.act(human, Intent::EndTurn)
     {
         warn!("end turn rejected: {err}");
     }
+    let in_battle = game.game.battle_dice(human).is_some() && game.human_awaited();
+    if in_battle && keys.just_pressed(KeyCode::Enter) {
+        let cards = std::mem::take(&mut selection.burn);
+        if let Err(err) = game.act(human, Intent::Burn { cards }) {
+            game.feed.push(format!("Нельзя: {}.", reason(err)));
+        }
+        return;
+    }
     if keys.just_pressed(KeyCode::KeyP) && game.game.window().is_some() && game.human_awaited() {
         selection.card = None;
+        selection.burn.clear();
         if let Err(err) = game.act(human, Intent::Pass) {
             warn!("pass rejected: {err}");
         }
@@ -382,8 +696,49 @@ fn keys(
 
 /// With nothing to answer, the human passes at once. The rules still see an
 /// ordinary pass; on a server the window timer hides who had cards (§11.3).
-fn auto_pass(mut game: ResMut<Match>) {
-    if game.game.window().is_none() || !game.human_awaited() {
+/// A card aimed at the human stays on screen this long even when they have no
+/// answer, so they can read what hits them.
+const READ_INCOMING_SECS: f32 = 3.0;
+
+/// Seconds left before an unanswerable card aimed at the human resolves by
+/// itself; `None` when no such countdown runs.
+#[derive(Resource, Default, PartialEq)]
+pub struct IncomingCountdown(pub Option<f32>);
+
+fn auto_pass(
+    time: Res<Time>,
+    mut seen: Local<Option<(WindowKind, f32)>>,
+    mut countdown: ResMut<IncomingCountdown>,
+    mut game: ResMut<Match>,
+) {
+    let Some(kind) = game.game.window().map(|w| w.kind) else {
+        *seen = None;
+        countdown.set_if_neq(IncomingCountdown(None));
+        return;
+    };
+    if !game.human_awaited() {
+        countdown.set_if_neq(IncomingCountdown(None));
+        return;
+    }
+    let now = time.elapsed_secs();
+    let opened = match *seen {
+        Some((k, at)) if k == kind => at,
+        _ => {
+            *seen = Some((kind, now));
+            now
+        }
+    };
+    let aimed_at_me = matches!(kind, WindowKind::Target { target, .. } if target == game.human);
+    let nothing_to_answer = game.game.playable(game.human).is_empty();
+    if aimed_at_me && now - opened < READ_INCOMING_SECS {
+        let left = nothing_to_answer.then(|| (READ_INCOMING_SECS - (now - opened)).ceil());
+        countdown.set_if_neq(IncomingCountdown(left));
+        return;
+    }
+    countdown.set_if_neq(IncomingCountdown(None));
+    // A battle waits for the human: burning cards is a choice even with no
+    // card playable. Only an empty hand has nothing to decide.
+    if game.game.battle_dice(game.human).is_some() && !game.game.hand(game.human).is_empty() {
         return;
     }
     if game.game.playable(game.human).is_empty() {
@@ -394,6 +749,9 @@ fn auto_pass(mut game: ResMut<Match>) {
 
 /// Forget an aimed card that can no longer be played.
 fn drop_stale_selection(game: Res<Match>, mut selection: ResMut<Selection>) {
+    if !selection.burn.is_empty() && game.game.battle_dice(game.human).is_none() {
+        selection.burn.clear();
+    }
     if let Some(card) = selection.card
         && game.game.can_play_now(game.human, card).is_err()
     {
@@ -408,9 +766,10 @@ fn run_bots(
     time: Res<Time>,
     mut clock: ResMut<BotClock>,
     mut game: ResMut<Match>,
+    dice: Res<DiceShow>,
     tokens: Query<&Token>,
 ) {
-    if tokens.iter().any(Token::is_walking) {
+    if tokens.iter().any(Token::is_walking) || dice.busy() {
         return;
     }
     let human = game.human;
@@ -427,7 +786,7 @@ fn run_bots(
         return;
     }
     let intent = bot::choose(&game.game, player);
-    if let Err(err) = game.act(player, intent) {
+    if let Err(err) = game.act(player, intent.clone()) {
         // A bot that cannot act must not stall the table.
         warn!("bot {player:?} {intent:?} rejected: {err}");
         let fallback = if game.game.window().is_some() {
@@ -436,5 +795,28 @@ fn run_bots(
             Intent::EndTurn
         };
         let _ = game.act(player, fallback);
+    }
+}
+
+impl Match {
+    /// What an event did to the human, while a card aimed at them resolves.
+    fn outcome_line(&self, event: &Event, hit: &Option<IncomingResult>) -> Option<String> {
+        let hit = hit.as_ref()?;
+        let me = self.human;
+        Some(match event {
+            Event::Damaged { player, amount, .. } if *player == me => format!("−{amount} здоровья"),
+            Event::Healed { player, amount, .. } if *player == me => format!("+{amount} здоровья"),
+            Event::Blocked { player, .. } if *player == me => "оберег удержал удар".into(),
+            Event::WardBroken { player, .. } if *player == me => "оберег сломан".into(),
+            Event::WardRaised { player, .. } if *player == me => "на тебе оберег".into(),
+            Event::Rooted { player } if *player == me => "ты скован".into(),
+            Event::Canceled { card, .. } if *card == hit.card => "карта погашена".into(),
+            Event::CancelFailed { card, .. } if *card == hit.card => "погасить не вышло".into(),
+            Event::Fizzled { card } if *card == hit.card => "карта ушла впустую".into(),
+            Event::ChampionFell { player, .. } if *player == me => {
+                "ты пал и просыпаешься дома".into()
+            }
+            _ => return None,
+        })
     }
 }

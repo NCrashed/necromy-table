@@ -1,5 +1,6 @@
 use super::*;
 use crate::cards::POOL;
+use necromy_dice::Face;
 
 fn five() -> Setup {
     Setup {
@@ -61,6 +62,9 @@ fn duel(distance: i32) -> (Game, PlayerId, PlayerId) {
     }
     g.place(me, Hex::new(0, 0));
     g.place(foe, Hex::new(distance, 0));
+    // Mid stages: cards work exactly as printed (§5).
+    g.pantheon.stages = [1; 5];
+    g.pantheon.pressure = [0; 5];
     // Plain ground on the line between them, so steps cost 1.
     for hex in [1, 2, 3, 4]
         .map(|q| Hex::new(q, 0))
@@ -88,7 +92,7 @@ fn replay_from_intents_matches() {
     for _ in 0..400 {
         let p = a.awaiting()[0];
         let intent = crate::bot::choose(&a, p);
-        intents.push((p, intent));
+        intents.push((p, intent.clone()));
         a.apply(p, intent).unwrap();
     }
     let (mut b, _) = Game::new(five());
@@ -533,7 +537,7 @@ fn bots_never_stall_or_break_rules() {
         for _ in 0..1500 {
             let p = g.awaiting()[0];
             let intent = crate::bot::choose(&g, p);
-            g.apply(p, intent)
+            g.apply(p, intent.clone())
                 .unwrap_or_else(|e| panic!("seed {seed}: bot {p:?} {intent:?}: {e}"));
         }
         assert!(
@@ -548,4 +552,710 @@ fn bots_never_stall_or_break_rules() {
             .count();
         assert!(played > 10, "seed {seed}: bots played only {played} cards");
     }
+}
+
+// ---- Battles (§12) ----
+
+fn start_battle(g: &mut Game, me: PlayerId, foe: PlayerId) -> Vec<Event> {
+    let at = g.champion(foe).unwrap().hex;
+    g.apply(me, Intent::Move { to: at }).unwrap()
+}
+
+#[test]
+fn stepping_onto_a_rival_opens_a_battle() {
+    let (mut g, me, foe) = duel(1);
+    assert_eq!(g.attackable(), vec![Hex::new(1, 0)]);
+    let events = start_battle(&mut g, me, foe);
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::WindowOpened { kind: WindowKind::Battle { .. }, eligible } if eligible == &vec![me, foe]
+    )));
+    // Nobody moved: the attacker stays on their own hex.
+    assert_eq!(g.champion(me).unwrap().hex, Hex::ZERO);
+    let spark = g.give(foe, "Искра");
+    assert_eq!(
+        g.apply(
+            foe,
+            Intent::Play {
+                card: spark,
+                target: Target::Champion(me)
+            }
+        ),
+        Err(RuleError::WrongTiming)
+    );
+    let third = g.players().find(|&p| p != me && p != foe).unwrap();
+    assert_eq!(g.apply(third, Intent::Pass), Err(RuleError::NotYourTurn));
+}
+
+#[test]
+fn burns_are_checked() {
+    let (mut g, me, foe) = duel(1);
+    let might = g.champion(me).unwrap().might;
+    let cards: Vec<CardId> = (0..=might).map(|_| g.give(me, "Искра")).collect();
+    start_battle(&mut g, me, foe);
+    assert_eq!(
+        g.apply(
+            me,
+            Intent::Burn {
+                cards: cards.clone()
+            }
+        ),
+        Err(RuleError::TooManyBurned { max: might })
+    );
+    assert_eq!(
+        g.apply(
+            me,
+            Intent::Burn {
+                cards: vec![cards[0], cards[0]]
+            }
+        ),
+        Err(RuleError::NotInHand)
+    );
+    assert_eq!(
+        g.apply(
+            me,
+            Intent::Burn {
+                cards: vec![CardId(9999)]
+            }
+        ),
+        Err(RuleError::NotInHand)
+    );
+    g.apply(
+        me,
+        Intent::Burn {
+            cards: vec![cards[0]],
+        },
+    )
+    .unwrap();
+    assert!(!g.hand(me).contains(&cards[0]));
+}
+
+#[test]
+fn battle_damage_follows_the_faces_both_ways() {
+    for seed in 0..40 {
+        let (mut g, _) = Game::new(Setup {
+            seed,
+            champions: God::ALL.to_vec(),
+        });
+        let me = g.current_player();
+        let foe = g.order()[1];
+        g.place(me, Hex::ZERO);
+        g.place(foe, Hex::new(1, 0));
+        g.champ_mut(me).body = 20;
+        g.champ_mut(me).hp = 20;
+        g.champ_mut(foe).body = 20;
+        g.champ_mut(foe).hp = 20;
+        start_battle(&mut g, me, foe);
+        g.apply(me, Intent::Burn { cards: vec![] }).unwrap();
+        let events = g.apply(foe, Intent::Burn { cards: vec![] }).unwrap();
+
+        let (a, d) = events
+            .iter()
+            .find_map(|e| match e {
+                Event::BattleResolved {
+                    attacker_score,
+                    defender_score,
+                    ..
+                } => Some((*attacker_score, *defender_score)),
+                _ => None,
+            })
+            .expect("battle resolved");
+        assert_eq!(
+            g.champion(foe).unwrap().hp,
+            20 - a.hits.saturating_sub(d.shields)
+        );
+        assert_eq!(
+            g.champion(me).unwrap().hp,
+            20 - d.hits.saturating_sub(a.shields)
+        );
+        assert_eq!(g.move_points(), 0, "a battle ends the movement");
+
+        // Every throw replays to the same faces on a client (§12.2), and each
+        // explosion throws exactly as many dice as Element faces came up.
+        let throws: Vec<(Fighter, u64, u8, Vec<Face>)> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::DiceThrown {
+                    fighter,
+                    seed,
+                    count,
+                    faces,
+                } => Some((*fighter, *seed, *count, faces.clone())),
+                _ => None,
+            })
+            .collect();
+        for (fighter, s, count, faces) in &throws {
+            assert_eq!(&necromy_dice::throw(*s, *count).faces, faces);
+            assert!(*fighter == Fighter::Champion(me) || *fighter == Fighter::Champion(foe));
+        }
+        for pair in throws.windows(2) {
+            let ((p1, _, _, f1), (p2, _, c2, _)) = (&pair[0], &pair[1]);
+            if p1 == p2 {
+                let elements = f1.iter().filter(|&&f| f == Face::Element).count();
+                assert_eq!(*c2 as usize, elements, "seed {seed}");
+            }
+        }
+    }
+}
+
+#[test]
+fn burned_cards_give_their_faces() {
+    let (mut g, me, foe) = duel(1);
+    // Strip the dice: every face comes from burned cards.
+    g.champ_mut(me).might = 2;
+    let tricks = vec![g.give(me, "Искра"), g.give(me, "Бинт")];
+    start_battle(&mut g, me, foe);
+    g.apply(
+        me,
+        Intent::Burn {
+            cards: tricks.clone(),
+        },
+    )
+    .unwrap();
+    let events = g.apply(foe, Intent::Burn { cards: vec![] }).unwrap();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::Burned { player, faces, .. } if *player == me && faces == &vec![Face::Strike, Face::Strike]
+    )));
+    assert!(
+        !events.iter().any(
+            |e| matches!(e, Event::DiceThrown { fighter, .. } if *fighter == Fighter::Champion(me))
+        ),
+        "all of the attacker's dice were replaced"
+    );
+    let a = events
+        .iter()
+        .find_map(|e| match e {
+            Event::BattleResolved { attacker_score, .. } => Some(*attacker_score),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(a.hits, 2);
+}
+
+#[test]
+fn defending_on_a_mountain_adds_a_die() {
+    let (mut g, me, foe) = duel(1);
+    let might = g.champion(foe).unwrap().might;
+    g.board.tile_mut(Hex::new(1, 0)).unwrap().terrain = Terrain::Mountain;
+    g.move_points = MOVE_POINTS;
+    start_battle(&mut g, me, foe);
+    assert_eq!(g.battle_dice(foe), Some(might + 1));
+    assert_eq!(g.battle_dice(me), Some(g.champion(me).unwrap().might));
+}
+
+#[test]
+fn bots_fight() {
+    let battles: usize = (0..30)
+        .map(|seed| {
+            let (mut g, _) = Game::new(Setup {
+                seed,
+                champions: God::ALL.to_vec(),
+            });
+            for _ in 0..1500 {
+                let p = g.awaiting()[0];
+                let intent = crate::bot::choose(&g, p);
+                g.apply(p, intent).unwrap();
+            }
+            g.log()
+                .iter()
+                .filter(|e| matches!(e, Event::BattleResolved { .. }))
+                .count()
+        })
+        .sum();
+    assert!(battles > 0, "bots never fought in 30 matches");
+}
+
+// ---- Gods as world state (§5) ----
+
+/// Ends turns until the next dusk has passed.
+fn to_next_dusk(g: &mut Game) {
+    let dusks = |g: &Game| {
+        g.log()
+            .iter()
+            .filter(|e| matches!(e, Event::Dusk { .. }))
+            .count()
+    };
+    let before = dusks(g);
+    while dusks(g) == before {
+        g.end_turn_and_settle();
+    }
+}
+
+#[test]
+fn gods_start_light_or_mid() {
+    for seed in 0..50 {
+        let (g, _) = Game::new(Setup {
+            seed,
+            champions: God::ALL.to_vec(),
+        });
+        assert!(God::ALL.iter().all(|&god| g.stage(god) < 2), "seed {seed}");
+    }
+}
+
+#[test]
+fn offerings_feed_one_god_and_relieve_the_one_it_quenches() {
+    let (mut g, me, _) = duel(3);
+    let mut events = Vec::new();
+    // Water quenches fire: serving Maya cools Trishna.
+    g.offer(Some(me), God::Maya, 2, &mut events);
+    assert_eq!(g.pressure(God::Maya), 2);
+    assert_eq!(g.pressure(God::Trishna), -2);
+    assert_eq!(g.favor(me, God::Maya), 2);
+    // The world's own offerings build pressure but no one's favour.
+    g.offer(None, God::Bhava, 1, &mut events);
+    assert!(g.players().all(|p| g.favor(p, God::Bhava) == 0));
+}
+
+#[test]
+fn left_alone_the_world_slides_towards_trishna() {
+    let (mut g, _, _) = duel(3);
+    g.pantheon.stages[God::Trishna.index()] = 0;
+    for _ in 0..STAGE_THRESHOLD {
+        to_next_dusk(&mut g);
+    }
+    assert_eq!(g.stage(God::Trishna), 1);
+    assert_eq!(
+        g.pressure(God::Trishna),
+        0,
+        "pressure starts over after a shift"
+    );
+}
+
+#[test]
+fn stages_move_both_ways_and_stay_in_range() {
+    let (mut g, _, _) = duel(3);
+    let z = God::Zaga.index();
+    g.pantheon.stages[z] = 2;
+    g.pantheon.pressure[z] = 9;
+    to_next_dusk(&mut g);
+    assert_eq!(g.stage(God::Zaga), 2, "already darkest");
+    g.pantheon.pressure[z] = -STAGE_THRESHOLD;
+    to_next_dusk(&mut g);
+    assert_eq!(g.stage(God::Zaga), 1);
+}
+
+#[test]
+fn a_gods_stage_bends_its_cards() {
+    for (stage, expected) in [(0, 1), (1, 2), (2, 3)] {
+        let (mut g, me, foe) = duel(2);
+        g.champ_mut(foe).body = 9;
+        g.champ_mut(foe).hp = 9;
+        g.champ_mut(me).spirit_points = 3;
+        g.pantheon.stages[God::Trishna.index()] = stage;
+        let fire = g.give(me, "Пламя пира");
+        g.apply(
+            me,
+            Intent::Play {
+                card: fire,
+                target: Target::Champion(foe),
+            },
+        )
+        .unwrap();
+        g.pass_all();
+        assert_eq!(9 - g.champion(foe).unwrap().hp, expected, "stage {stage}");
+    }
+}
+
+#[test]
+fn played_cards_are_offerings_and_bodies_weigh_double() {
+    let (mut g, me, _) = duel(3);
+    let here = g.champion(me).unwrap().hex;
+    g.board.tile_mut(here).unwrap().corpse = Some(Corpse { age: 0 });
+    let legion = g.give(me, "Вписать в легион");
+    g.apply(
+        me,
+        Intent::Play {
+            card: legion,
+            target: Target::Hex(here),
+        },
+    )
+    .unwrap();
+    assert_eq!(g.favor(me, God::Ahamar), 2);
+    let short = g.give(me, "Короткий путь");
+    g.apply(
+        me,
+        Intent::Play {
+            card: short,
+            target: Target::Champion(me),
+        },
+    )
+    .unwrap();
+    let total: u16 = God::ALL.iter().map(|&god| g.favor(me, god)).sum();
+    assert_eq!(total, 2, "neutral cards feed no god");
+}
+
+#[test]
+fn ending_a_turn_on_a_temple_is_a_prayer() {
+    let (mut g, me, _) = duel(3);
+    let temple = g.board().temple_of(God::Maya);
+    g.place(me, temple);
+    g.apply(me, Intent::EndTurn).unwrap();
+    assert_eq!(g.favor(me, God::Maya), 1);
+}
+
+#[test]
+fn feast_reads_trishnas_stage() {
+    // Generosity: everyone near heals.
+    let (mut g, me, foe) = duel(1);
+    g.pantheon.stages[God::Trishna.index()] = 0;
+    g.champ_mut(me).hp = 1;
+    g.champ_mut(foe).hp = 1;
+    let feast = g.give(me, "Пир урожая");
+    g.apply(
+        me,
+        Intent::Play {
+            card: feast,
+            target: Target::Champion(me),
+        },
+    )
+    .unwrap();
+    assert!(g.champion(me).unwrap().hp > 1);
+    assert!(g.champion(foe).unwrap().hp > 1);
+
+    // Thirst: the host eats, the guest pays.
+    let (mut g, me, foe) = duel(1);
+    g.pantheon.stages[God::Trishna.index()] = 1;
+    g.champ_mut(me).hp = 1;
+    let foe_hp = g.champion(foe).unwrap().hp;
+    let feast = g.give(me, "Пир урожая");
+    g.apply(
+        me,
+        Intent::Play {
+            card: feast,
+            target: Target::Champion(me),
+        },
+    )
+    .unwrap();
+    assert_eq!(g.champion(me).unwrap().hp, 3);
+    assert_eq!(g.champion(foe).unwrap().hp, foe_hp - 1);
+
+    // Devouring: bodies near burn into spirit, the host is scorched.
+    let (mut g, me, _) = duel(3);
+    g.pantheon.stages[God::Trishna.index()] = 2;
+    g.champ_mut(me).spirit_points = 0;
+    g.champ_mut(me).spirit = 4;
+    for hex in [Hex::ZERO, Hex::new(0, 1)] {
+        g.board.tile_mut(hex).unwrap().corpse = Some(Corpse { age: 0 });
+    }
+    let hp = g.champion(me).unwrap().hp;
+    let feast = g.give(me, "Пир урожая");
+    g.champ_mut(me).spirit_points = 1;
+    g.apply(
+        me,
+        Intent::Play {
+            card: feast,
+            target: Target::Champion(me),
+        },
+    )
+    .unwrap();
+    assert_eq!(g.champion(me).unwrap().spirit_points, 2);
+    assert_eq!(g.champion(me).unwrap().hp, hp - 1);
+    assert!(
+        g.board()
+            .corpses()
+            .next()
+            .is_none_or(|(h, _)| h.unsigned_distance_to(Hex::ZERO) > 1)
+    );
+}
+
+#[test]
+fn favor_vector_points_at_the_patron_served() {
+    let (mut g, me, _) = duel(3);
+    let mut events = Vec::new();
+    assert_eq!(g.favor_vector(me), [0.0, 0.0]);
+    g.offer(Some(me), God::Bhava, 4, &mut events);
+    let [x, y] = g.favor_vector(me);
+    assert!((x - 1.0).abs() < 1e-5 && y.abs() < 1e-5);
+    for god in God::ALL {
+        g.favor[me.0 as usize][god.index()] = 3;
+    }
+    let [x, y] = g.favor_vector(me);
+    assert!(
+        x.abs() < 1e-5 && y.abs() < 1e-5,
+        "serving all equally is the centre"
+    );
+}
+
+#[test]
+fn stages_move_in_bot_games() {
+    let mut changes = 0;
+    let mut trishna_dark = 0;
+    for seed in 0..20 {
+        let (mut g, _) = Game::new(Setup {
+            seed,
+            champions: God::ALL.to_vec(),
+        });
+        for _ in 0..1500 {
+            let p = g.awaiting()[0];
+            let intent = crate::bot::choose(&g, p);
+            g.apply(p, intent).unwrap();
+        }
+        changes += g
+            .log()
+            .iter()
+            .filter(|e| matches!(e, Event::StageChanged { .. }))
+            .count();
+        trishna_dark += usize::from(g.stage(God::Trishna) == 2);
+    }
+    assert!(changes > 0);
+    // The default drift: most untended worlds end in Trishna's dark.
+    assert!(
+        trishna_dark >= 10,
+        "only {trishna_dark} of 20 ended in Devouring"
+    );
+}
+
+// ---- Style, the Crown and Threat (§6) ----
+
+fn to_next_dawn(g: &mut Game) {
+    let dawns = |g: &Game| {
+        g.log()
+            .iter()
+            .filter(|e| matches!(e, Event::Dawn { .. }))
+            .count()
+    };
+    let before = dawns(g);
+    while dawns(g) == before {
+        g.end_turn_and_settle();
+    }
+}
+
+#[test]
+fn entering_a_settlement_claims_it_and_it_pays_at_dawn() {
+    let (mut g, me, foe) = duel(3);
+    let spot = Hex::new(1, 0);
+    g.board.tile_mut(spot).unwrap().terrain = Terrain::Settlement;
+    let events = g.apply(me, Intent::Move { to: spot }).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::Claimed { player, from: None, .. } if *player == me))
+    );
+    assert_eq!(g.owner(spot), Some(me));
+    // Being placed on the Table claims nothing: only entering does.
+    g.pass_all();
+    let expected = u16::from(g.taste().settlement);
+    to_next_dawn(&mut g);
+    assert!(g.style(me) >= expected);
+    assert_eq!(g.style(foe), 0);
+}
+
+#[test]
+fn the_crown_goes_to_the_leader_and_ties_keep_it() {
+    let (mut g, me, foe) = duel(3);
+    let mut ev = Vec::new();
+    g.add_style(me, 3, StyleReason::Territory, &mut ev);
+    g.add_style(foe, 1, StyleReason::Territory, &mut ev);
+    g.dawn(&mut ev);
+    assert_eq!(g.dominant(), Some(me));
+    assert_eq!(g.threat(me), 1, "the Crown draws the guard's eye");
+
+    g.add_style(foe, 2, StyleReason::Territory, &mut ev);
+    g.dawn(&mut ev);
+    assert_eq!(g.dominant(), Some(me), "a tie keeps the Crown where it was");
+
+    let third = g.players().find(|&p| p != me && p != foe).unwrap();
+    g.add_style(third, 3, StyleReason::Territory, &mut ev);
+    g.add_style(me, -1, StyleReason::Oath, &mut ev);
+    g.dawn(&mut ev);
+    assert_eq!(
+        g.dominant(),
+        None,
+        "two new leaders, the table is contested"
+    );
+}
+
+#[test]
+fn nobody_is_crowned_with_no_style() {
+    let (g, _) = Game::new(five());
+    assert_eq!(g.dominant(), None);
+    assert!(
+        g.log()
+            .iter()
+            .any(|e| matches!(e, Event::Crowned { player: None }))
+    );
+}
+
+#[test]
+fn battle_winner_takes_style_double_from_the_dominant() {
+    for seed in 0..40 {
+        let (mut g, _) = Game::new(Setup {
+            seed,
+            champions: God::ALL.to_vec(),
+        });
+        let me = g.current_player();
+        let foe = g.order()[1];
+        g.place(me, Hex::ZERO);
+        g.place(foe, Hex::new(1, 0));
+        let mut ev = Vec::new();
+        g.add_style(foe, 5, StyleReason::Territory, &mut ev);
+        g.dominant = Some(foe);
+        start_battle(&mut g, me, foe);
+        g.apply(me, Intent::Burn { cards: vec![] }).unwrap();
+        let events = g.apply(foe, Intent::Burn { cards: vec![] }).unwrap();
+        let (a, d) = events
+            .iter()
+            .find_map(|e| match e {
+                Event::BattleResolved {
+                    attacker_score,
+                    defender_score,
+                    ..
+                } => Some((*attacker_score, *defender_score)),
+                _ => None,
+            })
+            .unwrap();
+        let (to_d, to_a) = (
+            a.hits.saturating_sub(d.shields),
+            d.hits.saturating_sub(a.shields),
+        );
+        let stake = i16::from(g.taste().battle) * 2;
+        match to_d.cmp(&to_a) {
+            std::cmp::Ordering::Greater => {
+                assert_eq!(g.style(me), stake as u16, "seed {seed}");
+                assert_eq!(g.style(foe), 5 - stake as u16, "seed {seed}");
+            }
+            std::cmp::Ordering::Less => {
+                assert_eq!(
+                    g.style(foe),
+                    5 + i16::from(g.taste().battle) as u16,
+                    "seed {seed}"
+                );
+            }
+            std::cmp::Ordering::Equal => assert_eq!(g.style(foe), 5, "seed {seed}"),
+        }
+        assert_eq!(g.threat(me), 1, "attacking is loud");
+    }
+}
+
+#[test]
+fn manner_pays_and_a_broken_oath_costs_at_dusk() {
+    let (mut g, me, _) = duel(3);
+    let character = g.character(me).unwrap();
+    let mut ev = Vec::new();
+    g.record_deed(me, character.manner);
+    g.judge_the_day(&mut ev);
+    assert_eq!(g.style(me), u16::from(g.taste().roleplay));
+    g.record_deed(me, character.oath);
+    g.judge_the_day(&mut ev);
+    assert_eq!(g.style(me), u16::from(g.taste().roleplay) - 1);
+    g.judge_the_day(&mut ev);
+    assert_eq!(
+        g.style(me),
+        u16::from(g.taste().roleplay) - 1,
+        "deeds reset each day"
+    );
+}
+
+#[test]
+fn zaga_quiets_and_the_dead_used_are_noticed() {
+    let (mut g, me, _) = duel(3);
+    let here = g.champion(me).unwrap().hex;
+    g.board.tile_mut(here).unwrap().corpse = Some(Corpse { age: 0 });
+    let fuel = g.give(me, "Сжечь как топливо");
+    g.apply(
+        me,
+        Intent::Play {
+            card: fuel,
+            target: Target::Hex(here),
+        },
+    )
+    .unwrap();
+    assert_eq!(g.threat(me), 1);
+    let hair = g.give(me, "Власяница");
+    g.apply(
+        me,
+        Intent::Play {
+            card: hair,
+            target: Target::Champion(me),
+        },
+    )
+    .unwrap();
+    assert_eq!(g.threat(me), 0);
+}
+
+#[test]
+fn the_guard_hunts_the_loudest_and_strikes() {
+    let (mut g, _, foe) = duel(4);
+    let mut ev = Vec::new();
+    g.add_threat(foe, GUARD_THRESHOLD as i8 + 1, &mut ev);
+    g.champ_mut(foe).body = 30;
+    g.champ_mut(foe).hp = 30;
+    // Put the foe far from the centre so the guard has to walk.
+    g.place(foe, Hex::new(5, -5));
+    let mut spawned = false;
+    let mut struck = false;
+    for _ in 0..12 {
+        g.end_turn_and_settle();
+        spawned |= g
+            .log()
+            .iter()
+            .any(|e| matches!(e, Event::GuardSpawned { .. }));
+        if g.log()
+            .iter()
+            .any(|e| matches!(e, Event::GuardStruck { target } if *target == foe))
+        {
+            struck = true;
+            break;
+        }
+    }
+    assert!(spawned && struck);
+    assert!(
+        g.threat(foe) < GUARD_THRESHOLD + 1,
+        "the strike quiets them down"
+    );
+    let guard_throw = g.log().iter().find_map(|e| match e {
+        Event::DiceThrown {
+            fighter: Fighter::Guard,
+            seed,
+            count,
+            faces,
+        } => Some((*seed, *count, faces.clone())),
+        _ => None,
+    });
+    let (seed, count, faces) = guard_throw.expect("the guard threw dice");
+    assert_eq!(count, crate::game::GUARD_DICE);
+    assert_eq!(necromy_dice::throw(seed, count).faces, faces);
+}
+
+#[test]
+fn nobody_walks_through_the_guard() {
+    let (mut g, me, _) = duel(4);
+    g.guard = Some(Guard {
+        hex: Hex::new(1, 0),
+        target: me,
+    });
+    assert_eq!(
+        g.apply(me, Intent::Move { to: Hex::new(1, 0) }),
+        Err(RuleError::Occupied)
+    );
+    assert!(!g.reachable().contains_key(&Hex::new(1, 0)));
+}
+
+#[test]
+fn crowns_and_guards_happen_in_bot_games() {
+    let (mut crowned, mut guards) = (0, 0);
+    for seed in 0..20 {
+        let (mut g, _) = Game::new(Setup {
+            seed,
+            champions: God::ALL.to_vec(),
+        });
+        for _ in 0..1500 {
+            let p = g.awaiting()[0];
+            let intent = crate::bot::choose(&g, p);
+            g.apply(p, intent).unwrap();
+        }
+        crowned += g
+            .log()
+            .iter()
+            .filter(|e| matches!(e, Event::Crowned { player: Some(_) }))
+            .count();
+        guards += g
+            .log()
+            .iter()
+            .filter(|e| matches!(e, Event::GuardStruck { .. }))
+            .count();
+    }
+    assert!(crowned > 0, "nobody ever wore the Crown");
+    assert!(guards > 0, "the guard never struck");
 }

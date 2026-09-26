@@ -1,0 +1,11 @@
+[package]
+name = "necromy-dice"
+version = "0.1.0"
+edition = "2024"
+description = "Deterministic physical dice throws for Necromy Table (docs/design.md §12.2)."
+
+[dependencies]
+# enhanced-determinism: strict IEEE 754 through libm, no SIMD or FMA drift, so
+# the server and every client land the same faces from the same throw.
+rapier3d = { version = "0.36", default-features = false, features = ["dim3", "f32", "std", "enhanced-determinism"] }
+serde = { version = "1", features = ["derive"] }

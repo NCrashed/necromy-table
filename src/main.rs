@@ -1,8 +1,13 @@
+mod battle_ui;
 mod board;
+mod dice;
 mod hud;
+mod icons;
 mod names;
 mod play;
+mod stats;
 mod token;
+mod turn_ui;
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
@@ -29,6 +34,10 @@ fn main() {
             board::BoardPlugin,
             token::TokenPlugin,
             hud::HudPlugin,
+            dice::DicePlugin,
+            stats::StatsPlugin,
+            battle_ui::BattleUiPlugin,
+            turn_ui::TurnUiPlugin,
         ))
         .add_plugins(AutoScreenshotPlugin)
         .add_systems(Startup, setup_scene)
@@ -38,6 +47,7 @@ fn main() {
 fn setup_scene(mut commands: Commands) {
     // Fixed tilted view over the board, like Armello's table camera.
     commands.spawn((
+        TableCamera,
         Camera3d::default(),
         Transform::from_xyz(0.0, 18.0, 15.5).looking_at(Vec3::new(0.0, 0.0, 2.6), Vec3::Y),
     ));
@@ -87,12 +97,27 @@ const SCREENSHOT_SAVE_SECS: f32 = 1.0;
 fn auto_screenshot(
     mut commands: Commands,
     time: Res<Time>,
+    dice: Res<dice::DiceShow>,
+    game: Res<play::Match>,
     mut shot: ResMut<AutoScreenshot>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let now = time.elapsed_secs();
+    // `NECROMY_SCREENSHOT_WHEN=dice` waits for the first settled throw,
+    // `=guard` for the royal guard on the board with no dice in the air.
+    let ready = match std::env::var("NECROMY_SCREENSHOT_WHEN").as_deref() {
+        Ok("dice") => dice.ever_settled,
+        Ok("guard") => game.game.guard().is_some() && !dice.busy(),
+        Ok("hit") => game.incoming_result.is_some(),
+        Ok("myturn") => game.is_human_turn(),
+        Ok("incoming") => matches!(
+            game.game.window().map(|w| w.kind),
+            Some(necromy_rules::WindowKind::Target { target, .. }) if target == game.human
+        ),
+        _ => now >= shot.after,
+    };
     match shot.taken_at {
-        None if now >= shot.after => {
+        None if ready => {
             commands
                 .spawn(Screenshot::primary_window())
                 .observe(save_to_disk(shot.path.clone()));
@@ -104,3 +129,8 @@ fn auto_screenshot(
         _ => {}
     }
 }
+
+/// The camera over the board. Other cameras (the dice trays) render into
+/// textures; anything that picks, hovers or faces "the camera" means this one.
+#[derive(Component)]
+pub struct TableCamera;

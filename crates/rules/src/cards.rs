@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use necromy_dice::Face;
+
 use crate::gods::Element;
 use crate::rng::Rng;
 
@@ -93,9 +95,26 @@ pub enum Effect {
     BodyRest,
     /// Corpse → a grove at once, and healing (Bhava).
     BodySeed,
+    /// Reads Trishna's stage (§5): Generosity feeds everyone near, Thirst
+    /// feeds the caster at the neighbours' cost, Devouring burns the bodies near.
+    Feast,
 }
 
 impl Effect {
+    /// Has a number the generation chain and the god's stage can bend.
+    pub const fn scales(self) -> bool {
+        !matches!(
+            self,
+            Effect::Ward
+                | Effect::Root
+                | Effect::Grow
+                | Effect::Blink
+                | Effect::Cancel
+                | Effect::BodyLegion
+                | Effect::Trap(TrapEffect::Root)
+        )
+    }
+
     /// Hurts its target, so a ward can stop it.
     pub const fn is_harmful(self) -> bool {
         matches!(
@@ -126,6 +145,21 @@ pub struct CardDef {
     pub cost: u8,
     pub target: TargetRule,
     pub effect: Effect,
+}
+
+impl CardDef {
+    /// The face a card gives when burned in battle (§12.1): tricks strike,
+    /// bodies shield, rites carry their element's side of the day. Earth,
+    /// on both sides, gives the Element face.
+    pub fn burn_face(&self) -> Face {
+        match (self.kind, self.element) {
+            (CardKind::Trick, _) => Face::Strike,
+            (CardKind::Body, _) | (CardKind::Rite, None) => Face::Shield,
+            (CardKind::Rite, Some(Element::Earth)) => Face::Element,
+            (CardKind::Rite, Some(e)) if e.is_yang() => Face::Sun,
+            (CardKind::Rite, Some(_)) => Face::Moon,
+        }
+    }
 }
 
 // One positional row per card keeps the pool readable as a table.
@@ -173,6 +207,7 @@ pub const POOL: &[CardDef] = &[
     card("Второе блюдо", "Возьми 2 карты.", Some(Fire), Trick, Own, 0, Caster, Draw(2)),
     card("Жар в крови", "+2 очка движения в этот ход.", Some(Fire), Rite, Own, 1, Caster, Haste(2)),
     card("Искра", "1 урона сопернику в 2 шагах.", Some(Fire), Trick, Instant, 0, Enemy { range: 2 }, Damage(1)),
+    card("Пир урожая", "Щедрость: все рядом +1 здоровья. Жажда: ты +2, соседи −1. Пожирание: тела рядом сгорают, +1 Духа за каждое, ты −1.", Some(Fire), Rite, Own, 1, Caster, Feast),
     // Earth — Zaga
     card("Тишь", "Ответ: карта против тебя гаснет, если её стихия не гасит землю.", Some(Earth), Rite, Response, 1, Pending, Cancel),
     card("Оковы", "Соперник в 2 шагах теряет ход.", Some(Earth), Rite, Own, 1, Enemy { range: 2 }, Root),

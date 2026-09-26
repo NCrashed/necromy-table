@@ -8,7 +8,8 @@
 use hexx::Hex;
 
 use crate::cards::{CardId, Effect};
-use crate::game::{Game, Intent, PlayerId, Target, WindowKind};
+use crate::game::{Game, Intent, PlayerId, Target, TimeOfDay, WindowKind};
+use necromy_dice::Face;
 
 pub fn choose(game: &Game, player: PlayerId) -> Intent {
     match game.window() {
@@ -38,6 +39,7 @@ fn respond(game: &Game, player: PlayerId, kind: WindowKind) -> Intent {
                 return intent;
             }
         }
+        WindowKind::Battle { .. } => return burn(game, player),
         WindowKind::End { .. } => {
             if let Some(intent) = mend(game, player, &cards) {
                 return intent;
@@ -92,7 +94,41 @@ fn own_turn(game: &Game, player: PlayerId) -> Intent {
             _ => {}
         }
     }
+    if let Some(intent) = attack(game, player) {
+        return intent;
+    }
     walk(game, player)
+}
+
+/// Burn one card whose face would count right now, keeping two in hand.
+fn burn(game: &Game, player: PlayerId) -> Intent {
+    let day = game.time() == TimeOfDay::Day;
+    let hand = game.hand(player);
+    let max = game.battle_dice(player).unwrap_or(0) as usize;
+    let cards: Vec<CardId> = if hand.len() >= 3 && max > 0 {
+        hand.iter()
+            .copied()
+            .find(|&c| match game.def(c).burn_face() {
+                Face::Strike | Face::Shield | Face::Element => true,
+                Face::Sun => day,
+                Face::Moon => !day,
+                Face::Blank => false,
+            })
+            .into_iter()
+            .collect()
+    } else {
+        Vec::new()
+    };
+    Intent::Burn { cards }
+}
+
+/// Attack a neighbour we are at least as healthy and strong as.
+fn attack(game: &Game, player: PlayerId) -> Option<Intent> {
+    let me = game.champion(player)?;
+    game.attackable().into_iter().find_map(|hex| {
+        let foe = game.champion(game.occupant(hex)?)?;
+        (me.hp >= foe.hp && me.might >= foe.might).then_some(Intent::Move { to: hex })
+    })
 }
 
 /// A damaging or rooting card at the weakest rival in reach (or `only`).

@@ -1,0 +1,434 @@
+//! Where the match stands and what the human should do now.
+//!
+//! Top left, information only: day or night and the round, the turn order as
+//! portraits, the table's taste (its explanation on hover). Centre, what
+//! needs the human: a "your turn" splash when their turn begins, and an
+//! action bar above the hand with the one thing to do, a hint apart from it,
+//! and the button for it. The battle panel and the incoming card take the
+//! centre when they are up; the action bar steps aside for them.
+
+use bevy::prelude::*;
+use necromy_rules::{Intent, TimeOfDay, WindowKind};
+
+use crate::hud::{INK, PANEL, UiFont};
+use crate::icons::StatIcon;
+use crate::names;
+use crate::play::{self, Match, Selection};
+use crate::stats::{self, StatArt};
+
+const GOLD: Color = Color::srgb(1.0, 0.82, 0.3);
+const HINT: Color = Color::srgb(0.72, 0.70, 0.64);
+/// How long the "your turn" splash stays, fading out.
+const SPLASH_SECS: f32 = 1.6;
+
+pub struct TurnUiPlugin;
+
+impl Plugin for TurnUiPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, spawn)
+            .add_systems(
+                Update,
+                (rebuild_status, rebuild_action)
+                    .run_if(resource_changed::<Match>.or_else(resource_changed::<Selection>)),
+            )
+            .add_systems(Update, (taste_tip, action_buttons, splash));
+    }
+}
+
+#[derive(Component)]
+struct Status;
+
+#[derive(Component)]
+struct TasteChip;
+
+#[derive(Component)]
+struct TasteTip;
+
+#[derive(Component)]
+struct ActionBar;
+
+#[derive(Component)]
+struct Splash;
+
+#[derive(Component, Clone, Copy)]
+enum ActionButton {
+    EndTurn,
+    Pass,
+}
+
+fn spawn(mut commands: Commands, font: Res<UiFont>) {
+    commands.spawn((
+        Status,
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(10.0),
+            left: px(10.0),
+            ..default()
+        },
+    ));
+    commands.spawn((
+        TasteTip,
+        Text::new(""),
+        font.text(12.0),
+        TextColor(INK),
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(92.0),
+            left: px(10.0),
+            max_width: px(320.0),
+            padding: UiRect::all(px(6.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.05, 0.04, 0.07, 0.95)),
+        GlobalZIndex(10),
+        Visibility::Hidden,
+    ));
+    commands.spawn((
+        ActionBar,
+        // Top centre: between the status and the gods, clear of the board.
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(8.0),
+            left: px(0.0),
+            right: px(0.0),
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        Visibility::Hidden,
+    ));
+    commands.spawn((
+        Splash,
+        Text::new("Твой ход"),
+        font.bold(44.0),
+        TextColor(GOLD.with_alpha(0.0)),
+        TextShadow::default(),
+        // Hidden outright between splashes: the shadow has its own colour and
+        // would stay on screen if only the text faded.
+        Visibility::Hidden,
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Percent(36.0),
+            left: px(0.0),
+            right: px(0.0),
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        TextLayout::justify(Justify::Center),
+        GlobalZIndex(8),
+    ));
+}
+
+/// Day or night with the round, the turn order, the taste chip.
+fn rebuild_status(
+    mut commands: Commands,
+    game: Res<Match>,
+    art: Res<StatArt>,
+    font: Res<UiFont>,
+    status: Single<Entity, With<Status>>,
+) {
+    commands.entity(*status).despawn_related::<Children>();
+    let g = &game.game;
+    let panel = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(px(8.0)),
+                row_gap: px(6.0),
+                ..default()
+            },
+            BackgroundColor(PANEL),
+        ))
+        .id();
+
+    // Day or night, round, taste.
+    let top = stats::row(&mut commands);
+    let time_icon = match g.time() {
+        TimeOfDay::Day => StatIcon::Day,
+        TimeOfDay::Night => StatIcon::Night,
+    };
+    let sun = stats::icon_node(&mut commands, art.icon(time_icon), 28.0, true);
+    let round = stats::label(
+        &mut commands,
+        &font,
+        &format!("Раунд {} · {}", g.round(), play::time_name(g.time())),
+        16.0,
+        true,
+    );
+    let (taste, _) = names::taste_parts(g.taste().kind);
+    let chip = commands
+        .spawn((
+            TasteChip,
+            Button,
+            Node {
+                align_items: AlignItems::Center,
+                column_gap: px(4.0),
+                padding: UiRect::axes(px(6.0), px(2.0)),
+                margin: UiRect::left(px(10.0)),
+                border: UiRect::all(px(1.0)),
+                ..default()
+            },
+            BorderColor::all(GOLD.with_alpha(0.5)),
+        ))
+        .id();
+    let goblet = stats::icon_node(&mut commands, art.icon(StatIcon::Taste), 20.0, true);
+    let taste_label = stats::label(&mut commands, &font, &format!("вкус: {taste}"), 13.0, false);
+    commands.entity(chip).add_children(&[goblet, taste_label]);
+    commands.entity(top).add_children(&[sun, round, chip]);
+
+    // Turn order: portraits left to right, the one we wait on framed in gold.
+    let order = stats::row(&mut commands);
+    let awaited = g.awaiting();
+    for (i, &p) in g.order().iter().enumerate() {
+        if i > 0 {
+            let arrow = stats::label(&mut commands, &font, "›", 16.0, true);
+            commands.entity(order).add_child(arrow);
+        }
+        let current = p == g.current_player();
+        let seat = commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::all(px(2.0)),
+                    border: UiRect::all(px(2.0)),
+                    ..default()
+                },
+                BorderColor::all(if awaited.contains(&p) {
+                    GOLD
+                } else if current {
+                    GOLD.with_alpha(0.45)
+                } else {
+                    Color::NONE
+                }),
+            ))
+            .id();
+        let portrait = commands
+            .spawn((
+                ImageNode::new(art.portraits[p.0 as usize].clone()),
+                Node {
+                    width: px(24.0),
+                    height: px(36.0),
+                    ..default()
+                },
+            ))
+            .id();
+        let name = g.champion(p).map_or("?", |c| names::god(c.god));
+        let tag = if p == game.human { "ты" } else { name };
+        let tag = stats::label(&mut commands, &font, tag, 10.0, p == game.human);
+        commands.entity(seat).add_children(&[portrait, tag]);
+        commands.entity(order).add_child(seat);
+    }
+
+    commands.entity(panel).add_children(&[top, order]);
+    commands.entity(*status).add_child(panel);
+}
+
+fn taste_tip(
+    game: Res<Match>,
+    chip: Query<&Interaction, With<TasteChip>>,
+    tip: Single<(&mut Text, &mut Visibility), With<TasteTip>>,
+) {
+    let (mut text, mut visibility) = tip.into_inner();
+    let hovered = chip.iter().any(|i| *i != Interaction::None);
+    if !hovered {
+        visibility.set_if_neq(Visibility::Hidden);
+        return;
+    }
+    let (name, explain) = names::taste_parts(game.game.taste().kind);
+    let wanted = format!(
+        "Вкус стола «{name}»: {explain}.\nОн задаёт, за что на этот матч дают Стиль, а Стиль решает, кто носит Венец."
+    );
+    if text.0 != wanted {
+        text.0 = wanted;
+    }
+    visibility.set_if_neq(Visibility::Inherited);
+}
+
+/// The one thing the human should do now, a hint apart, and its button.
+fn rebuild_action(
+    mut commands: Commands,
+    game: Res<Match>,
+    selection: Res<Selection>,
+    art: Res<StatArt>,
+    font: Res<UiFont>,
+    bar: Single<(Entity, &mut Visibility), With<ActionBar>>,
+) {
+    let (bar, mut visibility) = bar.into_inner();
+    commands.entity(bar).despawn_related::<Children>();
+    let g = &game.game;
+    let human = game.human;
+    let kind = g.window().map(|w| w.kind);
+
+    let (title, hint, button, moves) = if let Some(card) = selection.card {
+        (
+            format!("Цель для «{}»", g.def(card).name),
+            "клик по золотой клетке · правый клик или Esc — отмена",
+            None,
+            false,
+        )
+    } else {
+        match kind {
+            // The battle panel and the incoming card have the centre.
+            Some(WindowKind::Battle { .. }) => (String::new(), "", None, false),
+            Some(WindowKind::Target { target, .. }) if target == human => {
+                (String::new(), "", None, false)
+            }
+            Some(k) if game.human_awaited() && !g.playable(human).is_empty() => {
+                let what = if matches!(k, WindowKind::Target { .. }) {
+                    "сыграй карту «ответ» из руки или пропусти"
+                } else {
+                    "сыграй «мгновенную» карту из руки или пропусти"
+                };
+                (
+                    format!("Можно ответить: {}", play::window_name(&game, k)),
+                    what,
+                    Some((ActionButton::Pass, "Пас\n(P)")),
+                    false,
+                )
+            }
+            None if game.is_human_turn() => (
+                "Твой ход".to_string(),
+                "светлая клетка — идти, красная — напасть, карта из руки — сыграть",
+                Some((ActionButton::EndTurn, "Конец хода\n(пробел)")),
+                true,
+            ),
+            _ => (String::new(), "", None, false),
+        }
+    };
+    if title.is_empty() {
+        visibility.set_if_neq(Visibility::Hidden);
+        return;
+    }
+    visibility.set_if_neq(Visibility::Inherited);
+
+    let panel = commands
+        .spawn((
+            Node {
+                align_items: AlignItems::Center,
+                column_gap: px(14.0),
+                padding: UiRect::axes(px(12.0), px(6.0)),
+                border: UiRect::all(px(2.0)),
+                ..default()
+            },
+            BorderColor::all(GOLD),
+            BackgroundColor(PANEL.with_alpha(0.97)),
+            GlobalZIndex(6),
+        ))
+        .id();
+    let texts = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: px(2.0),
+            ..default()
+        })
+        .id();
+    let main = stats::row(&mut commands);
+    let title = stats::label(&mut commands, &font, &title, 18.0, true);
+    commands.entity(main).add_child(title);
+    if moves {
+        let boot = stats::icon_node(&mut commands, art.icon(StatIcon::Moves), 24.0, true);
+        let mp = stats::label(
+            &mut commands,
+            &font,
+            &format!("{} очк. движения", g.move_points()),
+            15.0,
+            true,
+        );
+        commands.entity(main).add_children(&[boot, mp]);
+    }
+    let hint = commands
+        .spawn((
+            Text::new(hint),
+            font.text(12.0),
+            TextColor(HINT),
+            // A fixed width lets the hint wrap without inflating the bar.
+            Node {
+                width: px(250.0),
+                ..default()
+            },
+        ))
+        .id();
+    commands.entity(texts).add_children(&[main, hint]);
+    commands.entity(panel).add_child(texts);
+
+    if let Some((action, label)) = button {
+        let b = commands
+            .spawn((
+                action,
+                Button,
+                Node {
+                    padding: UiRect::axes(px(10.0), px(5.0)),
+                    border: UiRect::all(px(2.0)),
+                    ..default()
+                },
+                BorderColor::all(GOLD),
+                BackgroundColor(Color::srgba(0.2, 0.15, 0.1, 0.9)),
+            ))
+            .id();
+        // Two short lines: the action, then its key.
+        let t = commands
+            .spawn((
+                Text::new(label),
+                font.bold(13.0),
+                TextColor(INK),
+                TextLayout::new(Justify::Center, LineBreak::NoWrap),
+            ))
+            .id();
+        commands.entity(b).add_child(t);
+        commands.entity(panel).add_child(b);
+    }
+    commands.entity(bar).add_child(panel);
+}
+
+fn action_buttons(
+    pressed: Query<(&Interaction, &ActionButton), Changed<Interaction>>,
+    mut game: ResMut<Match>,
+    mut selection: ResMut<Selection>,
+) {
+    for (interaction, button) in &pressed {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        let human = game.human;
+        let intent = match button {
+            ActionButton::EndTurn => Intent::EndTurn,
+            ActionButton::Pass => {
+                selection.card = None;
+                Intent::Pass
+            }
+        };
+        if let Err(err) = game.act(human, intent) {
+            warn!("action rejected: {err}");
+        }
+    }
+}
+
+/// "Твой ход" in the middle of the screen when the human's turn begins.
+fn splash(
+    time: Res<Time>,
+    game: Res<Match>,
+    mut state: Local<(bool, Option<f32>)>,
+    splash: Single<(&mut TextColor, &mut TextShadow, &mut Visibility), With<Splash>>,
+) {
+    let now = time.elapsed_secs();
+    let mine = game.is_human_turn();
+    let (was_mine, started) = &mut *state;
+    if mine && !*was_mine {
+        *started = Some(now);
+    }
+    *was_mine = mine;
+    let alpha = started.map_or(0.0, |s| {
+        let t = (now - s) / SPLASH_SECS;
+        if t >= 1.0 { 0.0 } else { 1.0 - t * t }
+    });
+    let (mut color, mut shadow, mut visibility) = splash.into_inner();
+    if alpha <= 0.0 {
+        visibility.set_if_neq(Visibility::Hidden);
+        return;
+    }
+    visibility.set_if_neq(Visibility::Inherited);
+    if color.0.alpha() != alpha {
+        color.0 = GOLD.with_alpha(alpha);
+        shadow.color = Color::linear_rgba(0.0, 0.0, 0.0, 0.75 * alpha);
+    }
+}

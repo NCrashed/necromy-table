@@ -13,8 +13,12 @@ use std::collections::{BTreeMap, BinaryHeap, HashMap};
 use hexx::Hex;
 use serde::{Deserialize, Serialize};
 
+use necromy_dice::Face;
+
 use crate::board::{Board, Corpse, GROVE_AGE, Terrain};
-use crate::cards::{self, CardDef, CardId, DefId, Effect, TargetRule, Timing, TrapEffect};
+use crate::cards::{
+    self, CardDef, CardId, CardKind, DefId, Effect, TargetRule, Timing, TrapEffect,
+};
 use crate::gods::{Element, God};
 use crate::rng::Rng;
 
@@ -93,10 +97,10 @@ pub enum Target {
     Hex(Hex),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Intent {
     /// Step onto an adjacent hex. One step per intent: every step may open
-    /// an Enter window.
+    /// an Enter window. Stepping onto a rival attacks them (§12.1).
     Move {
         to: Hex,
     },
@@ -105,6 +109,10 @@ pub enum Intent {
     Play {
         card: CardId,
         target: Target,
+    },
+    /// In a Battle window: cards to burn for guaranteed faces. May be empty.
+    Burn {
+        cards: Vec<CardId>,
     },
     /// In a window: play nothing.
     Pass,
@@ -120,8 +128,20 @@ pub enum WindowKind {
         target: PlayerId,
         card: CardId,
     },
+    /// Before the dice: both sides pick cards to burn (§12.1).
+    Battle {
+        attacker: PlayerId,
+        defender: PlayerId,
+    },
     /// `player` finished their turn.
     End { player: PlayerId },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Choice {
+    Pass,
+    Play(CardId, Target),
+    Burn(Vec<CardId>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -129,7 +149,7 @@ pub struct Window {
     pub kind: WindowKind,
     /// In resolution order.
     pub eligible: Vec<PlayerId>,
-    choices: BTreeMap<PlayerId, Option<(CardId, Target)>>,
+    choices: BTreeMap<PlayerId, Choice>,
 }
 
 impl Window {
@@ -145,6 +165,13 @@ struct Pending {
     target: Target,
     bonus: u8,
     canceled: bool,
+}
+
+/// Who throws dice in a battle: a champion or the royal guard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Fighter {
+    Champion(PlayerId),
+    Guard,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,6 +220,56 @@ pub enum Event {
     /// God stages and the storyteller hook in here (§5, §8).
     Dusk {
         round: u32,
+    },
+    /// Something given to a god: by a player, or by the world (`None`).
+    Offered {
+        player: Option<PlayerId>,
+        god: God,
+        amount: u8,
+    },
+    StageChanged {
+        god: God,
+        stage: u8,
+    },
+    /// A settlement, temple or the Table changed hands.
+    Claimed {
+        player: PlayerId,
+        hex: Hex,
+        from: Option<PlayerId>,
+    },
+    StyleChanged {
+        player: PlayerId,
+        delta: i16,
+        total: u16,
+        reason: StyleReason,
+    },
+    ThreatChanged {
+        player: PlayerId,
+        delta: i8,
+        total: u8,
+    },
+    /// Who wears the Crown after this dawn; `None` if nobody leads.
+    Crowned {
+        player: Option<PlayerId>,
+    },
+    GuardSpawned {
+        hex: Hex,
+        target: PlayerId,
+    },
+    GuardMoved {
+        from: Hex,
+        to: Hex,
+    },
+    GuardLeft {
+        hex: Hex,
+    },
+    GuardStruck {
+        target: PlayerId,
+    },
+    GuardResolved {
+        target: PlayerId,
+        guard_score: Score,
+        target_score: Score,
     },
 
     // Hidden information below (draws, traps, choices) goes to every
@@ -298,6 +375,31 @@ pub enum Event {
         at: Hex,
         respawn: Hex,
     },
+    BattleStarted {
+        attacker: PlayerId,
+        defender: PlayerId,
+    },
+    /// Cards burned for guaranteed faces, revealed when the Battle window closes.
+    Burned {
+        player: PlayerId,
+        cards: Vec<CardId>,
+        faces: Vec<Face>,
+    },
+    /// One physical throw. Clients replay it with `necromy_dice::throw(seed, count)`
+    /// and must land on `faces` (§12.2).
+    DiceThrown {
+        fighter: Fighter,
+        seed: u64,
+        count: u8,
+        faces: Vec<Face>,
+    },
+    BattleResolved {
+        attacker: PlayerId,
+        defender: PlayerId,
+        /// Hits and shields of the attacker, then of the defender.
+        attacker_score: Score,
+        defender_score: Score,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -322,6 +424,10 @@ pub enum RuleError {
         have: u8,
     },
     InvalidTarget,
+    /// Burned more cards than the side has dice.
+    TooManyBurned {
+        max: u8,
+    },
 }
 
 impl std::fmt::Display for RuleError {
@@ -344,6 +450,7 @@ impl std::fmt::Display for RuleError {
                 write!(f, "needs {need} spirit, {have} left")
             }
             RuleError::InvalidTarget => write!(f, "invalid target"),
+            RuleError::TooManyBurned { max } => write!(f, "can burn at most {max} cards"),
         }
     }
 }
@@ -375,6 +482,20 @@ pub struct Game {
     last_element: Option<Element>,
     /// The active player has ended their turn; only the End window is left.
     turn_over: bool,
+    /// Battles fought so far; part of every throw's seed.
+    battles: u64,
+    pantheon: world::Pantheon,
+    /// Per player, per god (`God::index`).
+    favor: Vec<[u16; 5]>,
+    style: Vec<u16>,
+    threat: Vec<u8>,
+    dominant: Option<PlayerId>,
+    /// Settlements, temples and the Table, keyed by axial coordinates.
+    claims: BTreeMap<(i32, i32), PlayerId>,
+    taste: style::Taste,
+    /// Per player, what they did since the last dusk.
+    deeds: Vec<Vec<style::Deed>>,
+    guard: Option<guard::Guard>,
     log: Vec<Event>,
 }
 
@@ -396,6 +517,9 @@ impl Game {
         let mut order: Vec<PlayerId> = (0..champions.len() as u8).map(PlayerId).collect();
         rng.shuffle(&mut order);
 
+        // Gods start light or mid, never dark (§14).
+        let stages = God::ALL.map(|_| rng.below(2) as u8);
+        let taste = style::Taste::draw(&mut rng);
         let slice = cards::match_slice(&mut rng);
         let defs: Vec<DefId> = slice
             .iter()
@@ -405,6 +529,7 @@ impl Game {
         rng.shuffle(&mut deck);
 
         let hands = vec![Vec::new(); champions.len()];
+        let champions_len = champions.len();
         let mut game = Game {
             seed: setup.seed,
             rng,
@@ -425,6 +550,19 @@ impl Game {
             pending: None,
             last_element: None,
             turn_over: false,
+            battles: 0,
+            pantheon: world::Pantheon {
+                stages,
+                pressure: [0; 5],
+            },
+            favor: vec![[0; 5]; champions_len],
+            style: vec![0; champions_len],
+            threat: vec![0; champions_len],
+            dominant: None,
+            claims: BTreeMap::new(),
+            taste,
+            deeds: vec![Vec::new(); champions_len],
+            guard: None,
             log: Vec::new(),
         };
 
@@ -480,12 +618,23 @@ impl Game {
         self.order[self.turn]
     }
 
+    /// `player` is mid-turn and may still move. False between turns, in the End
+    /// window and during the world phase.
+    fn is_active(&self, player: PlayerId) -> bool {
+        !self.turn_over && self.order.get(self.turn) == Some(&player)
+    }
+
     pub fn move_points(&self) -> u32 {
         self.move_points
     }
 
     pub fn window(&self) -> Option<&Window> {
         self.window.as_ref()
+    }
+
+    /// Chain bonus (§4) of the card waiting in an open Target window.
+    pub fn pending_bonus(&self) -> Option<u8> {
+        self.pending.map(|p| p.bonus)
     }
 
     /// Players the game is waiting on right now.
@@ -564,7 +713,7 @@ impl Game {
         if champion.hex.unsigned_distance_to(to) != 1 {
             return Err(RuleError::NotAdjacent);
         }
-        if self.occupant(to).is_some() {
+        if self.occupant(to).is_some() || self.guard_at(to) {
             return Err(RuleError::Occupied);
         }
         Ok(tile.terrain.move_cost())
@@ -612,7 +761,7 @@ impl Game {
                 let Some(tile) = self.board.tile(next) else {
                     continue;
                 };
-                if next == start || self.occupant(next).is_some() {
+                if next == start || self.occupant(next).is_some() || self.guard_at(next) {
                     continue;
                 }
                 let total = cost + tile.terrain.move_cost();
@@ -646,6 +795,8 @@ impl Game {
                 }
                 let fits = match w.kind {
                     WindowKind::Target { .. } => def.timing == Timing::Response,
+                    // Cards go into a battle only as burned faces.
+                    WindowKind::Battle { .. } => false,
                     WindowKind::Enter { .. } | WindowKind::End { .. } => {
                         def.timing == Timing::Instant
                     }
@@ -696,6 +847,7 @@ impl Game {
                 .filter(|(h, t)| {
                     h.unsigned_distance_to(me) <= range
                         && self.occupant(*h).is_none()
+                        && !self.guard_at(*h)
                         && match def.effect {
                             Effect::Grow => {
                                 t.terrain.can_grow_grove() && t.terrain != Terrain::Grove
@@ -762,7 +914,7 @@ impl Game {
                 Intent::Play { card, target } => {
                     self.play_own(player, card, target, &mut events)?
                 }
-                Intent::Pass => return Err(RuleError::NoWindow),
+                Intent::Pass | Intent::Burn { .. } => return Err(RuleError::NoWindow),
             }
         }
         self.log.extend(events.iter().cloned());
@@ -775,6 +927,13 @@ impl Game {
         to: Hex,
         events: &mut Vec<Event>,
     ) -> Result<(), RuleError> {
+        if let Some(defender) = self.occupant(to)
+            && defender != player
+        {
+            let cost = self.attack_cost(player, to)?;
+            self.start_battle(player, defender, cost, events);
+            return Ok(());
+        }
         let cost = self.step_cost(player, to)?;
         if cost > self.move_points {
             return Err(RuleError::NotEnoughMovePoints {
@@ -795,6 +954,9 @@ impl Game {
 
         // The champion may have fallen to a trap and woken at home.
         let at = self.hex_of(player);
+        if at == to {
+            self.claim(player, at, events);
+        }
         let near: Vec<PlayerId> = self
             .initiative_after(player)
             .into_iter()
@@ -814,6 +976,15 @@ impl Game {
     fn end_turn(&mut self, player: PlayerId, events: &mut Vec<Event>) {
         events.push(Event::TurnEnded { player });
         self.turn_over = true;
+        // Ending the turn on a temple is a prayer to its god.
+        let hex = self.hex_of(player);
+        if let Some(tile) = self.board.tile(hex)
+            && tile.terrain == Terrain::Temple
+            && let Some(god) = tile.region
+        {
+            self.offer(Some(player), god, 1, events);
+            self.record_deed(player, style::Deed::Prayed);
+        }
         let others = self.initiative_after(player);
         self.open_window(WindowKind::End { player }, others, events);
         if self.window.is_none() {
@@ -886,13 +1057,22 @@ impl Game {
         if window.has_chosen(player) {
             return Err(RuleError::AlreadyChose);
         }
+        let battle = matches!(window.kind, WindowKind::Battle { .. });
         let choice = match intent {
-            Intent::Pass => None,
+            Intent::Pass => Choice::Pass,
             Intent::Play { card, target } => {
                 self.check_play(player, card, target)?;
                 self.take_from_hand(player, card, events);
-                Some((card, target))
+                Choice::Play(card, target)
             }
+            Intent::Burn { cards } if battle => {
+                self.check_burn(player, &cards)?;
+                for &card in &cards {
+                    self.hands[player.0 as usize].retain(|&c| c != card);
+                }
+                Choice::Burn(cards)
+            }
+            Intent::Burn { .. } => return Err(RuleError::WrongTiming),
             Intent::Move { .. } | Intent::EndTurn => return Err(RuleError::WindowOpen),
         };
         let window = self.window.as_mut().expect("still open");
@@ -928,13 +1108,9 @@ impl Game {
         let plays: Vec<(PlayerId, CardId, Target)> = window
             .eligible
             .iter()
-            .filter_map(|&p| {
-                window
-                    .choices
-                    .get(&p)
-                    .copied()
-                    .flatten()
-                    .map(|(c, t)| (p, c, t))
+            .filter_map(|&p| match window.choices.get(&p) {
+                Some(&Choice::Play(c, t)) => Some((p, c, t)),
+                _ => None,
             })
             .collect();
         events.push(Event::WindowClosed {
@@ -960,8 +1136,17 @@ impl Game {
                 self.resolve(p.caster, p.card, p.target, p.bonus, events);
             }
         }
-        if let WindowKind::End { .. } = window.kind {
-            self.advance_turn(events);
+        match window.kind {
+            WindowKind::End { .. } => self.advance_turn(events),
+            WindowKind::Battle { attacker, defender } => {
+                let burned = |p: PlayerId| match window.choices.get(&p) {
+                    Some(Choice::Burn(cards)) => cards.clone(),
+                    _ => Vec::new(),
+                };
+                let (a, d) = (burned(attacker), burned(defender));
+                self.resolve_battle(attacker, defender, a, d, events);
+            }
+            _ => {}
         }
     }
 
@@ -1019,6 +1204,7 @@ impl Game {
             rhythm_broken,
         });
         if rhythm_broken {
+            self.add_threat(player, 1, events);
             let champ = self.champ_mut(player);
             if champ.spirit_points > 0 {
                 champ.spirit_points -= 1;
@@ -1063,7 +1249,30 @@ impl Game {
             Target::Champion(p) => Some(p),
             _ => None,
         };
-        let n = |base: u8| base + bonus;
+        // Its god takes the card as an offering (§5); bodies weigh double.
+        if let Some(element) = def.element {
+            let amount = if def.kind == CardKind::Body { 2 } else { 1 };
+            self.offer(
+                Some(caster),
+                God::from_index(element.index()),
+                amount,
+                events,
+            );
+            self.record_deed(caster, style::Deed::Played(element));
+            // Zaga is the one god whose cards quiet a champion down (§6.5).
+            if element == Element::Earth {
+                self.add_threat(caster, -1, events);
+            }
+        }
+        if let Some(verb) = style::BodyVerb::of(def.effect) {
+            self.record_deed(caster, style::Deed::Body(verb));
+            // Burning and conscripting the dead is noticed; releasing is not.
+            if matches!(verb, style::BodyVerb::Fuel | style::BodyVerb::Legion) {
+                self.add_threat(caster, 1, events);
+            }
+        }
+        let shift = self.stage_shift(def.element, def.effect.is_harmful());
+        let n = |base: u8| (i16::from(base + bonus) + i16::from(shift)).max(1) as u8;
         match def.effect {
             Effect::Damage(x) => {
                 if let Some(t) = aimed
@@ -1147,6 +1356,9 @@ impl Game {
                         to,
                     });
                     self.spring_traps(caster, to, events);
+                    if self.hex_of(caster) == to {
+                        self.claim(caster, to, events);
+                    }
                 }
             }
             Effect::Cancel => self.cancel_pending(card, events),
@@ -1181,6 +1393,7 @@ impl Game {
                 self.grow(hex, events);
                 self.heal(caster, n(2), events);
             }
+            Effect::Feast => self.feast(caster, n(1), events),
         }
         self.discard.push(card);
     }
@@ -1250,7 +1463,7 @@ impl Game {
     }
 
     fn root(&mut self, player: PlayerId, events: &mut Vec<Event>) {
-        if player == self.current_player() && !self.turn_over {
+        if self.is_active(player) {
             self.move_points = 0;
         } else {
             self.champ_mut(player).rooted = true;
@@ -1292,7 +1505,11 @@ impl Game {
             });
             if self.pierce(victim, def.element, events) {
                 match def.effect {
-                    Effect::Trap(TrapEffect::Damage(x)) => self.damage(victim, x, events),
+                    Effect::Trap(TrapEffect::Damage(x)) => {
+                        let shift = self.stage_shift(def.element, true);
+                        let x = (i16::from(x) + i16::from(shift)).max(1) as u8;
+                        self.damage(victim, x, events)
+                    }
                     Effect::Trap(TrapEffect::Root) => self.root(victim, events),
                     _ => {}
                 }
@@ -1312,14 +1529,18 @@ impl Game {
         let home = self.board.start_of(self.champions[player.0 as usize].god);
         let respawn = (0..=self.board.radius() * 2)
             .flat_map(|r| home.ring(r).collect::<Vec<_>>())
-            .find(|&h| self.board.contains(h) && self.occupant(h).is_none_or(|p| p == player))
+            .find(|&h| {
+                self.board.contains(h)
+                    && self.occupant(h).is_none_or(|p| p == player)
+                    && !self.guard_at(h)
+            })
             .unwrap_or(home);
         let champ = self.champ_mut(player);
         champ.hex = respawn;
         champ.hp = champ.body;
         champ.ward = None;
         champ.rooted = false;
-        if player == self.current_player() && !self.turn_over {
+        if self.is_active(player) {
             self.move_points = 0;
         }
         events.push(Event::ChampionFell {
@@ -1363,6 +1584,8 @@ impl Game {
             self.world_phase(events);
             if self.time == TimeOfDay::Day {
                 events.push(Event::Dusk { round: self.round });
+                self.dusk(events);
+                self.judge_the_day(events);
             }
             self.start_round(events);
         } else {
@@ -1388,6 +1611,7 @@ impl Game {
         });
         if self.time == TimeOfDay::Day {
             events.push(Event::Dawn { round: self.round });
+            self.dawn(events);
         }
         self.start_turn(events);
     }
@@ -1429,6 +1653,8 @@ impl Game {
                 tile.corpse = None;
                 tile.terrain = Terrain::Grove;
                 events.push(Event::GroveGrew { hex });
+                // An untouched body is Bhava's offering (§3).
+                self.offer(None, God::Bhava, 1, events);
             } else {
                 tile.corpse = None;
                 events.push(Event::CorpseDecayed { hex });
@@ -1437,6 +1663,7 @@ impl Game {
         if self.time == TimeOfDay::Night {
             self.spawn_corpse(events);
         }
+        self.guard_phase(events);
     }
 
     fn spawn_corpse(&mut self, events: &mut Vec<Event>) {
@@ -1457,6 +1684,15 @@ impl Game {
         }
     }
 }
+
+mod battle;
+mod guard;
+mod style;
+mod world;
+pub use battle::Score;
+pub use guard::{GUARD_DICE, GUARD_RELIEF, GUARD_STEPS, Guard};
+pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
+pub use world::{Pantheon, STAGE_THRESHOLD, STAGES, TRISHNA_DRIFT};
 
 #[cfg(test)]
 mod tests;

@@ -25,8 +25,10 @@ pub struct TokenPlugin;
 
 impl Plugin for TokenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_tokens)
-            .add_systems(Update, (queue_steps, move_tokens, face_camera).chain());
+        app.add_systems(Startup, spawn_tokens).add_systems(
+            Update,
+            (queue_steps, move_tokens, sync_guard, face_camera).chain(),
+        );
     }
 }
 
@@ -42,6 +44,13 @@ impl Token {
         !self.waypoints.is_empty()
     }
 }
+
+/// Kingdom steel, darker than any patron's colour.
+pub const GUARD_COLOR: [u8; 3] = [120, 132, 150];
+
+/// The royal guard's token; follows `Game::guard`.
+#[derive(Component)]
+pub struct GuardToken;
 
 /// Keeps a sprite plane turned towards the camera.
 #[derive(Component)]
@@ -80,7 +89,7 @@ fn spawn_tokens(
 }
 
 /// A chunky hooded figure: dark outline, body in the patron's colour.
-fn placeholder_sprite(color: [u8; 3]) -> Image {
+pub fn placeholder_sprite(color: [u8; 3]) -> Image {
     let mut image = Image::new_fill(
         Extent3d {
             width: SPRITE_W,
@@ -156,10 +165,47 @@ fn move_tokens(time: Res<Time>, mut tokens: Query<(&mut Token, &mut Transform)>)
 }
 
 fn face_camera(
-    camera: Single<&Transform, (With<Camera3d>, Without<Billboard>)>,
+    camera: Single<&Transform, (With<crate::TableCamera>, Without<Billboard>)>,
     mut sprites: Query<&mut Transform, With<Billboard>>,
 ) {
     for mut transform in &mut sprites {
         transform.rotation = camera.rotation;
+    }
+}
+
+/// Spawns, walks and removes the guard token to match the rules.
+fn sync_guard(
+    mut commands: Commands,
+    time: Res<Time>,
+    game: Res<Match>,
+    board: Res<Board>,
+    mut images: ResMut<Assets<Image>>,
+    mut guards: Query<(Entity, &mut Transform), With<GuardToken>>,
+) {
+    match (game.game.guard(), guards.single_mut()) {
+        (Some(guard), Ok((_, mut transform))) => {
+            let target = board.hex_to_world(guard.hex);
+            let delta = target - transform.translation;
+            transform.translation += delta.clamp_length_max(MOVE_SPEED * 0.5 * time.delta_secs());
+        }
+        (Some(guard), Err(_)) => {
+            commands.spawn((
+                GuardToken,
+                Billboard,
+                NotShadowCaster,
+                NotShadowReceiver,
+                Sprite::from_image(images.add(placeholder_sprite(GUARD_COLOR))),
+                Sprite3d {
+                    pixels_per_metre: PIXELS_PER_METRE,
+                    pivot: Some(Vec2::new(0.5, 0.0)),
+                    alpha_mode: AlphaMode::Mask(0.5),
+                    unlit: true,
+                    ..default()
+                },
+                Transform::from_translation(board.hex_to_world(guard.hex)),
+            ));
+        }
+        (None, Ok((entity, _))) => commands.entity(entity).despawn(),
+        (None, Err(_)) => {}
     }
 }
