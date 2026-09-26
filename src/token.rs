@@ -25,10 +25,11 @@ pub struct TokenPlugin;
 
 impl Plugin for TokenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_tokens).add_systems(
-            Update,
-            (queue_steps, move_tokens, sync_guard, face_camera).chain(),
-        );
+        app.add_systems(crate::MatchBegins, spawn_tokens)
+            .add_systems(
+                crate::InGame,
+                (queue_steps, move_tokens, sync_guard, face_camera).chain(),
+            );
     }
 }
 

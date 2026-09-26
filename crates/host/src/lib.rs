@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use necromy_oracle::{Job, Oracle, prompt};
 use necromy_rules::{Event, Game, God, Intent, PlayerId, RuleError, Setup, bot};
+use serde::{Deserialize, Serialize};
 
 /// Seconds between two bot steps.
 pub const BOT_STEP_SECS: f32 = 0.35;
@@ -28,7 +29,7 @@ const PROBE_SECS: u64 = 5;
 const MAX_QUEUED_VOICES: usize = 2;
 
 /// Who plays a seat.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Seat {
     /// A person, through a client.
     Human,
@@ -59,7 +60,7 @@ pub struct Config {
 }
 
 /// A seat's message to the table.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ToTable {
     Act(Intent),
     /// The Dominant's wish in their own words, for the model to judge.
@@ -72,7 +73,7 @@ pub enum ToTable {
 }
 
 /// The table's message to a seat.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum FromTable {
     /// What changed and the state after it, as this seat sees them.
     Update {
@@ -80,13 +81,17 @@ pub enum FromTable {
         events: Vec<Event>,
         view: Box<Game>,
     },
+    /// The seat's intent went through; its update came just before.
+    /// Every `Act` gets exactly one `Accepted` or `Rejected`, in order, so a
+    /// client can hold its next intent until the last one is answered.
+    Accepted,
     /// The seat's intent broke the rules; nothing changed.
     Rejected(RuleError),
     Oracle(OracleNews),
 }
 
 /// News of the gods' voice.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OracleNews {
     /// Whether the model answers; wishes in free words need it.
     Online(bool),
@@ -197,6 +202,32 @@ impl Table {
         &self.seats
     }
 
+    /// Hand a seat to someone else: a bot while its player is away (§17.1),
+    /// the player again when they come back. A seat that becomes watched
+    /// gets a fresh view at once, so a returning client can catch up.
+    pub fn set_seat(&mut self, seat: PlayerId, kind: Seat) {
+        let i = seat.0 as usize;
+        if i >= self.seats.len() {
+            return;
+        }
+        self.seats[i] = kind;
+        self.outbox[i].clear();
+        if kind.watched() {
+            let salt = self.next_salt();
+            let view = self.game.view_for(Some(seat), salt);
+            self.shown[i] = self.serial;
+            let serial = self.serial;
+            self.send(
+                seat,
+                FromTable::Update {
+                    serial,
+                    events: Vec::new(),
+                    view: Box::new(view),
+                },
+            );
+        }
+    }
+
     /// Messages waiting for `seat`, oldest first.
     pub fn drain(&mut self, seat: PlayerId) -> Vec<FromTable> {
         self.outbox
@@ -214,9 +245,11 @@ impl Table {
         }
         match message {
             ToTable::Act(intent) => {
-                if let Err(err) = self.act(seat, intent) {
-                    self.send(seat, FromTable::Rejected(err));
-                }
+                let answer = match self.act(seat, intent) {
+                    Ok(()) => FromTable::Accepted,
+                    Err(err) => FromTable::Rejected(err),
+                };
+                self.send(seat, answer);
             }
             ToTable::Wish { god, text } => self.ask_wish(seat, god, text),
             ToTable::Shown(serial) => {

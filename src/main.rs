@@ -3,6 +3,7 @@ mod board;
 mod dice;
 mod hud;
 mod icons;
+mod lobby;
 mod names;
 mod play;
 mod stats;
@@ -12,6 +13,7 @@ mod turn_ui;
 mod victory_ui;
 mod wish_ui;
 
+use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy_sprite3d::prelude::*;
@@ -31,8 +33,11 @@ fn main() {
                 }),
         )
         .add_plugins(Sprite3dPlugin)
-        // PlayPlugin first: it inserts the `Match` the others read at startup.
+        .init_schedule(InGame)
+        .init_schedule(MatchBegins)
+        .add_systems(Update, run_game)
         .add_plugins((
+            lobby::LobbyPlugin,
             play::PlayPlugin,
             board::BoardPlugin,
             token::TokenPlugin,
@@ -104,25 +109,34 @@ fn auto_screenshot(
     mut commands: Commands,
     time: Res<Time>,
     dice: Res<dice::DiceShow>,
-    game: Res<play::Match>,
+    game: Option<Res<play::Match>>,
+    front: Res<lobby::Front>,
     mut shot: ResMut<AutoScreenshot>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let now = time.elapsed_secs();
     // `NECROMY_SCREENSHOT_WHEN=dice` waits for the first settled throw,
-    // `=guard` for the royal guard on the board with no dice in the air.
-    let ready = match std::env::var("NECROMY_SCREENSHOT_WHEN").as_deref() {
-        Ok("dice") => dice.ever_settled,
-        Ok("guard") => game.game.guard().is_some() && !dice.busy(),
-        Ok("hit") => game.incoming_result.is_some(),
-        Ok("myturn") => game.is_human_turn(),
-        Ok("victory") => game.game.winner().is_some() && !dice.busy(),
-        Ok("reply") => game.wish_reply.is_some() && !dice.busy(),
+    // `=guard` for the royal guard on the board with no dice in the air,
+    // `=lobby` for the lobby with everyone `NECROMY_START_AT` expects.
+    let when = std::env::var("NECROMY_SCREENSHOT_WHEN").ok();
+    let ready = match (when.as_deref(), game.as_deref()) {
+        (Some("lobby"), _) => front.lobby_full(),
+        // The menu: only a plain timed capture.
+        (None, None) => now >= shot.after,
+        (Some(_), None) => false,
+        (Some("dice"), Some(_)) => dice.ever_settled,
+        (Some("guard"), Some(game)) => game.game.guard().is_some() && !dice.busy(),
+        (Some("hit"), Some(game)) => game.incoming_result.is_some(),
+        (Some("myturn"), Some(game)) => game.is_human_turn(),
+        (Some("victory"), Some(game)) => game.game.winner().is_some() && !dice.busy(),
+        (Some("reply"), Some(game)) => game.wish_reply.is_some() && !dice.busy(),
         // The human's own words, judged by the model (`NECROMY_WISH`).
-        Ok("heard") => game.wish_reply.as_ref().is_some_and(|r| r.said.is_some()),
-        Ok("told") => game.told.is_some() && game.wish_reply.is_none() && !dice.busy(),
-        Ok("wishpanel") => game.game.wish_due() == Some(game.human),
-        Ok("incoming") => matches!(
+        (Some("heard"), Some(game)) => game.wish_reply.as_ref().is_some_and(|r| r.said.is_some()),
+        (Some("told"), Some(game)) => {
+            game.told.is_some() && game.wish_reply.is_none() && !dice.busy()
+        }
+        (Some("wishpanel"), Some(game)) => game.game.wish_due() == Some(game.human),
+        (Some("incoming"), Some(game)) => matches!(
             game.game.window().map(|w| w.kind),
             Some(necromy_rules::WindowKind::Target { target, .. }) if target == game.human
         ),
@@ -146,3 +160,24 @@ fn auto_screenshot(
 /// textures; anything that picks, hovers or faces "the camera" means this one.
 #[derive(Component)]
 pub struct TableCamera;
+
+/// Systems of the match itself. They run only while there is a match: before
+/// it, the menu and the lobby own the screen (`lobby.rs`).
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct InGame;
+
+/// Runs once, when the match arrives: whatever is built from its board and
+/// its seats (tiles, tokens, portraits).
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct MatchBegins;
+
+fn run_game(world: &mut World, mut begun: Local<bool>) {
+    if !world.contains_resource::<play::Match>() {
+        return;
+    }
+    if !*begun {
+        *begun = true;
+        world.run_schedule(MatchBegins);
+    }
+    world.run_schedule(InGame);
+}

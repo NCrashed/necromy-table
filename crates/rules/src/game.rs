@@ -42,7 +42,7 @@ pub struct Setup {
     pub champions: Vec<God>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Champion {
     pub god: God,
     pub hex: Hex,
@@ -148,14 +148,14 @@ pub enum WindowKind {
     End { player: PlayerId },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 enum Choice {
     Pass,
     Play(CardId, Target),
     Burn(Vec<CardId>),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Window {
     pub kind: WindowKind,
     /// In resolution order.
@@ -169,7 +169,7 @@ impl Window {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Pending {
     caster: PlayerId,
     card: CardId,
@@ -533,7 +533,7 @@ impl std::fmt::Display for RuleError {
 
 impl std::error::Error for RuleError {}
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Game {
     seed: u64,
     rng: Rng,

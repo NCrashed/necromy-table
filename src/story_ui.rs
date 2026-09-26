@@ -23,10 +23,10 @@ impl Plugin for StoryUiPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn)
             .add_systems(
-                Update,
+                crate::InGame,
                 (rebuild_lines, rebuild_voice).run_if(resource_changed::<Match>),
             )
-            .add_systems(Update, expire_voice);
+            .add_systems(crate::InGame, expire_voice);
     }
 }
 

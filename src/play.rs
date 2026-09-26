@@ -6,13 +6,14 @@
 //! know. Intents are checked against that view first, so a refusal comes at
 //! once and in words.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use necromy_host::{Config, FromTable, OracleNews, Seat, Table, ToTable};
+use necromy_net::{ClientConn, ClientMsg, ServerMsg};
 use necromy_rules::{
-    CardId, Event, Fighter, Game, God, Intent, PlayerId, RuleError, Score, Target, Terrain,
+    CardId, Event, Fighter, Game, God, Hex, Intent, PlayerId, RuleError, Score, Target, Terrain,
     TimeOfDay, WindowKind,
 };
 
@@ -29,21 +30,15 @@ pub struct PlayPlugin;
 
 impl Plugin for PlayPlugin {
     fn build(&self, app: &mut App) {
-        let seed = std::env::var("NECROMY_SEED")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or_else(|| {
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(0, |d| d.as_nanos() as u64)
-            });
-        info!("match seed {seed} (set NECROMY_SEED to replay it)");
-
-        app.insert_resource(Match::new(seed))
-            .init_resource::<Selection>()
+        // Dev runs go straight to a single player match; otherwise the menu
+        // (`lobby.rs`) inserts the `Match` when one begins.
+        if crate::lobby::skip_menu() {
+            app.insert_resource(Match::local());
+        }
+        app.init_resource::<Selection>()
             .init_resource::<IncomingCountdown>()
             .add_systems(
-                Update,
+                crate::InGame,
                 (
                     drive_table,
                     click_board,
@@ -59,10 +54,16 @@ impl Plugin for PlayPlugin {
 pub struct Match {
     /// The match as the human sees it (`Game::view_for`), after the last update.
     pub game: Game,
-    table: Table,
+    link: Link,
     /// The table's last update, and the last one the screen has shown.
     serial: u32,
     shown: u32,
+    /// Steps of a walk still to send, the next one last.
+    walk: Vec<Hex>,
+    /// An intent went to the table and its answer has not come yet.
+    answer_due: bool,
+    /// Intents made meanwhile, sent one by one as answers come.
+    queued: VecDeque<Intent>,
     /// The gods' voice as the table reports it.
     pub oracle: OracleState,
     pub human: PlayerId,
@@ -177,6 +178,55 @@ pub struct ThrowView {
     pub faces: Vec<necromy_rules::Face>,
 }
 
+/// Where the table is: in this process, or on a server.
+enum Link {
+    Local(Box<Table>),
+    Remote { conn: ClientConn, lost: bool },
+}
+
+/// What reaches the client: the table's messages, or a word from the server.
+enum Incoming {
+    Table(FromTable),
+    Notice(String),
+}
+
+impl Link {
+    fn submit(&mut self, seat: PlayerId, message: ToTable) {
+        match self {
+            Link::Local(table) => table.submit(seat, message),
+            Link::Remote { conn, .. } => conn.send(ClientMsg::Table(message)),
+        }
+    }
+
+    fn tick(&mut self, dt: f32) {
+        if let Link::Local(table) = self {
+            table.tick(dt);
+        }
+    }
+
+    fn drain(&mut self, seat: PlayerId) -> Vec<Incoming> {
+        match self {
+            Link::Local(table) => table.drain(seat).into_iter().map(Incoming::Table).collect(),
+            Link::Remote { conn, lost } => {
+                let mut out = Vec::new();
+                while let Some(message) = conn.poll() {
+                    match message {
+                        ServerMsg::Table(m) => out.push(Incoming::Table(m)),
+                        ServerMsg::Error(e) => out.push(Incoming::Notice(format!("Сервер: {e}."))),
+                        ServerMsg::Lobby(_) | ServerMsg::Started { .. } => {}
+                    }
+                }
+                if !conn.is_open() && !*lost {
+                    *lost = true;
+                    out.push(Incoming::Notice(
+                        "Связь с сервером потеряна: твоё место занял бот.".into(),
+                    ));
+                }
+                out
+            }
+        }
+    }
+}
 /// The card the human picked and is now aiming.
 #[derive(Resource, Default)]
 pub struct Selection {
@@ -186,7 +236,18 @@ pub struct Selection {
 }
 
 impl Match {
-    fn new(seed: u64) -> Self {
+    /// A single player match on a table in this process (§17.3), seeded by
+    /// `NECROMY_SEED` or the clock.
+    pub fn local() -> Self {
+        let seed = std::env::var("NECROMY_SEED")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_nanos() as u64)
+            });
+        info!("match seed {seed} (set NECROMY_SEED to replay it)");
         let champions = God::ALL.to_vec();
         let human = PlayerId(
             champions
@@ -219,14 +280,28 @@ impl Match {
             oracle: Some(oracle),
         });
         let first = table.drain(human);
-        let Some(FromTable::Update { view, .. }) = first.first() else {
+        Match::begin(Link::Local(Box::new(table)), human, autoplay, first)
+    }
+
+    /// A match on a server: `first` holds the table's first update for `seat`.
+    pub fn remote(conn: ClientConn, seat: PlayerId, first: Vec<FromTable>) -> Self {
+        Match::begin(Link::Remote { conn, lost: false }, seat, false, first)
+    }
+
+    fn begin(link: Link, human: PlayerId, autoplay: bool, first: Vec<FromTable>) -> Self {
+        let Some(FromTable::Update { view, .. }) =
+            first.iter().find(|m| matches!(m, FromTable::Update { .. }))
+        else {
             unreachable!("a table greets every watched seat with its view");
         };
         let mut m = Match {
             game: (**view).clone(),
-            table,
+            link,
             serial: 0,
             shown: 0,
+            walk: Vec::new(),
+            answer_due: false,
+            queued: VecDeque::new(),
             oracle: OracleState::default(),
             human,
             steps: Vec::new(),
@@ -243,7 +318,7 @@ impl Match {
             held: Vec::new(),
             holding: false,
         };
-        m.receive(first);
+        m.receive(first.into_iter().map(Incoming::Table).collect());
         m
     }
 
@@ -265,21 +340,67 @@ impl Match {
     }
 
     /// Send the human's intent to the table. It is checked against the view
-    /// first; the table's answer arrives before this returns (the table is
-    /// local), so the view is already up to date.
+    /// first, so a refusal comes at once and in words; the table still
+    /// decides. While the last intent waits for its answer, the next one
+    /// waits too and is checked again when its turn comes: a server answers
+    /// a moment later, and the view is stale until then.
     pub fn act(&mut self, player: PlayerId, intent: Intent) -> Result<(), RuleError> {
         debug_assert_eq!(player, self.human, "the client acts only for its seat");
         self.game.clone().apply(player, intent.clone())?;
-        self.table.submit(player, ToTable::Act(intent));
+        if self.answer_due {
+            self.queued.push_back(intent);
+            return Ok(());
+        }
+        self.answer_due = true;
+        self.link.submit(player, ToTable::Act(intent));
         self.pump();
         Ok(())
+    }
+
+    /// The last intent was answered: send the next one still valid.
+    fn answered(&mut self) {
+        self.answer_due = false;
+        let human = self.human;
+        while let Some(intent) = self.queued.pop_front() {
+            if self.game.clone().apply(human, intent.clone()).is_ok() {
+                self.answer_due = true;
+                self.link.submit(human, ToTable::Act(intent));
+                return;
+            }
+        }
+        if !self.walk.is_empty() {
+            self.next_step();
+        }
+    }
+
+    /// Walk a path one step per intent, as the table wants them: each step
+    /// goes once the last one came back, and a window stops the walk.
+    pub fn walk(&mut self, path: Vec<Hex>) {
+        self.walk = path;
+        self.walk.reverse();
+        self.next_step();
+    }
+
+    fn next_step(&mut self) {
+        if !self.is_human_turn() {
+            self.walk.clear();
+            return;
+        }
+        let Some(to) = self.walk.pop() else {
+            return;
+        };
+        let human = self.human;
+        if let Err(err) = self.act(human, Intent::Move { to }) {
+            warn!("move rejected: {err}");
+            self.walk.clear();
+        }
     }
 
     /// Hand the human's wish in free words to `god`; the table asks the model.
     pub fn wish_in_words(&mut self, god: God, text: &str) {
         self.oracle.failed = None;
         let human = self.human;
-        self.table.submit(
+        self.link.submit(
             human,
             ToTable::Wish {
                 god,
@@ -290,12 +411,19 @@ impl Match {
     }
 
     fn pump(&mut self) {
-        let messages = self.table.drain(self.human);
+        let messages = self.link.drain(self.human);
         self.receive(messages);
     }
 
-    fn receive(&mut self, messages: Vec<FromTable>) {
+    fn receive(&mut self, messages: Vec<Incoming>) {
         for message in messages {
+            let message = match message {
+                Incoming::Table(m) => m,
+                Incoming::Notice(text) => {
+                    self.feed.push(text);
+                    continue;
+                }
+            };
             match message {
                 FromTable::Update {
                     serial,
@@ -306,7 +434,13 @@ impl Match {
                     self.serial = serial;
                     self.record(&events);
                 }
-                FromTable::Rejected(err) => self.feed.push(format!("Нельзя: {}.", reason(err))),
+                FromTable::Accepted => self.answered(),
+                FromTable::Rejected(err) => {
+                    self.walk.clear();
+                    self.queued.clear();
+                    self.answer_due = false;
+                    self.feed.push(format!("Нельзя: {}.", reason(err)));
+                }
                 FromTable::Oracle(news) => match news {
                     OracleNews::Online(online) => self.oracle.online = online,
                     OracleNews::Listening(god) => self.oracle.listening = god,
@@ -908,18 +1042,9 @@ fn click_board(
     let Some(path) = game.game.path_to(hex) else {
         return;
     };
-    // One intent per step, as a server would receive them. A step may open
-    // a window; the rest of the path waits until the human clicks again.
-    let human = game.human;
-    for step in path {
-        if let Err(err) = game.act(human, Intent::Move { to: step }) {
-            warn!("move rejected: {err}");
-            break;
-        }
-        if game.game.window().is_some() {
-            break;
-        }
-    }
+    // One intent per step, as the table receives them. A step may open a
+    // window; the rest of the path waits until the human clicks again.
+    game.walk(path);
 }
 
 fn keys(
@@ -1057,10 +1182,10 @@ fn drive_table(
     if idle && m.shown < m.serial {
         m.shown = m.serial;
         let serial = m.serial;
-        m.table.submit(human, ToTable::Shown(serial));
+        m.link.submit(human, ToTable::Shown(serial));
     }
-    m.table.tick(time.delta_secs());
-    let messages = m.table.drain(human);
+    m.link.tick(time.delta_secs());
+    let messages = m.link.drain(human);
     if !messages.is_empty() {
         game.receive(messages);
     }

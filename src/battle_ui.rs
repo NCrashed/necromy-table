@@ -24,16 +24,16 @@ impl Plugin for BattleUiPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_panel)
             .add_systems(
-                Update,
+                crate::InGame,
                 rebuild.run_if(
                     resource_changed::<Match>
                         .or_else(resource_changed::<Selection>)
                         .or_else(resource_changed::<Revealed>),
                 ),
             )
-            .add_systems(Update, buttons)
+            .add_systems(crate::InGame, buttons)
             .add_systems(
-                Update,
+                crate::InGame,
                 debug_sizes.run_if(|| std::env::var_os("NECROMY_DEBUG_UI").is_some()),
             );
     }

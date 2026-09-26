@@ -102,7 +102,7 @@ fn same_kind(a: Condition, b: Condition) -> bool {
 }
 
 /// Per-player counters the checks need.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Progress {
     pub crown_streak: u8,
     pub middle_streak: u8,

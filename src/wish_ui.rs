@@ -34,16 +34,19 @@ impl Plugin for WishUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WishDraft>()
             .add_systems(Startup, spawn)
-            .add_systems(Update, (dev_wish, type_wish, buttons))
+            .add_systems(crate::InGame, (dev_wish, type_wish, buttons))
             .add_systems(
-                Update,
+                crate::InGame,
                 rebuild_panel
                     .after(type_wish)
                     .after(buttons)
                     .run_if(resource_changed::<Match>.or_else(resource_changed::<WishDraft>)),
             )
-            .add_systems(Update, rebuild_reply.run_if(resource_changed::<Match>))
-            .add_systems(Update, (expire_reply, listening_dots));
+            .add_systems(
+                crate::InGame,
+                rebuild_reply.run_if(resource_changed::<Match>),
+            )
+            .add_systems(crate::InGame, (expire_reply, listening_dots));
     }
 }
 

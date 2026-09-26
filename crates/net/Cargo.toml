@@ -1,0 +1,11 @@
+[package]
+name = "necromy-net"
+version = "0.1.0"
+edition = "2024"
+description = "Wire protocol between clients and the dedicated server: lobby by invite code, then the table's messages (docs/design.md §17)."
+
+[dependencies]
+necromy-rules = { path = "../rules" }
+necromy-host = { path = "../host" }
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", features = ["use-std"] }

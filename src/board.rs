@@ -29,10 +29,10 @@ impl Plugin for BoardPlugin {
             layout: HexLayout::flat().with_hex_size(HEX_SIZE),
         })
         .init_resource::<Hovered>()
-        .add_systems(Startup, spawn_board)
-        .add_systems(Update, track_hover)
+        .add_systems(crate::MatchBegins, spawn_board)
+        .add_systems(crate::InGame, track_hover)
         .add_systems(
-            Update,
+            crate::InGame,
             (sync_tiles, sync_markers).after(track_hover).run_if(
                 resource_changed::<Match>
                     .or_else(resource_changed::<Selection>)

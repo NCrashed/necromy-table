@@ -19,18 +19,18 @@ impl Plugin for HudPlugin {
         app.add_systems(PreStartup, load_font)
             .add_systems(Startup, spawn_hud)
             .add_systems(
-                Update,
+                crate::InGame,
                 (update_text, rebuild_hand)
                     .run_if(resource_changed::<Match>.or_else(resource_changed::<Selection>)),
             )
             .add_systems(
-                Update,
+                crate::InGame,
                 rebuild_incoming.run_if(
                     resource_changed::<Match>.or_else(resource_changed::<IncomingCountdown>),
                 ),
             )
             .add_systems(
-                Update,
+                crate::InGame,
                 (click_cards, tooltip, skip_incoming, expire_incoming_result),
             );
     }

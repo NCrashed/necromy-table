@@ -53,7 +53,7 @@ pub struct Corpse {
     pub age: u8,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Tile {
     pub terrain: Terrain,
     /// Owning region; `None` only for the Table.
@@ -61,7 +61,7 @@ pub struct Tile {
     pub corpse: Option<Corpse>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Board {
     tiles: HexagonalMap<Tile>,
     starts: [Hex; 5],

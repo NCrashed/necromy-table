@@ -30,14 +30,14 @@ pub struct StatsPlugin;
 impl Plugin for StatsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HoveredSeat>()
-            .add_systems(Startup, (make_art, spawn_panels).chain())
-            .add_systems(Update, (track_seat_hover, place_popup).chain())
+            .add_systems(crate::MatchBegins, (make_art, spawn_panels).chain())
+            .add_systems(crate::InGame, (track_seat_hover, place_popup).chain())
             .add_systems(
-                Update,
+                crate::InGame,
                 (rebuild_mine, rebuild_seats, rebuild_gods).run_if(resource_changed::<Match>),
             )
             .add_systems(
-                Update,
+                crate::InGame,
                 rebuild_popup
                     .after(track_seat_hover)
                     .run_if(resource_changed::<Match>.or_else(resource_changed::<HoveredSeat>)),

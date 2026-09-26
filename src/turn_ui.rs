@@ -27,11 +27,11 @@ impl Plugin for TurnUiPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn)
             .add_systems(
-                Update,
+                crate::InGame,
                 (rebuild_status, rebuild_action)
                     .run_if(resource_changed::<Match>.or_else(resource_changed::<Selection>)),
             )
-            .add_systems(Update, (taste_tip, action_buttons, splash));
+            .add_systems(crate::InGame, (taste_tip, action_buttons, splash));
     }
 }
 

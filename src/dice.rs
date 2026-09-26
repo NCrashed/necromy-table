@@ -42,7 +42,7 @@ impl Plugin for DicePlugin {
         app.init_resource::<DiceShow>()
             .init_resource::<Revealed>()
             .add_systems(Startup, build_dice_scene)
-            .add_systems(Update, (take_throws, play_throws).chain());
+            .add_systems(crate::InGame, (take_throws, play_throws).chain());
     }
 }
 

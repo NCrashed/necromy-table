@@ -1,0 +1,11 @@
+[package]
+name = "necromy-server"
+version = "0.1.0"
+edition = "2024"
+description = "Dedicated server: lobbies by invite code, tables, bots and the gods' voice; no graphics (docs/design.md §17.1)."
+
+[dependencies]
+necromy-rules = { path = "../rules" }
+necromy-host = { path = "../host" }
+necromy-net = { path = "../net" }
+necromy-oracle = { path = "../oracle" }

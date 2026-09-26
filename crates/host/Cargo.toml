@@ -7,3 +7,4 @@ description = "The authoritative table: one match, its bots, its gods' voice, an
 [dependencies]
 necromy-rules = { path = "../rules" }
 necromy-oracle = { path = "../oracle" }
+serde = { version = "1", features = ["derive"] }

@@ -56,7 +56,7 @@ impl BodyVerb {
 /// What a champion swore never to do, and how they like to act (§13). The
 /// offline storyteller rewards the manner and punishes a broken oath at dusk;
 /// the LLM storyteller will judge richer play later (§6.6).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Character {
     pub oath: Deed,
     pub manner: Deed,

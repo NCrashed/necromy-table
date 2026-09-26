@@ -24,11 +24,11 @@ impl Plugin for VictoryUiPlugin {
         app.init_resource::<EndDismissed>()
             .add_systems(Startup, spawn)
             .add_systems(
-                Update,
+                crate::InGame,
                 (rebuild_conditions, rebuild_end)
                     .run_if(resource_changed::<Match>.or_else(resource_changed::<EndDismissed>)),
             )
-            .add_systems(Update, (condition_tip, end_buttons));
+            .add_systems(crate::InGame, (condition_tip, end_buttons));
     }
 }
 
