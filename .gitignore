@@ -1,0 +1,5 @@
+/target
+.env
+result
+# Raw GPT Image output: large and regenerable. Commit the picks into art/refs/.
+/art/concepts/

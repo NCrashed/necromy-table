@@ -1,0 +1,9 @@
+[package]
+name = "necromy-rules"
+version = "0.1.0"
+edition = "2024"
+description = "Deterministic rules core of Necromy Table: no rendering, no I/O."
+
+[dependencies]
+hexx = { version = "0.25", default-features = false, features = ["algorithms", "grid", "serde"] }
+serde = { version = "1", features = ["derive"] }
