@@ -22,7 +22,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever a message changes shape; mismatched sides refuse.
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
 pub const DEFAULT_PORT: u16 = 7878;
 /// A view of the match is a few kilobytes; anything near this is garbage.
 const MAX_FRAME: usize = 4 << 20;
@@ -42,15 +42,22 @@ pub enum ClientMsg {
     Pick(Option<God>),
     /// The owner starts the match; free seats go to bots.
     Start,
+    /// Sit back down at a running match after losing the connection.
+    Rejoin {
+        code: String,
+        ticket: u64,
+    },
     Table(ToTable),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ServerMsg {
     Lobby(LobbyInfo),
-    /// The match began: this client plays `seat`.
+    /// The match began, or the client sat back down: it plays `seat`, and
+    /// `ticket` brings it back to this seat if the connection breaks.
     Started {
         seat: PlayerId,
+        ticket: u64,
     },
     Table(FromTable),
     /// Something was refused; in words for the player.
@@ -249,6 +256,7 @@ mod tests {
             seats,
             salt: 9,
             oracle: None,
+            timers: None,
         });
         let sent = table.drain(PlayerId(2));
         for m in sent.clone() {

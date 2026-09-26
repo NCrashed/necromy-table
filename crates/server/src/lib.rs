@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use necromy_host::{Config, Seat, Table};
+use necromy_host::{Config, Seat, Table, Timers};
 use necromy_net::{
     CODE_LEN, CODE_LETTERS, ClientMsg, LobbyInfo, PROTOCOL, Person, ServerConn, ServerMsg,
     normalize_code,
@@ -18,6 +18,8 @@ use necromy_rules::{God, PlayerId};
 
 /// Seats at a table; free ones go to bots.
 pub const SEATS: usize = 5;
+/// A match nobody sits at waits this long for someone to come back.
+pub const ABANDON_SECS: f32 = 600.0;
 const MAX_NAME: usize = 24;
 
 pub struct Server {
@@ -27,6 +29,8 @@ pub struct Server {
     rng: u64,
     /// `llama-server` address for the tables' gods' voice.
     oracle: Option<String>,
+    /// Clocks on people's decisions at every table.
+    pub timers: Option<Timers>,
 }
 
 struct Client {
@@ -46,7 +50,12 @@ struct Lobby {
 
 struct Running {
     table: Table,
+    /// Connected clients and their seats.
     seats: BTreeMap<u64, PlayerId>,
+    /// Every person's ticket back to their seat.
+    tickets: BTreeMap<u64, PlayerId>,
+    /// Seconds since the last person left, while nobody sits.
+    empty_for: f32,
 }
 
 impl Server {
@@ -57,6 +66,7 @@ impl Server {
             next_client: 0,
             rng: seed,
             oracle,
+            timers: Some(Timers::default()),
         }
     }
 
@@ -87,10 +97,20 @@ impl Server {
                 self.drop_client(id);
             }
         }
-        for lobby in self.lobbies.values_mut() {
+        let mut abandoned = Vec::new();
+        for (code, lobby) in self.lobbies.iter_mut() {
             let Some(running) = lobby.running.as_mut() else {
                 continue;
             };
+            // Nobody sits: the match waits for someone to come back, a while.
+            if running.seats.is_empty() {
+                running.empty_for += dt;
+                if running.empty_for >= ABANDON_SECS {
+                    abandoned.push(code.clone());
+                }
+                continue;
+            }
+            running.empty_for = 0.0;
             running.table.tick(dt);
             for (&client, &seat) in &running.seats {
                 let messages = running.table.drain(seat);
@@ -100,6 +120,9 @@ impl Server {
                     }
                 }
             }
+        }
+        for code in abandoned {
+            self.lobbies.remove(&code);
         }
     }
 
@@ -209,6 +232,10 @@ impl Server {
                 }
                 self.tell_lobby(&code);
             }
+            ClientMsg::Rejoin { code, ticket } => {
+                self.leave(id);
+                self.rejoin(id, &code, ticket);
+            }
             ClientMsg::Start => {
                 let Some(code) = self.lobby_of(id) else {
                     self.refuse(id, "ты не за столом");
@@ -290,6 +317,8 @@ impl Server {
         let seed = self.next_random();
         let salt = self.next_random();
         let oracle = self.oracle.clone();
+        let timers = self.timers;
+        let tickets: Vec<u64> = (0..SEATS).map(|_| self.next_random()).collect();
         let Some(lobby) = self.lobbies.get_mut(code) else {
             return;
         };
@@ -323,14 +352,43 @@ impl Server {
             seats,
             salt,
             oracle,
+            timers,
         });
+        let handed: Vec<(u64, PlayerId, u64)> = seats_of
+            .iter()
+            .zip(tickets)
+            .map(|((&member, &seat), ticket)| (member, seat, ticket))
+            .collect();
         lobby.running = Some(Running {
             table,
-            seats: seats_of.clone(),
+            seats: seats_of,
+            tickets: handed.iter().map(|&(_, seat, t)| (t, seat)).collect(),
+            empty_for: 0.0,
         });
-        for (member, seat) in seats_of {
-            self.send(member, ServerMsg::Started { seat });
+        for (member, seat, ticket) in handed {
+            self.send(member, ServerMsg::Started { seat, ticket });
         }
+    }
+
+    /// Someone who lost the connection sits back down by ticket.
+    fn rejoin(&mut self, id: u64, code: &str, ticket: u64) {
+        let code = normalize_code(code);
+        let Some(running) = self.lobbies.get_mut(&code).and_then(|l| l.running.as_mut()) else {
+            self.refuse(id, "этой партии больше нет");
+            return;
+        };
+        let Some(&seat) = running.tickets.get(&ticket) else {
+            self.refuse(id, "это место не твоё");
+            return;
+        };
+        // A stale connection on the same seat gives way to the new one.
+        running.seats.retain(|_, s| *s != seat);
+        running.seats.insert(id, seat);
+        running.table.set_seat(seat, Seat::Human);
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.lobby = Some(code);
+        }
+        self.send(id, ServerMsg::Started { seat, ticket });
     }
 
     /// Leave the lobby this client is in, if any.
@@ -352,16 +410,16 @@ impl Server {
             // Someone left mid-match: a bot takes the seat (§17.1).
             running.table.set_seat(seat, Seat::Bot);
         }
-        let empty = match &lobby.running {
-            Some(running) => running.seats.is_empty(),
-            None => lobby.members.is_empty(),
-        };
-        if empty {
+        // A match waits for its people to come back (`step` gives up after
+        // `ABANDON_SECS`); a lobby nobody sits in goes at once.
+        if lobby.running.is_none() && lobby.members.is_empty() {
             self.lobbies.remove(&code);
             return;
         }
-        if lobby.owner == id {
-            lobby.owner = lobby.members[0];
+        if lobby.owner == id
+            && let Some(&first) = lobby.members.first()
+        {
+            lobby.owner = first;
         }
         if lobby.running.is_none() {
             self.tell_lobby(&code);

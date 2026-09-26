@@ -10,7 +10,7 @@ use std::collections::{HashMap, VecDeque};
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use necromy_host::{Config, FromTable, OracleNews, Seat, Table, ToTable};
+use necromy_host::{Clock, Config, Decision, FromTable, OracleNews, Seat, Table, ToTable};
 use necromy_net::{ClientConn, ClientMsg, ServerMsg};
 use necromy_rules::{
     CardId, Event, Fighter, Game, God, Hex, Intent, PlayerId, RuleError, Score, Target, Terrain,
@@ -64,6 +64,10 @@ pub struct Match {
     answer_due: bool,
     /// Intents made meanwhile, sent one by one as answers come.
     queued: VecDeque<Intent>,
+    /// The clock the table runs on the human now (§17.1), and seconds since
+    /// it said so.
+    pub clock: Option<Clock>,
+    pub clock_since: f32,
     /// The gods' voice as the table reports it.
     pub oracle: OracleState,
     pub human: PlayerId,
@@ -181,45 +185,91 @@ pub struct ThrowView {
 /// Where the table is: in this process, or on a server.
 enum Link {
     Local(Box<Table>),
-    Remote { conn: ClientConn, lost: bool },
+    Remote(Box<Remote>),
 }
 
-/// What reaches the client: the table's messages, or a word from the server.
+/// A server connection that finds its way back after a break (§17.1).
+struct Remote {
+    conn: ClientConn,
+    ticket: crate::lobby::Ticket,
+    /// The connection broke; `retry` counts down to the next attempt.
+    lost: bool,
+    retry: f32,
+    /// The server refused the ticket: the seat stays with a bot.
+    gone: bool,
+    notices: Vec<Incoming>,
+}
+
+/// Seconds between attempts to sit back down.
+const RETRY_SECS: f32 = 3.0;
+
+/// What reaches the client: the table's messages, or a word about the link.
 enum Incoming {
     Table(FromTable),
     Notice(String),
+    /// The connection broke: whatever was sent and not answered is lost.
+    Broke,
 }
 
 impl Link {
     fn submit(&mut self, seat: PlayerId, message: ToTable) {
         match self {
             Link::Local(table) => table.submit(seat, message),
-            Link::Remote { conn, .. } => conn.send(ClientMsg::Table(message)),
+            Link::Remote(r) => r.conn.send(ClientMsg::Table(message)),
         }
     }
 
     fn tick(&mut self, dt: f32) {
-        if let Link::Local(table) = self {
-            table.tick(dt);
+        match self {
+            Link::Local(table) => table.tick(dt),
+            Link::Remote(r) if r.lost && !r.gone => {
+                r.retry -= dt;
+                if r.retry > 0.0 {
+                    return;
+                }
+                r.retry = RETRY_SECS;
+                if let Ok(conn) = necromy_net::connect(&r.ticket.server, &r.ticket.name) {
+                    conn.send(ClientMsg::Rejoin {
+                        code: r.ticket.code.clone(),
+                        ticket: r.ticket.ticket,
+                    });
+                    r.conn = conn;
+                    r.lost = false;
+                }
+            }
+            Link::Remote(_) => {}
         }
     }
 
     fn drain(&mut self, seat: PlayerId) -> Vec<Incoming> {
         match self {
             Link::Local(table) => table.drain(seat).into_iter().map(Incoming::Table).collect(),
-            Link::Remote { conn, lost } => {
-                let mut out = Vec::new();
-                while let Some(message) = conn.poll() {
+            Link::Remote(r) => {
+                let mut out = std::mem::take(&mut r.notices);
+                while let Some(message) = r.conn.poll() {
                     match message {
                         ServerMsg::Table(m) => out.push(Incoming::Table(m)),
-                        ServerMsg::Error(e) => out.push(Incoming::Notice(format!("Сервер: {e}."))),
-                        ServerMsg::Lobby(_) | ServerMsg::Started { .. } => {}
+                        ServerMsg::Started { .. } => {
+                            out.push(Incoming::Notice("Ты снова за столом.".into()));
+                        }
+                        ServerMsg::Error(e) => {
+                            // Only a refused ticket comes here mid-match.
+                            r.gone = true;
+                            crate::lobby::Ticket::forget();
+                            out.push(Incoming::Notice(format!(
+                                "Сервер: {e}. Твоё место остаётся за ботом."
+                            )));
+                        }
+                        ServerMsg::Lobby(_) => {}
                     }
                 }
-                if !conn.is_open() && !*lost {
-                    *lost = true;
+                if !r.conn.is_open() && !r.lost && !r.gone {
+                    r.lost = true;
+                    r.retry = RETRY_SECS;
+                    out.push(Incoming::Broke);
                     out.push(Incoming::Notice(
-                        "Связь с сервером потеряна: твоё место занял бот.".into(),
+                        "Связь с сервером потеряна: пока за тебя играет бот. Пробую вернуться…"
+                            .into(),
                     ));
                 }
                 out
@@ -278,14 +328,29 @@ impl Match {
             seats,
             salt,
             oracle: Some(oracle),
+            // Alone, nobody waits on the human.
+            timers: None,
         });
         let first = table.drain(human);
         Match::begin(Link::Local(Box::new(table)), human, autoplay, first)
     }
 
     /// A match on a server: `first` holds the table's first update for `seat`.
-    pub fn remote(conn: ClientConn, seat: PlayerId, first: Vec<FromTable>) -> Self {
-        Match::begin(Link::Remote { conn, lost: false }, seat, false, first)
+    pub fn remote(
+        conn: ClientConn,
+        seat: PlayerId,
+        first: Vec<FromTable>,
+        ticket: crate::lobby::Ticket,
+    ) -> Self {
+        let remote = Remote {
+            conn,
+            ticket,
+            lost: false,
+            retry: 0.0,
+            gone: false,
+            notices: Vec::new(),
+        };
+        Match::begin(Link::Remote(Box::new(remote)), seat, false, first)
     }
 
     fn begin(link: Link, human: PlayerId, autoplay: bool, first: Vec<FromTable>) -> Self {
@@ -303,6 +368,8 @@ impl Match {
             answer_due: false,
             queued: VecDeque::new(),
             oracle: OracleState::default(),
+            clock: None,
+            clock_since: 0.0,
             human,
             steps: Vec::new(),
             feed: Vec::new(),
@@ -419,6 +486,13 @@ impl Match {
         for message in messages {
             let message = match message {
                 Incoming::Table(m) => m,
+                Incoming::Broke => {
+                    self.answer_due = false;
+                    self.queued.clear();
+                    self.walk.clear();
+                    self.clock = None;
+                    continue;
+                }
                 Incoming::Notice(text) => {
                     self.feed.push(text);
                     continue;
@@ -433,6 +507,10 @@ impl Match {
                     self.game = *view;
                     self.serial = serial;
                     self.record(&events);
+                    // The match is over: there is no seat to come back to.
+                    if self.game.winner().is_some() && matches!(self.link, Link::Remote(_)) {
+                        crate::lobby::Ticket::forget();
+                    }
                 }
                 FromTable::Accepted => self.answered(),
                 FromTable::Rejected(err) => {
@@ -441,6 +519,18 @@ impl Match {
                     self.answer_due = false;
                     self.feed.push(format!("Нельзя: {}.", reason(err)));
                 }
+                FromTable::Clock(clock) => {
+                    self.clock = clock;
+                    self.clock_since = 0.0;
+                }
+                FromTable::TimedOut(what) => self.feed.push(
+                    match what {
+                        Decision::Turn => "Время вышло: ход закончен.",
+                        Decision::Window => "Время вышло: пас.",
+                        Decision::Wish => "Время вышло: желание не загадано.",
+                    }
+                    .into(),
+                ),
                 FromTable::Oracle(news) => match news {
                     OracleNews::Online(online) => self.oracle.online = online,
                     OracleNews::Listening(god) => self.oracle.listening = god,
@@ -1185,6 +1275,7 @@ fn drive_table(
         m.link.submit(human, ToTable::Shown(serial));
     }
     m.link.tick(time.delta_secs());
+    m.clock_since += time.delta_secs();
     let messages = m.link.drain(human);
     if !messages.is_empty() {
         game.receive(messages);

@@ -19,6 +19,11 @@ use necromy_oracle::{Job, Oracle, prompt};
 use necromy_rules::{Event, Game, God, Intent, PlayerId, RuleError, Setup, bot};
 use serde::{Deserialize, Serialize};
 
+mod clock;
+
+use clock::SeatClock;
+pub use clock::{Clock, Decision, Timers};
+
 /// Seconds between two bot steps.
 pub const BOT_STEP_SECS: f32 = 0.35;
 /// Longest wait for a seat to show a change before bots go on without it.
@@ -57,6 +62,8 @@ pub struct Config {
     pub salt: u64,
     /// `llama-server` address for the gods' voice, `None` for templates only.
     pub oracle: Option<String>,
+    /// Clocks on people's decisions; `None` lets them think forever (alone).
+    pub timers: Option<Timers>,
 }
 
 /// A seat's message to the table.
@@ -88,6 +95,11 @@ pub enum FromTable {
     /// The seat's intent broke the rules; nothing changed.
     Rejected(RuleError),
     Oracle(OracleNews),
+    /// The clock this seat should watch now, sent after every update; `None`
+    /// when nothing runs for it.
+    Clock(Option<Clock>),
+    /// A clock ran out and the table decided for the seat.
+    TimedOut(Decision),
 }
 
 /// News of the gods' voice.
@@ -142,6 +154,8 @@ pub struct Table {
     since_bot: f32,
     outbox: Vec<Vec<FromTable>>,
     voice: Option<Voice>,
+    timers: Option<Timers>,
+    clocks: Vec<SeatClock>,
 }
 
 impl Table {
@@ -162,7 +176,8 @@ impl Table {
                 std::thread::Builder::new()
                     .name("oracle-probe".into())
                     .spawn(move || {
-                        loop {
+                        // Until the table is gone: only this thread holds the flag then.
+                        while Arc::strong_count(&online) > 1 {
                             online.store(necromy_oracle::alive(&addr), Ordering::Relaxed);
                             std::thread::sleep(Duration::from_secs(PROBE_SECS));
                         }
@@ -188,6 +203,8 @@ impl Table {
             since_bot: 0.0,
             outbox: vec![Vec::new(); n],
             voice,
+            timers: config.timers,
+            clocks: vec![SeatClock::default(); n],
         };
         table.broadcast(&events);
         table
@@ -226,6 +243,8 @@ impl Table {
                 },
             );
         }
+        self.clocks[i].clear();
+        self.follow_clock(seat, &[]);
     }
 
     /// Messages waiting for `seat`, oldest first.
@@ -264,6 +283,7 @@ impl Table {
         self.since_update += dt;
         self.since_bot += dt;
         self.hear();
+        self.run_clocks(dt);
         self.run_bots();
     }
 
@@ -299,7 +319,7 @@ impl Table {
             let seat = PlayerId(i as u8);
             let salt = self.next_salt();
             let view = self.game.view_for(Some(seat), salt);
-            let events = events
+            let seen = events
                 .iter()
                 .map(|e| Game::event_for(&view, Some(seat), e))
                 .collect();
@@ -308,10 +328,56 @@ impl Table {
                 seat,
                 FromTable::Update {
                     serial,
-                    events,
+                    events: seen,
                     view: Box::new(view),
                 },
             );
+            self.follow_clock(seat, events);
+        }
+    }
+
+    /// A person's clocks follow the change, and they hear which one runs.
+    fn follow_clock(&mut self, seat: PlayerId, events: &[Event]) {
+        let i = seat.0 as usize;
+        let Some(timers) = self.timers else {
+            return;
+        };
+        if self.seats[i] != Seat::Human {
+            return;
+        }
+        self.clocks[i].follow(&timers, &self.game, seat, events);
+        let shown = self.clocks[i].shown(&self.game, seat);
+        self.send(seat, FromTable::Clock(shown));
+    }
+
+    /// A clock ran out: decide the plainest way for that seat.
+    fn run_clocks(&mut self, dt: f32) {
+        if self.timers.is_none() || self.game.winner().is_some() {
+            return;
+        }
+        for i in 0..self.seats.len() {
+            if self.seats[i] != Seat::Human {
+                continue;
+            }
+            let seat = PlayerId(i as u8);
+            let thinking = self.voice.as_ref().is_some_and(|v| {
+                v.pending
+                    .iter()
+                    .any(|(_, p)| matches!(p, Purpose::Wish { seat: s, .. } if *s == seat))
+            });
+            let Some(intent) = self.clocks[i].run(dt, &self.game, seat, thinking) else {
+                continue;
+            };
+            let what = self.clocks[i].shown(&self.game, seat).map(|c| c.what);
+            let fallback = bot::choose(&self.game, seat);
+            if self.act(seat, intent).is_err() {
+                // The plain move was not legal after all: let the bot decide
+                // rather than hold the table.
+                let _ = self.act(seat, fallback);
+            }
+            if let Some(what) = what {
+                self.send(seat, FromTable::TimedOut(what));
+            }
         }
     }
 

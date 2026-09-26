@@ -25,13 +25,16 @@ pub struct TurnUiPlugin;
 
 impl Plugin for TurnUiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn)
+        app.add_systems(Startup, (spawn, spawn_clock))
             .add_systems(
                 crate::InGame,
                 (rebuild_status, rebuild_action)
                     .run_if(resource_changed::<Match>.or_else(resource_changed::<Selection>)),
             )
-            .add_systems(crate::InGame, (taste_tip, action_buttons, splash));
+            .add_systems(
+                crate::InGame,
+                (taste_tip, action_buttons, splash, show_clock),
+            );
     }
 }
 
@@ -49,6 +52,10 @@ struct ActionBar;
 
 #[derive(Component)]
 struct Splash;
+
+/// Seconds left on the human's clock (server matches only, §17.1).
+#[derive(Component)]
+struct ClockChip;
 
 #[derive(Component, Clone, Copy)]
 enum ActionButton {
@@ -432,4 +439,84 @@ fn splash(
         color.0 = GOLD.with_alpha(alpha);
         shadow.color = Color::linear_rgba(0.0, 0.0, 0.0, 0.75 * alpha);
     }
+}
+
+/// Seconds below which the clock turns red.
+const CLOCK_URGENT: f32 = 10.0;
+
+fn spawn_clock(mut commands: Commands, font: Res<UiFont>) {
+    let chip = commands
+        .spawn((
+            ClockChip,
+            Text::new(""),
+            font.bold(14.0),
+            TextColor(INK),
+            Node {
+                padding: UiRect::axes(px(10.0), px(3.0)),
+                border: UiRect::all(px(2.0)),
+                ..default()
+            },
+            BorderColor::all(GOLD),
+            BackgroundColor(PANEL.with_alpha(0.97)),
+        ))
+        .id();
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(80.0),
+                left: px(0.0),
+                right: px(0.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            // Over the battle panel and the wish: the clock runs there too.
+            GlobalZIndex(40),
+            Visibility::Hidden,
+        ))
+        .add_child(chip);
+}
+
+/// Every frame: the countdown moves even when nothing else changes. Reads
+/// `Match` without touching it, so it redraws nothing else.
+fn show_clock(
+    game: Res<Match>,
+    mut chip: Query<(&mut Text, &mut TextColor, &ChildOf), With<ClockChip>>,
+    mut holders: Query<&mut Visibility>,
+) {
+    let Ok((mut text, mut color, parent)) = chip.single_mut() else {
+        return;
+    };
+    let left = game
+        .clock
+        .map(|c| (c.what, (c.left - game.clock_since).max(0.0)));
+    let Ok(mut visibility) = holders.get_mut(parent.parent()) else {
+        return;
+    };
+    // A window with nothing to answer passes by itself at once: no clock.
+    let idle_window = |what| {
+        what == necromy_host::Decision::Window
+            && game.game.playable(game.human).is_empty()
+            && game.game.battle_dice(game.human).is_none()
+    };
+    let Some((what, left)) = left.filter(|(what, _)| !idle_window(*what)) else {
+        visibility.set_if_neq(Visibility::Hidden);
+        return;
+    };
+    visibility.set_if_neq(Visibility::Inherited);
+    let what = match what {
+        necromy_host::Decision::Turn => "на ход",
+        necromy_host::Decision::Window => "на ответ",
+        necromy_host::Decision::Wish => "на желание",
+    };
+    let wanted = format!("{} с {what}", left.ceil() as u32);
+    if text.0 != wanted {
+        text.0 = wanted;
+    }
+    let tint = if left <= CLOCK_URGENT {
+        Color::srgb(1.0, 0.45, 0.35)
+    } else {
+        INK
+    };
+    color.set_if_neq(TextColor(tint));
 }

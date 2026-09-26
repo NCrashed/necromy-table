@@ -87,11 +87,11 @@ fn friends_meet_by_code_and_play_against_bots() {
     rig.until(&boris, |m| matches!(m, ServerMsg::Error(_)).then_some(()));
     anna.send(ClientMsg::Start);
     let anna_seat = rig.until(&anna, |m| match m {
-        ServerMsg::Started { seat } => Some(seat),
+        ServerMsg::Started { seat, .. } => Some(seat),
         _ => None,
     });
     let boris_seat = rig.until(&boris, |m| match m {
-        ServerMsg::Started { seat } => Some(seat),
+        ServerMsg::Started { seat, .. } => Some(seat),
         _ => None,
     });
     assert_eq!(boris_seat, PlayerId(God::Maya.index() as u8));
@@ -144,7 +144,7 @@ fn a_seat_left_empty_goes_to_a_bot() {
     rig.until(&boris, lobby);
     anna.send(ClientMsg::Start);
     let seat = rig.until(&anna, |m| match m {
-        ServerMsg::Started { seat } => Some(seat),
+        ServerMsg::Started { seat, .. } => Some(seat),
         _ => None,
     });
     drop(boris);
@@ -187,4 +187,105 @@ fn wrong_codes_and_strangers_are_turned_away() {
         _ => None,
     });
     assert!(e.contains("код"));
+}
+
+/// Open a table for `names`, start it, and return the clients, their seats
+/// and tickets, and the code.
+fn seated(rig: &mut Rig, names: &[&str]) -> (Vec<ClientConn>, Vec<(PlayerId, u64)>, String) {
+    let clients: Vec<ClientConn> = names.iter().map(|n| rig.client(n)).collect();
+    clients[0].send(ClientMsg::Create);
+    let code = rig.until(&clients[0], lobby).code;
+    for c in &clients[1..] {
+        c.send(ClientMsg::Join { code: code.clone() });
+        rig.until(c, lobby);
+    }
+    clients[0].send(ClientMsg::Start);
+    let seats = clients
+        .iter()
+        .map(|c| {
+            rig.until(c, |m| match m {
+                ServerMsg::Started { seat, ticket } => Some((seat, ticket)),
+                _ => None,
+            })
+        })
+        .collect();
+    (clients, seats, code)
+}
+
+#[test]
+fn a_lost_player_sits_back_down_by_ticket() {
+    let mut rig = Rig::new();
+    let (mut clients, seats, code) = seated(&mut rig, &["Аня", "Борис"]);
+    let (seat, ticket) = seats[1];
+    drop(clients.pop());
+    for _ in 0..5 {
+        rig.server.step(0.05);
+    }
+    let boris = rig.client("Борис");
+    // Someone else's ticket does not work.
+    boris.send(ClientMsg::Rejoin {
+        code: code.clone(),
+        ticket: ticket ^ 1,
+    });
+    rig.until(&boris, |m| matches!(m, ServerMsg::Error(_)).then_some(()));
+    boris.send(ClientMsg::Rejoin { code, ticket });
+    let back = rig.until(&boris, |m| match m {
+        ServerMsg::Started { seat, .. } => Some(seat),
+        _ => None,
+    });
+    assert_eq!(back, seat);
+    // A fresh view of the running match follows.
+    let view = rig.until(&boris, |m| match m {
+        ServerMsg::Table(FromTable::Update { view, .. }) => Some(view),
+        _ => None,
+    });
+    assert!(view.secret(seat).is_some());
+}
+
+#[test]
+fn a_player_who_sits_idle_is_timed_out() {
+    let mut rig = Rig::new();
+    rig.server.timers = Some(necromy_host::Timers {
+        turn: 2.0,
+        window: 1.0,
+        wish: 1.0,
+    });
+    let (clients, seats, _) = seated(&mut rig, &["Аня"]);
+    let (seat, _) = seats[0];
+    // Anna only watches: she never acts, yet the rounds go on.
+    let mut round = 0;
+    let mut timed_out = 0;
+    for _ in 0..4000 {
+        rig.server.step(0.5);
+        while let Some(m) = clients[0].poll() {
+            match m {
+                ServerMsg::Table(FromTable::Update { serial, view, .. }) => {
+                    round = view.round();
+                    clients[0].send(ClientMsg::Table(ToTable::Shown(serial)));
+                }
+                ServerMsg::Table(FromTable::TimedOut(_)) => timed_out += 1,
+                _ => {}
+            }
+        }
+        if round >= 3 {
+            assert!(timed_out > 0, "{seat:?} was never timed out");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    panic!("an idle player held the table: round {round}");
+}
+
+#[test]
+fn an_empty_match_waits_and_then_closes() {
+    let mut rig = Rig::new();
+    let (clients, _, _) = seated(&mut rig, &["Аня"]);
+    drop(clients);
+    for _ in 0..20 {
+        rig.server.step(0.05);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(rig.server.lobby_count(), 1, "kept for a return");
+    rig.server.step(ABANDON_SECS + 1.0);
+    assert_eq!(rig.server.lobby_count(), 0);
 }

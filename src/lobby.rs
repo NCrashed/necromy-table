@@ -1,4 +1,4 @@
-//! The front of the game: the menu and the lobby (docs/design.md §17).
+//! The front of the game: the //! Dev aids: `NECROMY_PLAY=local|menu|create|join:CODE|return` skips the clicks, and the lobby (docs/design.md §17).
 //!
 //! Before a match there is no `Match`: this screen owns the window. From
 //! the menu one plays alone (a table in this process) or with friends: open
@@ -89,6 +89,12 @@ pub struct Front {
     /// `NECROMY_START_AT`: the opener starts once this many sit.
     start_at: Option<usize>,
     asked_start: bool,
+    /// A saved way back to a running match.
+    ticket: Option<Ticket>,
+    /// The ticket the server handed out with our seat.
+    ticket_no: u64,
+    /// We dialled to sit back down by ticket.
+    returning: bool,
 }
 
 impl Front {
@@ -108,6 +114,9 @@ impl Front {
             first: Vec::new(),
             start_at: env("NECROMY_START_AT").and_then(|n| n.parse().ok()),
             asked_start: false,
+            ticket: Ticket::load(),
+            ticket_no: 0,
+            returning: false,
         }
     }
 
@@ -145,6 +154,21 @@ impl Front {
         }
     }
 
+    /// Sit back down at the match the saved ticket names.
+    fn go_back(&mut self) {
+        let Some(t) = self.ticket.clone() else {
+            return;
+        };
+        self.server = t.server;
+        self.name = t.name;
+        self.code = t.code.clone();
+        self.returning = true;
+        self.dial(ClientMsg::Rejoin {
+            code: t.code,
+            ticket: t.ticket,
+        });
+    }
+
     fn leave(&mut self) {
         self.conn = None;
         self.lobby = None;
@@ -166,6 +190,8 @@ enum FrontButton {
     Pick(Option<God>),
     Start,
     Leave,
+    /// Sit back down at the match the saved ticket names.
+    Return,
 }
 
 fn spawn(mut commands: Commands) {
@@ -204,6 +230,9 @@ fn dev_play(mut done: Local<bool>, mut front: ResMut<Front>, mut commands: Comma
             front.dial(ClientMsg::Join { code });
         }
         Ok("local") => commands.insert_resource(Match::local()),
+        Ok("return") => {
+            front.go_back();
+        }
         _ => {}
     }
 }
@@ -227,8 +256,19 @@ fn poll_server(mut front: ResMut<Front>, mut commands: Commands) {
                 f.code = info.code.clone();
                 f.lobby = Some(info);
             }
-            ServerMsg::Error(e) => f.error = Some(e),
-            ServerMsg::Started { seat } => f.seat = Some(seat),
+            ServerMsg::Error(e) => {
+                // The seat to return to is gone: forget it.
+                if f.returning {
+                    f.returning = false;
+                    f.ticket = None;
+                    Ticket::forget();
+                }
+                f.error = Some(e);
+            }
+            ServerMsg::Started { seat, ticket } => {
+                f.seat = Some(seat);
+                f.ticket_no = ticket;
+            }
             ServerMsg::Table(m) => f.first.push(m),
         }
     }
@@ -260,7 +300,20 @@ fn poll_server(mut front: ResMut<Front>, mut commands: Commands) {
         && let Some(conn) = f.conn.take()
     {
         let first = std::mem::take(&mut f.first);
-        commands.insert_resource(Match::remote(conn, seat, first));
+        let ticket = Ticket {
+            server: f.server.clone(),
+            name: f.name.clone(),
+            code: f.code.clone(),
+            ticket: f.ticket_no,
+        };
+        ticket.save();
+        let mut m = Match::remote(conn, seat, first, ticket);
+        if f.returning {
+            f.returning = false;
+            m.feed
+                .push("Ты снова за столом: пока тебя не было, играл бот.".into());
+        }
+        commands.insert_resource(m);
     }
     if changed {
         front.set_changed();
@@ -341,6 +394,9 @@ fn buttons(
                 }
             }
             FrontButton::Leave => front.leave(),
+            FrontButton::Return => {
+                front.go_back();
+            }
         }
     }
 }
@@ -493,6 +549,26 @@ fn rebuild(
 fn menu(commands: &mut Commands, font: &UiFont, front: &Front, rows: &mut Vec<Entity>) {
     rows.push(text(commands, font, "Стол пяти богов.", 14.0, DIM));
     rows.push(field(commands, font, front, Field::Name, "Имя"));
+    if let Some(t) = &front.ticket {
+        let back = button(
+            commands,
+            font,
+            FrontButton::Return,
+            &format!("Вернуться за стол {}", t.code),
+            true,
+        );
+        rows.push(back);
+        rows.push(text(
+            commands,
+            font,
+            &format!(
+                "Партия на {} ещё может идти: твоё место держит бот.",
+                t.server
+            ),
+            12.0,
+            DIM,
+        ));
+    }
     let alone = button(commands, font, FrontButton::Alone, "Одиночная игра", true);
     rows.push(alone);
     rows.push(text(
@@ -659,4 +735,62 @@ fn lobby_rows(commands: &mut Commands, font: &UiFont, lobby: &LobbyInfo, rows: &
 fn god_color(god: God) -> Color {
     let [r, g, b] = god.accent();
     Color::srgb_u8(r, g, b)
+}
+
+/// The way back to a seat at a running match on a server, kept on disk so
+/// that even a restarted game can sit back down (`NECROMY_TICKET` moves it).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ticket {
+    pub server: String,
+    pub name: String,
+    pub code: String,
+    pub ticket: u64,
+}
+
+impl Ticket {
+    fn path() -> Option<std::path::PathBuf> {
+        if let Some(p) = std::env::var_os("NECROMY_TICKET") {
+            return Some(p.into());
+        }
+        let state = std::env::var_os("XDG_STATE_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".local/state"))
+            })?;
+        Some(state.join("necromy-table").join("ticket"))
+    }
+
+    pub fn save(&self) {
+        let Some(path) = Ticket::path() else {
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let text = format!(
+            "{}\n{}\n{}\n{}\n",
+            self.server, self.code, self.ticket, self.name
+        );
+        if let Err(err) = std::fs::write(&path, text) {
+            warn!("could not keep the ticket at {}: {err}", path.display());
+        }
+    }
+
+    pub fn load() -> Option<Ticket> {
+        let text = std::fs::read_to_string(Ticket::path()?).ok()?;
+        let mut lines = text.lines();
+        Some(Ticket {
+            server: lines.next()?.to_string(),
+            code: lines.next()?.to_string(),
+            ticket: lines.next()?.parse().ok()?,
+            name: lines.next().unwrap_or("Игрок").to_string(),
+        })
+    }
+
+    /// The match is over or the seat is gone: nothing to come back to.
+    pub fn forget() {
+        if let Some(path) = Ticket::path() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }

@@ -7,6 +7,7 @@ fn table(seats: Vec<Seat>) -> Table {
         seats,
         salt: 1234,
         oracle: None,
+        timers: None,
     })
 }
 
