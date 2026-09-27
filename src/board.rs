@@ -124,8 +124,13 @@ struct IconMaterials(HashMap<Terrain, Handle<StandardMaterial>>);
 #[derive(Resource, Default, PartialEq, Eq)]
 pub struct Hovered(pub Option<Hex>);
 
-#[derive(Component)]
-struct Marker;
+/// A marker on the board: what it shows and where, so a redraw keeps the
+/// ones still true and touches only what changed.
+#[derive(Component, Clone, PartialEq)]
+struct Marker {
+    hex: Hex,
+    image: AssetId<Image>,
+}
 
 #[derive(Resource)]
 struct MarkerSprites {
@@ -361,11 +366,8 @@ fn sync_markers(
     game: Res<Match>,
     board: Res<Board>,
     sprites: Res<MarkerSprites>,
-    markers: Query<Entity, With<Marker>>,
+    markers: Query<(Entity, &Marker)>,
 ) {
-    for entity in &markers {
-        commands.entity(entity).despawn();
-    }
     let corpses = game
         .game
         .board()
@@ -406,10 +408,31 @@ fn sync_markers(
     // Pixels per metre: markers are small, the trail is drawn twice as big.
     let corpses = corpses.map(|(h, i)| (h, i, front, 16.0));
     let traps = traps.map(|(h, i)| (h, i, front, 16.0));
-    for (hex, image, offset, pixels_per_metre) in corpses.chain(traps).chain(flags).chain(trails) {
+    let wanted: Vec<_> = corpses.chain(traps).chain(flags).chain(trails).collect();
+    // Despawning and respawning everything would blink every marker for a
+    // frame (this runs on each hover): keep what is still wanted.
+    let mut kept = Vec::new();
+    for (entity, marker) in &markers {
+        if wanted
+            .iter()
+            .any(|(h, i, ..)| *h == marker.hex && i.id() == marker.image)
+        {
+            kept.push(marker.clone());
+        } else {
+            commands.entity(entity).despawn();
+        }
+    }
+    for (hex, image, offset, pixels_per_metre) in wanted {
+        let marker = Marker {
+            hex,
+            image: image.id(),
+        };
+        if kept.contains(&marker) {
+            continue;
+        }
         let pos = board.hex_to_world(hex) + offset;
         commands.spawn((
-            Marker,
+            marker,
             Billboard,
             NotShadowCaster,
             NotShadowReceiver,

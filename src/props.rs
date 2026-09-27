@@ -24,10 +24,15 @@ pub struct PropsPlugin;
 
 impl Plugin for PropsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, load_props).add_systems(
-            crate::InGame,
-            sync_props.run_if(resource_changed::<Match>.or_else(props_just_loaded)),
-        );
+        app.add_systems(Startup, load_props)
+            .add_systems(
+                crate::InGame,
+                sync_props.run_if(resource_changed::<Match>.or_else(props_just_loaded)),
+            )
+            .add_systems(
+                crate::InGame,
+                (own_materials, fade_occluders).after(crate::camera::apply),
+            );
     }
 }
 
@@ -232,4 +237,76 @@ fn spawn_prop(commands: &mut Commands, images: &PropImages, kind: PropKind, hex:
         },
         Transform::from_translation(at),
     ));
+}
+
+/// Props still sharing the library's material.
+type SharedProps<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static mut MeshMaterial3d<StandardMaterial>),
+    (With<Prop>, Without<Fade>),
+>;
+
+/// A prop with its own material, so it alone can fade.
+#[derive(Component)]
+struct Fade {
+    faded: bool,
+}
+
+/// `bevy_sprite3d` shares one material per image; a prop that may fade
+/// takes its own copy once built. Props never change their `Sprite`, so the
+/// library does not swap it back.
+fn own_materials(
+    mut commands: Commands,
+    mut props: SharedProps,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for (entity, mut material) in &mut props {
+        let Some(copy) = materials.get(&material.0).cloned() else {
+            continue;
+        };
+        material.0 = materials.add(copy);
+        commands.entity(entity).insert(Fade { faded: false });
+    }
+}
+
+/// How close in front of a champion a prop must stand to be seen through.
+const FADE_REACH: f32 = 0.95;
+const FADE_ALPHA: f32 = 0.35;
+
+/// A prop between the camera and a champion goes see-through: trees must
+/// not swallow the pieces.
+fn fade_occluders(
+    camera: Single<&Transform, With<crate::TableCamera>>,
+    tokens: Query<(&Transform, &Visibility), With<crate::token::Token>>,
+    mut props: Query<(&Transform, &MeshMaterial3d<StandardMaterial>, &mut Fade)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let towards_camera = camera.back().with_y(0.0).normalize_or_zero();
+    let across = Vec3::Y.cross(towards_camera);
+    let pieces: Vec<Vec3> = tokens
+        .iter()
+        .filter(|(_, v)| **v != Visibility::Hidden)
+        .map(|(t, _)| t.translation)
+        .collect();
+    for (transform, material, mut fade) in &mut props {
+        let covers = pieces.iter().any(|piece| {
+            let d = (transform.translation - *piece).with_y(0.0);
+            let ahead = d.dot(towards_camera);
+            ahead > 0.0 && ahead < FADE_REACH && d.dot(across).abs() < 0.6
+        });
+        if covers == fade.faded {
+            continue;
+        }
+        fade.faded = covers;
+        if let Some(mut m) = materials.get_mut(&material.0) {
+            if covers {
+                m.alpha_mode = AlphaMode::Blend;
+                m.base_color = Color::srgba(1.0, 1.0, 1.0, FADE_ALPHA);
+            } else {
+                m.alpha_mode = AlphaMode::Mask(0.5);
+                m.base_color = Color::WHITE;
+            }
+        }
+    }
 }

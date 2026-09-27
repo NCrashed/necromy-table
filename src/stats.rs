@@ -100,7 +100,12 @@ struct Popup;
 #[derive(Component)]
 struct GodsPanel;
 
-fn make_art(mut commands: Commands, game: Res<Match>, mut images: ResMut<Assets<Image>>) {
+fn make_art(
+    mut commands: Commands,
+    game: Res<Match>,
+    assets: Res<AssetServer>,
+    mut images: ResMut<Assets<Image>>,
+) {
     let icons = StatIcon::ALL
         .into_iter()
         .map(|i| (i, images.add(icons::stat_icon(i))))
@@ -110,7 +115,16 @@ fn make_art(mut commands: Commands, game: Res<Match>, mut images: ResMut<Assets<
         .game
         .champions()
         .iter()
-        .map(|c| images.add(token::placeholder_sprite(c.god.accent())))
+        .map(|c| {
+            // A bust cut from the champion's sheet (`scripts/portraits.sh`),
+            // else the placeholder figure.
+            let path = format!("portraits/{}.png", c.god.name().to_lowercase());
+            if std::path::Path::new("assets").join(&path).exists() {
+                assets.load(path)
+            } else {
+                images.add(token::placeholder_sprite(c.god.accent()))
+            }
+        })
         .collect();
     let gods = God::ALL.map(|g| images.add(icons::element_icon(g.element(), g.accent())));
     let offering = images.add(icons::offering_icon());

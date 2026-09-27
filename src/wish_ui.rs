@@ -291,10 +291,11 @@ fn rebuild_panel(
         let field = commands
             .spawn((
                 Node {
-                    padding: UiRect::all(px(8.0)),
                     border: UiRect::all(px(2.0)),
-                    min_height: px(44.0),
+                    // Room for the longest wish (`MAX_WISH`), four lines.
+                    height: px(84.0),
                     width: px(610.0),
+                    overflow: Overflow::clip(),
                     ..default()
                 },
                 BorderColor::all(GOLD.with_alpha(0.6)),
@@ -315,6 +316,12 @@ fn rebuild_panel(
                 font.text(15.0),
                 TextColor(color),
                 Node {
+                    // Out of the field's layout: measured at min-content
+                    // width, wrapped text would grow the field by a line
+                    // per key (CLAUDE.md, `TextLayout::no_wrap`).
+                    position_type: PositionType::Absolute,
+                    left: px(8.0),
+                    top: px(6.0),
                     width: px(590.0),
                     ..default()
                 },
