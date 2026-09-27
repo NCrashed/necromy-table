@@ -7,6 +7,7 @@ mod icons;
 mod lobby;
 mod names;
 mod play;
+mod props;
 mod stats;
 mod story_ui;
 mod token;
@@ -42,6 +43,7 @@ fn main() {
             camera::CameraPlugin,
             play::PlayPlugin,
             board::BoardPlugin,
+            props::PropsPlugin,
             token::TokenPlugin,
             hud::HudPlugin,
             dice::DicePlugin,

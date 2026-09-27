@@ -72,18 +72,20 @@ struct TileArt {
     terrain: Terrain,
 }
 
-/// Painted terrain tiles in `assets/tiles/`, `<name>-<n>.png`. A terrain not
-/// listed keeps its flat colour and icon.
+/// Ground textures in `assets/tiles/`, `<name>-<n>.png`: bare ground under
+/// the terrain's billboard props (`props.rs`). The temple is still a
+/// painted tile with its shrine baked in. A terrain not listed keeps its
+/// flat colour and icon.
 const TILE_ART: [(Terrain, &str, usize); 9] = [
-    (Terrain::Plains, "plains", 3),
-    (Terrain::Forest, "forest", 4),
-    (Terrain::Mountain, "mountain", 3),
-    (Terrain::Swamp, "swamp", 2),
-    (Terrain::Settlement, "settlement", 3),
+    (Terrain::Plains, "ground/meadow", 2),
+    (Terrain::Forest, "ground/forest", 1),
+    (Terrain::Grove, "ground/forest", 1),
+    (Terrain::Mountain, "ground/rock", 3),
+    (Terrain::Swamp, "ground/swamp", 3),
+    (Terrain::Settlement, "ground/village", 1),
     (Terrain::Temple, "temple", 4),
-    (Terrain::Ruins, "ruins", 4),
-    (Terrain::Stones, "stones", 4),
-    (Terrain::Grove, "grove", 4),
+    (Terrain::Ruins, "ground/ruins", 2),
+    (Terrain::Stones, "ground/moss", 2),
 ];
 
 /// Tile images are 64×64 with the hexagon in the top 55.4 rows: the quad is
