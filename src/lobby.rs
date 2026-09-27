@@ -21,6 +21,7 @@ use necromy_rules::{God, PlayerId};
 use crate::hud::{INK, UiFont};
 use crate::names;
 use crate::play::Match;
+use crate::ui_skin::{Accent, BRONZE_RIM, Frame};
 
 const GOLD: Color = Color::srgb(1.0, 0.82, 0.3);
 const DIM: Color = Color::srgb(0.72, 0.70, 0.64);
@@ -413,18 +414,13 @@ fn button(
             action,
             Button,
             Node {
-                padding: UiRect::axes(px(12.0), px(6.0)),
-                border: UiRect::all(px(2.0)),
+                padding: UiRect::axes(px(16.0), px(9.0)),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BorderColor::all(if on { GOLD } else { GOLD.with_alpha(0.3) }),
-            BackgroundColor(if on {
-                Color::srgba(0.35, 0.26, 0.1, 0.95)
-            } else {
-                Color::srgba(0.15, 0.12, 0.15, 0.9)
-            }),
+            Frame::Button,
+            Accent(if on { GOLD } else { BRONZE_RIM }),
         ))
         .id();
     let t = commands
@@ -491,12 +487,11 @@ fn field(
             Node {
                 width: px(300.0),
                 min_height: px(30.0),
-                padding: UiRect::axes(px(8.0), px(5.0)),
-                border: UiRect::all(px(2.0)),
+                padding: UiRect::axes(px(10.0), px(7.0)),
                 ..default()
             },
-            BorderColor::all(if focused { GOLD } else { GOLD.with_alpha(0.3) }),
-            BackgroundColor(Color::srgba(0.04, 0.03, 0.06, 1.0)),
+            Frame::Inset,
+            Accent(if focused { GOLD } else { BRONZE_RIM }),
         ))
         .id();
     let t = commands
@@ -520,13 +515,11 @@ fn rebuild(
             Node {
                 flex_direction: FlexDirection::Column,
                 row_gap: px(12.0),
-                padding: UiRect::all(px(24.0)),
-                border: UiRect::all(px(2.0)),
+                padding: UiRect::all(px(30.0)),
                 width: px(560.0),
                 ..default()
             },
-            BorderColor::all(GOLD),
-            BackgroundColor(Color::srgba(0.13, 0.11, 0.15, 1.0)),
+            Frame::Plate,
         ))
         .id();
     let mut rows = Vec::new();

@@ -8,7 +8,8 @@
 use bevy::prelude::*;
 use necromy_rules::Condition;
 
-use crate::hud::{INK, PANEL, UiFont};
+use crate::hud::{INK, UiFont};
+use crate::ui_skin::{Accent, Frame};
 use crate::names;
 use crate::play::Match;
 use crate::stats::{self, StatArt};
@@ -75,10 +76,10 @@ fn spawn(mut commands: Commands, font: Res<UiFont>) {
             top: px(205.0),
             right: px(300.0),
             width: px(260.0),
-            padding: UiRect::all(px(6.0)),
+            padding: UiRect::all(px(8.0)),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.05, 0.04, 0.07, 0.95)),
+        Frame::Tip,
         GlobalZIndex(10),
         Visibility::Hidden,
     ));
@@ -112,12 +113,12 @@ fn rebuild_conditions(
         .spawn((
             Node {
                 flex_direction: FlexDirection::Column,
-                padding: UiRect::all(px(8.0)),
+                padding: UiRect::all(px(12.0)),
                 row_gap: px(4.0),
                 width: px(280.0),
                 ..default()
             },
-            BackgroundColor(PANEL),
+            Frame::Panel,
         ))
         .id();
     let title = stats::label(&mut commands, &font, "Условия победы", 14.0, true);
@@ -165,14 +166,14 @@ fn condition_row(
             Button,
             Node {
                 flex_direction: FlexDirection::Column,
-                padding: UiRect::all(px(4.0)),
-                border: UiRect::all(px(1.0)),
+                padding: UiRect::axes(px(8.0), px(6.0)),
                 ..default()
             },
-            BorderColor::all(if secret {
-                Color::srgba(0.7, 0.5, 0.95, 0.7)
+            Frame::Tip,
+            Accent(if secret {
+                Color::srgb(0.62, 0.45, 0.85)
             } else {
-                GOLD.with_alpha(0.35)
+                Color::srgb(0.66, 0.47, 0.24)
             }),
         ))
         .id();
@@ -254,17 +255,16 @@ fn rebuild_end(
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 row_gap: px(10.0),
-                padding: UiRect::all(px(20.0)),
-                border: UiRect::all(px(3.0)),
+                padding: UiRect::all(px(26.0)),
                 width: px(460.0),
                 ..default()
             },
-            BorderColor::all(if won {
+            Frame::Plate,
+            Accent(if won {
                 GOLD
             } else {
                 Color::srgb(0.6, 0.6, 0.65)
             }),
-            BackgroundColor(PANEL.with_alpha(1.0)),
         ))
         .id();
     let title = stats::label(
@@ -328,12 +328,10 @@ fn rebuild_end(
                 button,
                 Button,
                 Node {
-                    padding: UiRect::axes(px(12.0), px(6.0)),
-                    border: UiRect::all(px(2.0)),
+                    padding: UiRect::axes(px(16.0), px(8.0)),
                     ..default()
                 },
-                BorderColor::all(GOLD),
-                BackgroundColor(Color::srgba(0.2, 0.15, 0.1, 0.9)),
+                Frame::Button,
             ))
             .id();
         let t = stats::label(&mut commands, &font, label, 14.0, true);

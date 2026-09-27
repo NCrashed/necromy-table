@@ -6,6 +6,7 @@ use bevy::text::{FontSize, FontSource};
 use bevy::window::PrimaryWindow;
 use necromy_rules::{CardId, Game, WindowKind};
 
+use crate::ui_skin::Frame;
 use crate::board::{Board, Hovered};
 use crate::card_art::{CARD_H, CardArt, CardLook, card_node};
 use crate::names;
@@ -97,7 +98,6 @@ struct Incoming;
 struct HandCard(CardId);
 
 pub const INK: Color = Color::srgb(0.95, 0.92, 0.85);
-pub const PANEL: Color = Color::srgba(0.08, 0.07, 0.10, 0.82);
 
 fn spawn_hud(mut commands: Commands, font: Res<UiFont>) {
     let panel = |top: Option<f32>, left: Option<f32>, right: Option<f32>| Node {
@@ -105,7 +105,7 @@ fn spawn_hud(mut commands: Commands, font: Res<UiFont>) {
         top: top.map_or(Val::Auto, px),
         left: left.map_or(Val::Auto, px),
         right: right.map_or(Val::Auto, px),
-        padding: UiRect::all(px(8.0)),
+        padding: UiRect::all(px(10.0)),
         max_width: px(620.0),
         ..default()
     };
@@ -118,7 +118,7 @@ fn spawn_hud(mut commands: Commands, font: Res<UiFont>) {
             max_width: px(360.0),
             ..panel(Some(140.0), Some(10.0), None)
         },
-        BackgroundColor(PANEL),
+        Frame::Panel,
     ));
     commands.spawn((
         Incoming,
@@ -141,11 +141,11 @@ fn spawn_hud(mut commands: Commands, font: Res<UiFont>) {
         TextColor(INK),
         Node {
             position_type: PositionType::Absolute,
-            padding: UiRect::all(px(6.0)),
+            padding: UiRect::all(px(8.0)),
             max_width: px(320.0),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.05, 0.04, 0.07, 0.92)),
+        Frame::Tip,
         Visibility::Hidden,
         // Above cards and panels.
         GlobalZIndex(10),
@@ -283,7 +283,7 @@ fn rebuild_incoming(
     visibility.set_if_neq(Visibility::Inherited);
 
     let backed = Node {
-        padding: UiRect::axes(px(8.0), px(3.0)),
+        padding: UiRect::axes(px(10.0), px(5.0)),
         ..default()
     };
     let header = commands
@@ -292,7 +292,7 @@ fn rebuild_incoming(
             font.bold(14.0),
             TextColor(INK),
             backed.clone(),
-            BackgroundColor(PANEL),
+            Frame::Tip,
         ))
         .id();
     let card = card_node(
@@ -312,7 +312,7 @@ fn rebuild_incoming(
                 font.text(12.0),
                 TextColor(INK),
                 backed.clone(),
-                BackgroundColor(PANEL),
+                Frame::Tip,
             ))
             .id();
         children.push(f);
@@ -323,12 +323,10 @@ fn rebuild_incoming(
                 IncomingSkip,
                 Button,
                 Node {
-                    padding: UiRect::axes(px(10.0), px(4.0)),
-                    border: UiRect::all(px(2.0)),
+                    padding: UiRect::axes(px(14.0), px(7.0)),
                     ..default()
                 },
-                BorderColor::all(Color::srgb(1.0, 0.82, 0.3)),
-                BackgroundColor(Color::srgba(0.2, 0.15, 0.1, 0.9)),
+                Frame::Button,
             ))
             .id();
         let label = commands

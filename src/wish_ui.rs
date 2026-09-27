@@ -15,7 +15,8 @@ use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 use necromy_rules::{God, Intent, PlayerId, WishKind};
 
-use crate::hud::{INK, PANEL, UiFont};
+use crate::hud::{INK, UiFont};
+use crate::ui_skin::{Accent, BRONZE_RIM, Frame};
 use crate::names;
 use crate::play::Match;
 use crate::stats::{self, StatArt};
@@ -115,18 +116,13 @@ fn button(
             action,
             Button,
             Node {
-                padding: UiRect::axes(px(8.0), px(4.0)),
-                border: UiRect::all(px(2.0)),
+                padding: UiRect::axes(px(12.0), px(7.0)),
                 align_items: AlignItems::Center,
                 column_gap: px(4.0),
                 ..default()
             },
-            BorderColor::all(if on { GOLD } else { GOLD.with_alpha(0.25) }),
-            BackgroundColor(if on {
-                Color::srgba(0.35, 0.26, 0.1, 0.95)
-            } else {
-                Color::srgba(0.15, 0.12, 0.15, 0.9)
-            }),
+            Frame::Button,
+            Accent(if on { GOLD } else { BRONZE_RIM }),
         ))
         .id();
     let t = stats::label(commands, font, text, 13.0, on);
@@ -187,13 +183,11 @@ fn rebuild_panel(
             Node {
                 flex_direction: FlexDirection::Column,
                 row_gap: px(8.0),
-                padding: UiRect::all(px(14.0)),
-                border: UiRect::all(px(2.0)),
+                padding: UiRect::all(px(22.0)),
                 width: px(640.0),
                 ..default()
             },
-            BorderColor::all(GOLD),
-            BackgroundColor(PANEL.with_alpha(1.0)),
+            Frame::Plate,
         ))
         .id();
     let mut rows = Vec::new();
@@ -291,15 +285,14 @@ fn rebuild_panel(
         let field = commands
             .spawn((
                 Node {
-                    border: UiRect::all(px(2.0)),
+                    border: UiRect::all(px(4.0)),
                     // Room for the longest wish (`MAX_WISH`), four lines.
                     height: px(84.0),
                     width: px(610.0),
                     overflow: Overflow::clip(),
                     ..default()
                 },
-                BorderColor::all(GOLD.with_alpha(0.6)),
-                BackgroundColor(Color::srgba(0.05, 0.04, 0.07, 1.0)),
+                Frame::Inset,
             ))
             .id();
         let (shown, color) = if draft.text.is_empty() {
@@ -608,13 +601,11 @@ fn rebuild_reply(
             Node {
                 flex_direction: FlexDirection::Column,
                 row_gap: px(4.0),
-                padding: UiRect::all(px(12.0)),
-                border: UiRect::all(px(2.0)),
+                padding: UiRect::all(px(20.0)),
                 width: px(540.0),
                 ..default()
             },
-            BorderColor::all(GOLD),
-            BackgroundColor(PANEL.with_alpha(0.97)),
+            Frame::Plate,
         ))
         .id();
     let mut rows = Vec::new();

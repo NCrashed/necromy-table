@@ -15,6 +15,7 @@ mod stats;
 mod story_ui;
 mod token;
 mod turn_ui;
+mod ui_skin;
 mod victory_ui;
 mod wish_ui;
 
@@ -52,6 +53,7 @@ fn main() {
             token::TokenPlugin,
             hud::HudPlugin,
             card_art::CardArtPlugin,
+            ui_skin::UiSkinPlugin,
             dice::DicePlugin,
         ))
         // The screens: more plugins than one tuple holds.

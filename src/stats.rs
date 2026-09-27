@@ -9,15 +9,16 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use necromy_rules::{GUARD_THRESHOLD, God, PlayerId};
 
+use crate::ui_skin::{Accent, Frame};
 use crate::board::Hovered;
-use crate::hud::{INK, PANEL, UiFont};
+use crate::hud::{INK, UiFont};
 use crate::icons::{self, StatIcon};
 use crate::names;
 use crate::play::Match;
 use crate::token;
 
 const ICON: f32 = 32.0;
-const CELL_W: f32 = 9.0;
+const CELL_W: f32 = 10.0;
 const CELL_H: f32 = 14.0;
 
 pub const HEALTH: Color = Color::srgb(0.84, 0.20, 0.23);
@@ -219,7 +220,7 @@ fn rebuild_seats(
         let border = if g.awaiting().contains(&p) {
             GOLD
         } else {
-            Color::srgba(1.0, 1.0, 1.0, 0.15)
+            Color::srgb(0.36, 0.3, 0.26)
         };
         let seat = commands
             .spawn((
@@ -228,13 +229,12 @@ fn rebuild_seats(
                 Node {
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    padding: UiRect::all(px(3.0)),
-                    border: UiRect::all(px(2.0)),
+                    padding: UiRect::all(px(7.0)),
                     row_gap: px(2.0),
                     ..default()
                 },
-                BorderColor::all(border),
-                BackgroundColor(PANEL),
+                Frame::Tip,
+                Accent(border),
             ))
             .id();
         let crown = icon_node(
@@ -328,11 +328,11 @@ fn stat_sheet(
         .spawn((
             Node {
                 flex_direction: FlexDirection::Column,
-                padding: UiRect::all(px(8.0)),
+                padding: UiRect::all(px(12.0)),
                 row_gap: px(2.0),
                 ..default()
             },
-            BackgroundColor(PANEL),
+            Frame::Panel,
         ))
         .id();
     let Some(c) = g.champion(player) else {
@@ -558,11 +558,10 @@ pub fn bar(
                 Node {
                     width: px(w),
                     height: px(h),
-                    border: UiRect::all(px(1.0)),
                     ..default()
                 },
-                BorderColor::all(frame),
-                BackgroundColor(if filled { color } else { Color::NONE }),
+                if filled { Frame::Cell } else { Frame::Slot },
+                Accent(if filled { color } else { frame }),
             ))
             .id();
         commands.entity(bar).add_child(cell);
@@ -572,7 +571,7 @@ pub fn bar(
 
 const RELIEF: Color = Color::srgb(0.50, 0.76, 0.96);
 const PRESSURE: Color = Color::srgb(0.92, 0.30, 0.24);
-const HOLLOW: Color = Color::srgba(1.0, 1.0, 1.0, 0.3);
+const HOLLOW: Color = Color::srgb(0.55, 0.52, 0.5);
 
 /// The five gods (§5): stage as cells from light to dark, pressure as a
 /// two-sided bar (a full side shifts the stage at dusk), your favour.
@@ -589,11 +588,11 @@ fn rebuild_gods(
         .spawn((
             Node {
                 flex_direction: FlexDirection::Column,
-                padding: UiRect::all(px(8.0)),
+                padding: UiRect::all(px(12.0)),
                 row_gap: px(3.0),
                 ..default()
             },
-            BackgroundColor(PANEL),
+            Frame::Panel,
         ))
         .id();
     let title = label(&mut commands, &font, "Боги", 14.0, true);
@@ -693,11 +692,10 @@ fn cell(commands: &mut Commands, filled: bool, fill: Color, frame: Color) -> Ent
             Node {
                 width: px(CELL_W),
                 height: px(CELL_H),
-                border: UiRect::all(px(1.0)),
                 ..default()
             },
-            BorderColor::all(if filled { fill } else { frame }),
-            BackgroundColor(if filled { fill } else { Color::NONE }),
+            if filled { Frame::Cell } else { Frame::Slot },
+            Accent(if filled { fill } else { frame }),
         ))
         .id()
 }
@@ -786,11 +784,11 @@ fn guard_sheet(commands: &mut Commands, art: &StatArt, font: &UiFont, m: &Match)
         .spawn((
             Node {
                 flex_direction: FlexDirection::Column,
-                padding: UiRect::all(px(8.0)),
+                padding: UiRect::all(px(12.0)),
                 row_gap: px(4.0),
                 ..default()
             },
-            BackgroundColor(PANEL),
+            Frame::Panel,
         ))
         .id();
 

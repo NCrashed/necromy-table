@@ -7,7 +7,8 @@ use bevy::prelude::*;
 use necromy_rules::{Face, GUARD_DICE, Intent, PlayerId, WindowKind};
 
 use crate::dice::{DiceShow, Revealed, TRAY_TEXTURE, TrayTextures};
-use crate::hud::{INK, PANEL, UiFont};
+use crate::hud::{INK, UiFont};
+use crate::ui_skin::Frame;
 use crate::icons::StatIcon;
 use crate::names;
 use crate::play::{Match, Selection};
@@ -16,7 +17,6 @@ use crate::stats::{self, HEALTH, StatArt};
 /// Width of the trays on screen.
 const TRAY_W: f32 = 400.0;
 const BURN_FRAME: Color = Color::srgb(0.95, 0.55, 0.2);
-const GOLD: Color = Color::srgb(1.0, 0.82, 0.3);
 
 pub struct BattleUiPlugin;
 
@@ -102,15 +102,13 @@ fn rebuild(
     let frame = commands
         .spawn((
             Node {
-                padding: UiRect::all(px(12.0)),
+                padding: UiRect::all(px(20.0)),
                 column_gap: px(14.0),
-                border: UiRect::all(px(2.0)),
                 align_items: AlignItems::FlexStart,
                 align_self: AlignSelf::FlexStart,
                 ..default()
             },
-            BorderColor::all(GOLD),
-            BackgroundColor(PANEL.with_alpha(1.0)),
+            Frame::Plate,
         ))
         .id();
 
@@ -233,7 +231,7 @@ fn side_column(
     {
         let heart = stats::icon_node(commands, art.icon(StatIcon::Health), 24.0, true);
         let hp_now = hp_shown.unwrap_or(c.hp);
-        let hp = stats::bar(commands, hp_now, c.body, HEALTH, None, 9.0, 14.0);
+        let hp = stats::bar(commands, hp_now, c.body, HEALTH, None, 10.0, 14.0);
         let text = if fell {
             format!("{hp_now}/{} — пал!", c.body)
         } else {
@@ -263,6 +261,17 @@ fn side_column(
                 ..default()
             },
         ))
+        .id();
+    // Set into the panel like a box.
+    let tray = commands
+        .spawn((
+            Frame::Inset,
+            Node {
+                padding: UiRect::all(px(6.0)),
+                ..default()
+            },
+        ))
+        .add_child(tray)
         .id();
 
     // Faces so far: burned ones framed in orange, then thrown ones as they land.
@@ -391,12 +400,10 @@ fn centre_column(
                     button,
                     Button,
                     Node {
-                        padding: UiRect::axes(px(10.0), px(5.0)),
-                        border: UiRect::all(px(2.0)),
+                        padding: UiRect::axes(px(14.0), px(8.0)),
                         ..default()
                     },
-                    BorderColor::all(GOLD),
-                    BackgroundColor(Color::srgba(0.2, 0.15, 0.1, 0.9)),
+                    Frame::Button,
                 ))
                 .id();
             let t = stats::label(commands, font, text, 13.0, true);

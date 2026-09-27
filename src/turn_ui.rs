@@ -10,7 +10,8 @@
 use bevy::prelude::*;
 use necromy_rules::{Intent, TimeOfDay, WindowKind};
 
-use crate::hud::{INK, PANEL, UiFont};
+use crate::ui_skin::{Accent, Frame};
+use crate::hud::{INK, UiFont};
 use crate::icons::StatIcon;
 use crate::names;
 use crate::play::{self, Match, Selection};
@@ -83,10 +84,10 @@ fn spawn(mut commands: Commands, font: Res<UiFont>) {
             top: px(92.0),
             left: px(10.0),
             max_width: px(320.0),
-            padding: UiRect::all(px(6.0)),
+            padding: UiRect::all(px(8.0)),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.05, 0.04, 0.07, 0.95)),
+        Frame::Tip,
         GlobalZIndex(10),
         Visibility::Hidden,
     ));
@@ -96,8 +97,9 @@ fn spawn(mut commands: Commands, font: Res<UiFont>) {
         Node {
             position_type: PositionType::Absolute,
             top: px(8.0),
-            left: px(0.0),
-            right: px(0.0),
+            // Centred in the gap between the status panel and the gods panel.
+            left: px(345.0),
+            right: px(425.0),
             justify_content: JustifyContent::Center,
             ..default()
         },
@@ -139,11 +141,11 @@ fn rebuild_status(
         .spawn((
             Node {
                 flex_direction: FlexDirection::Column,
-                padding: UiRect::all(px(8.0)),
+                padding: UiRect::all(px(12.0)),
                 row_gap: px(6.0),
                 ..default()
             },
-            BackgroundColor(PANEL),
+            Frame::Panel,
         ))
         .id();
 
@@ -169,12 +171,11 @@ fn rebuild_status(
             Node {
                 align_items: AlignItems::Center,
                 column_gap: px(4.0),
-                padding: UiRect::axes(px(6.0), px(2.0)),
+                padding: UiRect::axes(px(8.0), px(4.0)),
                 margin: UiRect::left(px(10.0)),
-                border: UiRect::all(px(1.0)),
                 ..default()
             },
-            BorderColor::all(GOLD.with_alpha(0.5)),
+            Frame::Button,
         ))
         .id();
     let goblet = stats::icon_node(&mut commands, art.icon(StatIcon::Taste), 20.0, true);
@@ -196,19 +197,17 @@ fn rebuild_status(
                 Node {
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    padding: UiRect::all(px(2.0)),
-                    border: UiRect::all(px(2.0)),
+                    padding: UiRect::all(px(5.0)),
                     ..default()
                 },
-                BorderColor::all(if awaited.contains(&p) {
-                    GOLD
-                } else if current {
-                    GOLD.with_alpha(0.45)
-                } else {
-                    Color::NONE
-                }),
             ))
             .id();
+        // The one we wait on framed in gold, the one whose turn it is in bronze.
+        if awaited.contains(&p) {
+            commands.entity(seat).insert((Frame::Tip, Accent(GOLD)));
+        } else if current {
+            commands.entity(seat).insert(Frame::Tip);
+        }
         let portrait = commands
             .spawn((
                 ImageNode::new(art.portraits[p.0 as usize].clone()),
@@ -313,13 +312,11 @@ fn rebuild_action(
         .spawn((
             Node {
                 align_items: AlignItems::Center,
-                column_gap: px(14.0),
-                padding: UiRect::axes(px(12.0), px(6.0)),
-                border: UiRect::all(px(2.0)),
+                column_gap: px(12.0),
+                padding: UiRect::axes(px(14.0), px(10.0)),
                 ..default()
             },
-            BorderColor::all(GOLD),
-            BackgroundColor(PANEL.with_alpha(0.97)),
+            Frame::Panel,
             GlobalZIndex(6),
         ))
         .id();
@@ -365,12 +362,10 @@ fn rebuild_action(
                 action,
                 Button,
                 Node {
-                    padding: UiRect::axes(px(10.0), px(5.0)),
-                    border: UiRect::all(px(2.0)),
+                    padding: UiRect::axes(px(14.0), px(8.0)),
                     ..default()
                 },
-                BorderColor::all(GOLD),
-                BackgroundColor(Color::srgba(0.2, 0.15, 0.1, 0.9)),
+                Frame::Button,
             ))
             .id();
         // Two short lines: the action, then its key.
@@ -452,12 +447,10 @@ fn spawn_clock(mut commands: Commands, font: Res<UiFont>) {
             font.bold(14.0),
             TextColor(INK),
             Node {
-                padding: UiRect::axes(px(10.0), px(3.0)),
-                border: UiRect::all(px(2.0)),
+                padding: UiRect::axes(px(14.0), px(6.0)),
                 ..default()
             },
-            BorderColor::all(GOLD),
-            BackgroundColor(PANEL.with_alpha(0.97)),
+            Frame::Tip,
         ))
         .id();
     commands

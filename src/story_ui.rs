@@ -7,7 +7,8 @@
 
 use bevy::prelude::*;
 
-use crate::hud::{INK, PANEL, UiFont};
+use crate::hud::{INK, UiFont};
+use crate::ui_skin::{Accent, Frame};
 use crate::names;
 use crate::play::Match;
 use crate::stats::{self, StatArt};
@@ -79,12 +80,12 @@ fn rebuild_lines(
         .spawn((
             Node {
                 flex_direction: FlexDirection::Column,
-                padding: UiRect::all(px(8.0)),
+                padding: UiRect::all(px(12.0)),
                 row_gap: px(4.0),
                 width: px(250.0),
                 ..default()
             },
-            BackgroundColor(PANEL),
+            Frame::Panel,
         ))
         .id();
     let title = stats::label(&mut commands, &font, "Сюжет", 14.0, true);
@@ -151,13 +152,12 @@ fn rebuild_voice(
             Node {
                 flex_direction: FlexDirection::Column,
                 row_gap: px(4.0),
-                padding: UiRect::all(px(12.0)),
-                border: UiRect::all(px(2.0)),
+                padding: UiRect::all(px(18.0)),
                 width: px(480.0),
                 ..default()
             },
-            BorderColor::all(VOICE),
-            BackgroundColor(PANEL.with_alpha(0.97)),
+            Frame::Plate,
+            Accent(VOICE),
         ))
         .id();
     let head = stats::row(&mut commands);
