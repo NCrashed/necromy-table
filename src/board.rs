@@ -73,17 +73,17 @@ struct TileArt {
 }
 
 /// Ground textures in `assets/tiles/`, `<name>-<n>.png`: bare ground under
-/// the terrain's billboard props (`props.rs`). The temple is still a
-/// painted tile with its shrine baked in. A terrain not listed keeps its
-/// flat colour and icon.
-const TILE_ART: [(Terrain, &str, usize); 9] = [
+/// the terrain's billboard props (`props.rs`), temples and the Table
+/// included. A terrain not listed keeps its flat colour and icon.
+const TILE_ART: [(Terrain, &str, usize); 10] = [
     (Terrain::Plains, "ground/meadow", 2),
     (Terrain::Forest, "ground/forest", 1),
     (Terrain::Grove, "ground/forest", 1),
     (Terrain::Mountain, "ground/rock", 3),
     (Terrain::Swamp, "ground/swamp", 3),
     (Terrain::Settlement, "ground/village", 1),
-    (Terrain::Temple, "temple", 4),
+    (Terrain::Temple, "ground/paving", 2),
+    (Terrain::Table, "ground/paving", 2),
     (Terrain::Ruins, "ground/ruins", 2),
     (Terrain::Stones, "ground/moss", 2),
 ];

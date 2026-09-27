@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use bevy::light::{NotShadowCaster, NotShadowReceiver};
 use bevy::prelude::*;
 use bevy_sprite3d::prelude::*;
-use necromy_rules::{Hex, Terrain};
+use necromy_rules::{God, Hex, Terrain};
 
 use crate::board::Board;
 use crate::play::Match;
@@ -45,6 +45,8 @@ struct PropKind {
     /// Its visible pixels: height and the empty rows below its base.
     px_high: f32,
     px_below: f32,
+    /// How far from the hex centre it stands.
+    radius: f32,
 }
 
 const fn kind(file: &'static str, height: f32, px_high: f32, px_below: f32) -> PropKind {
@@ -53,6 +55,16 @@ const fn kind(file: &'static str, height: f32, px_high: f32, px_below: f32) -> P
         height,
         px_high,
         px_below,
+        radius: SPOT_RADIUS,
+    }
+}
+
+/// A building that is the hex (a temple, the Table): nearer the centre, so
+/// it stays on its own hex; the champion still stands at the centre.
+const fn landmark(file: &'static str, height: f32, px_high: f32, px_below: f32) -> PropKind {
+    PropKind {
+        radius: LANDMARK_RADIUS,
+        ..kind(file, height, px_high, px_below)
     }
 }
 
@@ -73,10 +85,26 @@ const COLUMN: PropKind = kind("column", 0.7, 52.0, 3.0);
 const WALL: PropKind = kind("wall", 0.75, 60.0, 3.0);
 const REEDS: PropKind = kind("reeds", 0.6, 58.0, 3.0);
 const BONES: PropKind = kind("bones", 0.35, 37.0, 7.0);
+const BANNER: PropKind = kind("banner-ahamar", 1.1, 61.0, 1.0);
+const BRAZIER: PropKind = kind("brazier", 0.55, 50.0, 6.0);
+const GRAVESTONE: PropKind = kind("gravestone", 0.45, 41.0, 8.0);
+// Each god's temple, two looks (§5): Bhava has no face, only his growth.
+const TEMPLE_BHAVA_OAK: PropKind = landmark("temple-bhava-oak", 1.6, 63.0, 1.0);
+const TEMPLE_BHAVA_RING: PropKind = landmark("temple-bhava-ring", 1.3, 55.0, 1.0);
+const TEMPLE_TRISHNA_ALTAR: PropKind = landmark("temple-trishna-altar", 1.2, 57.0, 2.0);
+const TEMPLE_TRISHNA_TENT: PropKind = landmark("temple-trishna-tent", 1.4, 62.0, 1.0);
+const TEMPLE_ZAGA_CHAPEL: PropKind = landmark("temple-zaga-chapel", 1.5, 63.0, 0.0);
+const TEMPLE_ZAGA_CELL: PropKind = landmark("temple-zaga-cell", 1.3, 55.0, 5.0);
+const TEMPLE_AHAMAR_PORTICO: PropKind = landmark("temple-ahamar-portico", 1.4, 61.0, 2.0);
+const TEMPLE_AHAMAR_DOME: PropKind = landmark("temple-ahamar-dome", 1.5, 62.0, 1.0);
+const TEMPLE_MAYA_RUIN: PropKind = landmark("temple-maya-ruin", 1.4, 60.0, 2.0);
+const TEMPLE_MAYA_ARCH: PropKind = landmark("temple-maya-arch", 1.4, 58.0, 3.0);
+/// Ahamar's Table, the centre of the board.
+const TABLE: PropKind = landmark("table-dais", 1.15, 47.0, 6.0);
 /// Nothing on this spot: a choice that leaves the ground bare.
 const BARE: PropKind = kind("", 0.0, 1.0, 0.0);
 
-const ALL: [PropKind; 16] = [
+const ALL: [PropKind; 30] = [
     OAK,
     PINE,
     PINE_SMALL,
@@ -93,11 +121,26 @@ const ALL: [PropKind; 16] = [
     WALL,
     REEDS,
     BONES,
+    BANNER,
+    BRAZIER,
+    GRAVESTONE,
+    TEMPLE_BHAVA_OAK,
+    TEMPLE_BHAVA_RING,
+    TEMPLE_TRISHNA_ALTAR,
+    TEMPLE_TRISHNA_TENT,
+    TEMPLE_ZAGA_CHAPEL,
+    TEMPLE_ZAGA_CELL,
+    TEMPLE_AHAMAR_PORTICO,
+    TEMPLE_AHAMAR_DOME,
+    TEMPLE_MAYA_RUIN,
+    TEMPLE_MAYA_ARCH,
+    TABLE,
 ];
 
 /// What stands on a hex of this terrain: every entry is one prop, picked
-/// from its choices, on one of the six spots around the centre.
-fn layout(terrain: Terrain) -> &'static [&'static [PropKind]] {
+/// from its choices, on one of the six spots around the centre. A temple is
+/// its region's god's.
+fn layout(terrain: Terrain, region: Option<God>) -> &'static [&'static [PropKind]] {
     match terrain {
         // Mostly open meadow: a bush or a stone on about a third of it.
         Terrain::Plains => &[&[BUSH, BOULDER, BUSH, BARE, BARE, BARE, BARE, BARE, BARE]],
@@ -113,12 +156,23 @@ fn layout(terrain: Terrain) -> &'static [&'static [PropKind]] {
         Terrain::Settlement => &[&[COTTAGE_RED], &[COTTAGE_THATCH], &[WELL]],
         Terrain::Ruins => &[&[WALL], &[COLUMN], &[BOULDER, COLUMN]],
         Terrain::Stones => &[&[MENHIR], &[MENHIR], &[MENHIR], &[MENHIR]],
-        Terrain::Temple | Terrain::Table => &[],
+        Terrain::Temple => match region {
+            Some(God::Bhava) => &[&[TEMPLE_BHAVA_OAK, TEMPLE_BHAVA_RING]],
+            Some(God::Trishna) => &[&[TEMPLE_TRISHNA_ALTAR, TEMPLE_TRISHNA_TENT], &[BRAZIER]],
+            Some(God::Zaga) => &[&[TEMPLE_ZAGA_CHAPEL, TEMPLE_ZAGA_CELL]],
+            Some(God::Ahamar) => &[&[TEMPLE_AHAMAR_PORTICO, TEMPLE_AHAMAR_DOME], &[BANNER]],
+            Some(God::Maya) => &[&[TEMPLE_MAYA_RUIN, TEMPLE_MAYA_ARCH], &[GRAVESTONE]],
+            None => &[],
+        },
+        // The Table: the dais, Ahamar's banners either side of it.
+        Terrain::Table => &[&[TABLE], &[BANNER], &[BANNER]],
     }
 }
 
 /// Spots around a hex centre: a ring between the champion and the edge.
 const SPOT_RADIUS: f32 = 0.58;
+/// Temples and the Table: nearer the centre than the ring.
+const LANDMARK_RADIUS: f32 = 0.42;
 
 #[derive(Resource)]
 struct PropImages(HashMap<&'static str, Handle<Image>>);
@@ -206,12 +260,13 @@ fn sync_props(
         let centre = board.hex_to_world(hex);
         // Spots are taken in a turned order, so hexes differ.
         let turn = hex_seed(hex, 1) as usize % 6;
-        for (i, choices) in layout(terrain).iter().enumerate() {
+        let region = game.game.board().tile(hex).and_then(|t| t.region);
+        for (i, choices) in layout(terrain, region).iter().enumerate() {
             let pick = choices[hex_seed(hex, 2 + i as i32) as usize % choices.len()];
             let spot = (turn + i * 5) % 6;
             let angle = std::f32::consts::FRAC_PI_3 * spot as f32 + std::f32::consts::FRAC_PI_6;
             let jitter = (hex_seed(hex, 20 + i as i32) % 100) as f32 / 100.0 * 0.12;
-            let at = centre + Vec3::new(angle.cos(), 0.0, angle.sin()) * (SPOT_RADIUS + jitter);
+            let at = centre + Vec3::new(angle.cos(), 0.0, angle.sin()) * (pick.radius + jitter);
             spawn_prop(&mut commands, &images, pick, hex, at);
         }
     }
