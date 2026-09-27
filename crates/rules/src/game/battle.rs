@@ -69,7 +69,8 @@ impl Game {
                 .board
                 .tile(c.hex)
                 .is_some_and(|t| t.terrain == Terrain::Mountain);
-        c.might + u8::from(high_ground)
+        let ambush = !defending && self.ambush == Some(player);
+        c.might + u8::from(high_ground) + u8::from(ambush)
     }
 
     /// Dice `player` throws in the open Battle window, if they are in it.

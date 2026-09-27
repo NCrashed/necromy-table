@@ -7,12 +7,13 @@
 //!
 //! Hidden: the seed and the generator (with them the rest of the match could
 //! be predicted), the deck's order, rivals' hands and face-down traps, rivals'
-//! secret conditions, rivals' choices in an open window, and the log. Hidden
+//! secret conditions, rivals' choices in an open window, where hidden rivals
+//! are (§11.6: they stand where last seen), and the log. Hidden
 //! cards keep their ids, so hands keep their size, but their definitions are
 //! shuffled among themselves with the server's salt: a client learns what is
 //! left unseen, not who holds it.
 
-use super::{Choice, Event, Game, PlayerId};
+use super::{Choice, Event, Game, PlayerId, Target};
 use crate::rng::Rng;
 
 impl Game {
@@ -47,6 +48,12 @@ impl Game {
         }
         v.rng.shuffle(&mut v.deck);
 
+        // A hidden rival stands where they were last seen (§11.6).
+        for (i, c) in v.champions.iter_mut().enumerate() {
+            if c.hidden && !mine(PlayerId(i as u8)) {
+                c.hex = c.seen_at;
+            }
+        }
         for (i, secret) in v.secrets.iter_mut().enumerate() {
             if !mine(PlayerId(i as u8)) {
                 *secret = None;
@@ -63,16 +70,39 @@ impl Game {
     }
 
     /// `event` as `viewer` may hear it, given their `view` of the state after
-    /// it: a rival's draw names the card as the view has it.
-    pub fn event_for(view: &Game, viewer: Option<PlayerId>, event: &Event) -> Event {
-        match event {
+    /// it: a rival's draw names the card as the view has it, and what a
+    /// hidden rival does where nobody sees them (steps, blinks, traps, the
+    /// hex a card lands on) does not reach them at all (§11.6).
+    pub fn event_for(view: &Game, viewer: Option<PlayerId>, event: &Event) -> Option<Event> {
+        let unseen = |p: PlayerId| Some(p) != viewer && view.is_hidden(p);
+        Some(match event {
             Event::CardDrawn { player, card, .. } if Some(*player) != viewer => Event::CardDrawn {
                 player: *player,
                 card: *card,
                 def: view.def_id(*card),
             },
+            Event::Moved { player, .. }
+            | Event::Blinked { player, .. }
+            | Event::TrapSet { player, .. }
+                if unseen(*player) =>
+            {
+                return None;
+            }
+            Event::CardPlayed {
+                player,
+                card,
+                def,
+                target: Target::Hex(_),
+                response,
+            } if unseen(*player) => Event::CardPlayed {
+                player: *player,
+                card: *card,
+                def: *def,
+                target: Target::None,
+                response: *response,
+            },
             other => other.clone(),
-        }
+        })
     }
 }
 

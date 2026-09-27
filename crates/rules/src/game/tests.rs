@@ -1831,3 +1831,196 @@ fn bots_live_their_lines() {
     assert!(told > 20, "only {told} lines told");
     assert!(done * 5 >= told, "only {done} of {told} lines done");
 }
+
+// ---- Stealth (§11.6) ----
+
+/// `duel`, with `me` on a forest hex at night, well away from `foe`.
+fn in_the_woods() -> (Game, PlayerId, PlayerId) {
+    let (mut g, me, foe) = duel(3);
+    let woods = Hex::new(0, 2);
+    g.board.tile_mut(woods).unwrap().terrain = Terrain::Forest;
+    g.place(me, woods);
+    g.time = TimeOfDay::Night;
+    (g, me, foe)
+}
+
+#[test]
+fn night_in_the_woods_hides_and_dawn_in_the_open_reveals() {
+    let (mut g, me, _) = in_the_woods();
+    let events = g.apply(me, Intent::EndTurn).unwrap();
+    assert!(g.is_hidden(me));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::Hid { player, .. } if *player == me))
+    );
+
+    // Dawn finds them out of cover.
+    g.board.tile_mut(g.hex_of(me)).unwrap().terrain = Terrain::Plains;
+    let mut events = Vec::new();
+    g.stealth_at_dawn(&mut events);
+    assert!(!g.is_hidden(me));
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::Revealed {
+            why: RevealReason::Dawn,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn no_cover_by_day_or_next_to_a_rival() {
+    let (mut g, me, _) = in_the_woods();
+    g.time = TimeOfDay::Day;
+    g.apply(me, Intent::EndTurn).unwrap();
+    assert!(!g.is_hidden(me));
+
+    let (mut g, me, foe) = in_the_woods();
+    g.place(foe, Hex::new(1, 2));
+    g.apply(me, Intent::EndTurn).unwrap();
+    assert!(!g.is_hidden(me), "a rival next door sees them");
+}
+
+#[test]
+fn the_hidden_cannot_be_aimed_at_or_attacked() {
+    let (mut g, me, foe) = duel(1);
+    let mut events = Vec::new();
+    g.hide(foe, &mut events);
+    assert!(g.attackable().is_empty());
+    let spark = g.give(me, "Искра");
+    assert!(g.targets(me, spark).is_empty());
+    assert!(g.occupant(g.hex_of(foe)).is_none());
+}
+
+#[test]
+fn walking_into_the_hidden_is_an_ambush() {
+    let (mut g, me, foe) = duel(1);
+    let mut events = Vec::new();
+    g.hide(foe, &mut events);
+    let might = g.champion(foe).unwrap().might;
+    let events = g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::Stumbled { mover, hidden, .. }
+        if *mover == me && *hidden == foe))
+    );
+    assert!(!g.is_hidden(foe));
+    assert_eq!(g.hex_of(me), Hex::ZERO, "the step does not happen");
+    assert_eq!(g.move_points(), 0, "the walk is over");
+    assert!(matches!(
+        g.window().map(|w| w.kind),
+        Some(WindowKind::Battle { attacker, defender }) if attacker == foe && defender == me
+    ));
+    assert_eq!(
+        g.battle_dice(foe),
+        Some(might + 1),
+        "one more die from the shadow"
+    );
+    g.pass_all();
+    assert_eq!(
+        g.dice_for(foe, false),
+        might,
+        "the ambush die is for that one battle"
+    );
+}
+
+#[test]
+fn striking_from_the_shadow_reveals_with_an_extra_die() {
+    let (mut g, me, _) = duel(1);
+    let mut events = Vec::new();
+    g.hide(me, &mut events);
+    let might = g.champion(me).unwrap().might;
+    let events = g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    assert!(events.iter().any(
+        |e| matches!(e, Event::Revealed { player, why: RevealReason::Attacked, .. } if *player == me)
+    ));
+    assert_eq!(g.battle_dice(me), Some(might + 1));
+}
+
+#[test]
+fn aiming_at_a_rival_reveals() {
+    let (mut g, me, foe) = duel(2);
+    let mut events = Vec::new();
+    g.hide(me, &mut events);
+    let flame = g.give(me, "Пламя пира");
+    g.champ_mut(me).spirit_points = 3;
+    let events = g
+        .apply(
+            me,
+            Intent::Play {
+                card: flame,
+                target: Target::Champion(foe),
+            },
+        )
+        .unwrap();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::Revealed {
+            why: RevealReason::Aimed,
+            ..
+        }
+    )));
+    assert!(!g.is_hidden(me));
+}
+
+#[test]
+fn walking_into_a_crowd_reveals() {
+    let (mut g, me, _) = duel(3);
+    let mut events = Vec::new();
+    g.hide(me, &mut events);
+    let town = Hex::new(0, 1);
+    g.board.tile_mut(town).unwrap().terrain = Terrain::Settlement;
+    let events = g.apply(me, Intent::Move { to: town }).unwrap();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::Revealed {
+            why: RevealReason::Crowd,
+            ..
+        }
+    )));
+    assert!(!g.is_hidden(me));
+}
+
+#[test]
+fn a_hidden_walk_opens_no_window_and_reaches_no_rival() {
+    let (mut g, me, foe) = duel(3);
+    let mut events = Vec::new();
+    g.hide(me, &mut events);
+    let seen_at = g.hex_of(me);
+    let events = g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    assert!(g.window().is_none(), "nobody sees the step, nobody reacts");
+    let view = g.view_for(Some(foe), 5);
+    assert_eq!(
+        view.champion(me).unwrap().hex,
+        seen_at,
+        "the rival sees the old spot"
+    );
+    assert!(
+        events
+            .iter()
+            .filter_map(|e| Game::event_for(&view, Some(foe), e))
+            .all(|e| !matches!(e, Event::Moved { .. }))
+    );
+    // The hidden one sees themselves where they are.
+    let own = g.view_for(Some(me), 5);
+    assert_eq!(own.champion(me).unwrap().hex, Hex::new(1, 0));
+}
+
+#[test]
+fn the_veil_hides_anywhere() {
+    let (mut g, me, _) = duel(3);
+    let veil = g.give(me, "Пелена");
+    g.champ_mut(me).spirit_points = 3;
+    g.apply(
+        me,
+        Intent::Play {
+            card: veil,
+            target: Target::Champion(me),
+        },
+    )
+    .unwrap();
+    g.pass_all();
+    assert!(g.is_hidden(me));
+}

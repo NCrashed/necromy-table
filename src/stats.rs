@@ -411,6 +411,16 @@ fn stat_sheet(
             let t = label(commands, font, "скован", 12.0, false);
             commands.entity(r).add_children(&[i, t]);
         }
+        if c.hidden {
+            let t = label(
+                commands,
+                font,
+                "в тени: соперники тебя не видят",
+                12.0,
+                false,
+            );
+            commands.entity(r).add_child(t);
+        }
         for god in curses {
             let i = icon_node(commands, art.icon(StatIcon::Curse), 24.0, true);
             let t = label(

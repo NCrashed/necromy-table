@@ -1,5 +1,6 @@
 mod battle_ui;
 mod board;
+mod camera;
 mod dice;
 mod hud;
 mod icons;
@@ -38,6 +39,7 @@ fn main() {
         .add_systems(Update, run_game)
         .add_plugins((
             lobby::LobbyPlugin,
+            camera::CameraPlugin,
             play::PlayPlugin,
             board::BoardPlugin,
             token::TokenPlugin,
@@ -87,6 +89,7 @@ impl Plugin for AutoScreenshotPlugin {
             app.insert_resource(AutoScreenshot {
                 path,
                 after,
+                ready_at: None,
                 taken_at: None,
             })
             .add_systems(Update, auto_screenshot);
@@ -99,8 +102,13 @@ struct AutoScreenshot {
     path: String,
     /// Seconds to wait (`NECROMY_SCREENSHOT_AFTER`, default 4).
     after: f32,
+    /// When the awaited moment came; the capture waits a little after it.
+    ready_at: Option<f32>,
     taken_at: Option<f32>,
 }
+
+/// The screen catches up with a change a frame or two after it arrives.
+const SCREENSHOT_SETTLE_SECS: f32 = 0.3;
 
 /// Time for the capture to reach the disk before quitting.
 const SCREENSHOT_SAVE_SECS: f32 = 1.0;
@@ -136,14 +144,22 @@ fn auto_screenshot(
             game.told.is_some() && game.wish_reply.is_none() && !dice.busy()
         }
         (Some("wishpanel"), Some(game)) => game.game.wish_due() == Some(game.human),
+        // Someone slipped out of sight (§11.6).
+        (Some("hidden"), Some(game)) => game.game.players().any(|p| game.game.is_hidden(p)),
         (Some("incoming"), Some(game)) => matches!(
             game.game.window().map(|w| w.kind),
             Some(necromy_rules::WindowKind::Target { target, .. }) if target == game.human
         ),
         _ => now >= shot.after,
     };
+    if ready && shot.ready_at.is_none() {
+        shot.ready_at = Some(now);
+    }
+    let settled = shot
+        .ready_at
+        .is_some_and(|at| now - at >= SCREENSHOT_SETTLE_SECS);
     match shot.taken_at {
-        None if ready => {
+        None if settled => {
             commands
                 .spawn(Screenshot::primary_window())
                 .observe(save_to_disk(shot.path.clone()));

@@ -321,7 +321,7 @@ impl Table {
             let view = self.game.view_for(Some(seat), salt);
             let seen = events
                 .iter()
-                .map(|e| Game::event_for(&view, Some(seat), e))
+                .filter_map(|e| Game::event_for(&view, Some(seat), e))
                 .collect();
             let serial = self.serial;
             self.send(

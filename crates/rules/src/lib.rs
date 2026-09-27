@@ -21,8 +21,8 @@ pub use cards::{CardDef, CardId, CardKind, DefId, Effect, TargetRule, Timing};
 pub use game::{
     BodyVerb, Champion, Character, Check, CheckKind, Condition, Deed, Event, Fighter, GUARD_DICE,
     GUARD_RELIEF, GUARD_STEPS, GUARD_THRESHOLD, Game, Goal, Guard, Intent, Line, LineKind,
-    PlayerId, RuleError, STAGE_THRESHOLD, STAGES, Said, Score, Setup, StyleReason, Target, Taste,
-    TasteKind, TimeOfDay, Trap, Window, WindowKind, WishKind, WorldStir,
+    PlayerId, RevealReason, RuleError, STAGE_THRESHOLD, STAGES, Said, Score, Setup, StyleReason,
+    Target, Taste, TasteKind, TimeOfDay, Trap, Window, WindowKind, WishKind, WorldStir,
 };
 pub use gods::{Element, God};
 pub use hexx::Hex;

@@ -349,3 +349,17 @@ pub fn world_stir(stir: necromy_rules::WorldStir) -> &'static str {
         WorldStir::Unrest => "На столе тихо — и по королевству ползёт тревога: всем +1 Угрозы.",
     }
 }
+
+/// Why a hidden champion was seen again (§11.6).
+pub fn reveal(why: necromy_rules::RevealReason) -> &'static str {
+    use necromy_rules::RevealReason::*;
+    match why {
+        Attacked => "удар из засады",
+        Aimed => "карта в соперника",
+        Crowd => "там люди",
+        Spotted => "замечен рядом с соперником",
+        Guard => "мимо прошла гвардия",
+        Dawn => "рассвет в чистом поле",
+        Stumbled => "на него наткнулись",
+    }
+}

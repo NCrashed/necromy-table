@@ -95,6 +95,8 @@ pub enum Effect {
     BodyRest,
     /// Corpse → a grove at once, and healing (Bhava).
     BodySeed,
+    /// The caster slips out of sight (§11.6).
+    Hide,
     /// Reads Trishna's stage (§5): Generosity feeds everyone near, Thirst
     /// feeds the caster at the neighbours' cost, Devouring burns the bodies near.
     Feast,
@@ -109,6 +111,7 @@ impl Effect {
                 | Effect::Root
                 | Effect::Grow
                 | Effect::Blink
+                | Effect::Hide
                 | Effect::Cancel
                 | Effect::BodyLegion
                 | Effect::Trap(TrapEffect::Root)
@@ -227,6 +230,7 @@ pub const POOL: &[CardDef] = &[
     card("Морок", "Ответ: карта против тебя гаснет, если её стихия не гасит воду.", Some(Water), Rite, Response, 1, Pending, Cancel),
     card("Дымная ладонь", "1 урона сопернику в 3 шагах, вылечись на 1.", Some(Water), Trick, Instant, 0, Enemy { range: 3 }, Drain(1)),
     card("Бирюзовый оберег", "Оберег воды на себя.", Some(Water), Rite, Own, 1, Caster, Ward),
+    card("Пелена", "Скройся: соперники не видят тебя, пока ты не раскроешься.", Some(Water), Rite, Own, 1, Caster, Hide),
     // Neutral
     card("Короткий путь", "+1 очко движения в этот ход.", None, Trick, Own, 0, Caster, Haste(1)),
     card("Бинт", "Вылечись на 1.", None, Trick, Instant, 0, Caster, Heal(1)),

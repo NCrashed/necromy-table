@@ -251,6 +251,7 @@ impl Game {
 
     /// Dawn: land pays Style, then the Crown goes to the leader (§6.1).
     pub(super) fn dawn(&mut self, events: &mut Vec<Event>) {
+        self.stealth_at_dawn(events);
         let income: Vec<(PlayerId, u8)> = self
             .claims()
             .filter_map(|(hex, p)| {

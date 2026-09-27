@@ -28,7 +28,13 @@ impl Plugin for TokenPlugin {
         app.add_systems(crate::MatchBegins, spawn_tokens)
             .add_systems(
                 crate::InGame,
-                (queue_steps, move_tokens, sync_guard, face_camera).chain(),
+                (queue_steps, move_tokens, sync_guard).chain(),
+            )
+            // Billboards face the camera where it is this frame.
+            .add_systems(crate::InGame, face_camera.after(crate::camera::apply))
+            .add_systems(
+                crate::InGame,
+                shade_tokens.run_if(resource_changed::<Match>),
             );
     }
 }
@@ -148,7 +154,7 @@ fn queue_steps(mut game: ResMut<Match>, board: Res<Board>, mut tokens: Query<&mu
     }
 }
 
-fn move_tokens(time: Res<Time>, mut tokens: Query<(&mut Token, &mut Transform)>) {
+pub fn move_tokens(time: Res<Time>, mut tokens: Query<(&mut Token, &mut Transform)>) {
     for (mut token, mut transform) in &mut tokens {
         let mut budget = MOVE_SPEED * time.delta_secs();
         while let Some(&target) = token.waypoints.front() {
@@ -208,5 +214,28 @@ fn sync_guard(
         }
         (None, Ok((entity, _))) => commands.entity(entity).despawn(),
         (None, Err(_)) => {}
+    }
+}
+
+/// Stealth on the board (§11.6): a hidden rival's token is gone (a trail
+/// marks where they were seen, `board.rs`); the human's own, when hidden,
+/// stands in shadow.
+fn shade_tokens(game: Res<Match>, mut tokens: Query<(&Token, &mut Sprite, &mut Visibility)>) {
+    for (token, mut sprite, mut visibility) in &mut tokens {
+        let hidden = game.game.is_hidden(token.player);
+        let own = token.player == game.human;
+        visibility.set_if_neq(if hidden && !own {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        });
+        let tint = if hidden && own {
+            Color::srgb(0.45, 0.5, 0.75)
+        } else {
+            Color::WHITE
+        };
+        if sprite.color != tint {
+            sprite.color = tint;
+        }
     }
 }

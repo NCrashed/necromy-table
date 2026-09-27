@@ -58,6 +58,10 @@ pub struct Champion {
     pub ward: Option<Element>,
     /// Loses the movement of its next turn.
     pub rooted: bool,
+    /// Out of rivals' sight (§11.6).
+    pub hidden: bool,
+    /// Where rivals saw them last; views show a hidden rival here.
+    pub seen_at: Hex,
 }
 
 impl Champion {
@@ -81,6 +85,8 @@ impl Champion {
             spirit_points: spirit,
             ward: None,
             rooted: false,
+            hidden: false,
+            seen_at: hex,
         }
     }
 
@@ -437,6 +443,23 @@ pub enum Event {
         hex: Hex,
         def: DefId,
     },
+    /// A champion slipped out of sight at `hex` (§11.6).
+    Hid {
+        player: PlayerId,
+        hex: Hex,
+    },
+    /// A hidden champion is seen again, at `hex`.
+    Revealed {
+        player: PlayerId,
+        hex: Hex,
+        why: stealth::RevealReason,
+    },
+    /// `mover` walked into `hidden` on `hex`.
+    Stumbled {
+        mover: PlayerId,
+        hidden: PlayerId,
+        hex: Hex,
+    },
     ChampionFell {
         player: PlayerId,
         at: Hex,
@@ -589,6 +612,8 @@ pub struct Game {
     next_line: u32,
     /// Round of the last battle or guard strike.
     last_fight: u32,
+    /// Strikes from the shadow in the battle now open: one more die (§11.6).
+    ambush: Option<PlayerId>,
     /// Deeds since the last story check.
     pending_story: Vec<(PlayerId, style::Deed)>,
     log: Vec<Event>,
@@ -669,6 +694,7 @@ impl Game {
             lines: Vec::new(),
             next_line: 0,
             last_fight: 0,
+            ambush: None,
             pending_story: Vec::new(),
             log: Vec::new(),
         };
@@ -791,11 +817,10 @@ impl Game {
         &self.log
     }
 
+    /// The champion in sight on `hex`. A hidden one is not there as far as
+    /// anyone can tell (§11.6): walking in stumbles into them instead.
     pub fn occupant(&self, hex: Hex) -> Option<PlayerId> {
-        self.champions
-            .iter()
-            .position(|c| c.hex == hex)
-            .map(|i| PlayerId(i as u8))
+        self.champion_at(hex).filter(|&p| !self.is_hidden(p))
     }
 
     fn hex_of(&self, player: PlayerId) -> Hex {
@@ -943,12 +968,15 @@ impl Game {
             TargetRule::Caster => vec![Target::Champion(player)],
             TargetRule::Champion { range } => self
                 .players()
+                // A hidden rival is not there to aim at (§11.6).
+                .filter(|&p| p == player || !self.is_hidden(p))
                 .filter(|&p| self.hex_of(p).unsigned_distance_to(me) <= range)
                 .map(Target::Champion)
                 .collect(),
             TargetRule::Enemy { range } => self
                 .players()
-                .filter(|&p| p != player && self.hex_of(p).unsigned_distance_to(me) <= range)
+                .filter(|&p| p != player && !self.is_hidden(p))
+                .filter(|&p| self.hex_of(p).unsigned_distance_to(me) <= range)
                 .map(Target::Champion)
                 .collect(),
             TargetRule::EmptyHex { range } => self
@@ -1081,6 +1109,11 @@ impl Game {
             && defender != player
         {
             let cost = self.attack_cost(player, to)?;
+            // Out of the shadow: an ambush, and then everyone sees them.
+            if self.is_hidden(player) {
+                self.ambush = Some(player);
+                self.reveal(player, RevealReason::Attacked, events);
+            }
             self.start_battle(player, defender, cost, events);
             return Ok(());
         }
@@ -1090,6 +1123,12 @@ impl Game {
                 need: cost,
                 have: self.move_points,
             });
+        }
+        if let Some(hidden) = self.hidden_at(to)
+            && hidden != player
+        {
+            self.stumble(player, hidden, to, events);
+            return Ok(());
         }
         let from = self.hex_of(player);
         self.champ_mut(player).hex = to;
@@ -1105,13 +1144,17 @@ impl Game {
         // The champion may have fallen to a trap and woken at home.
         let at = self.hex_of(player);
         if at == to {
+            // People live there: nobody walks in unseen.
+            if self.board.tile(at).is_some_and(|t| t.terrain.crowded()) {
+                self.reveal(player, RevealReason::Crowd, events);
+            }
             self.claim(player, at, events);
         }
-        let near: Vec<PlayerId> = self
-            .initiative_after(player)
-            .into_iter()
-            .filter(|&p| self.hex_of(p).unsigned_distance_to(at) <= REACTION_RANGE)
-            .collect();
+        // Nobody sees a hidden champion walk by, so nobody reacts to it.
+        if self.is_hidden(player) {
+            return Ok(());
+        }
+        let near = self.watchers(player, at);
         self.open_window(
             WindowKind::Enter {
                 mover: player,
@@ -1135,7 +1178,12 @@ impl Game {
             self.offer(Some(player), god, 1, events);
             self.record_deed(player, style::Deed::Prayed);
         }
-        let others = self.initiative_after(player);
+        self.stealth_at_turn_end(player, events);
+        let others: Vec<PlayerId> = self
+            .initiative_after(player)
+            .into_iter()
+            .filter(|&p| !self.is_hidden(p))
+            .collect();
         self.open_window(WindowKind::End { player }, others, events);
         if self.window.is_none() {
             self.advance_turn(events);
@@ -1163,11 +1211,15 @@ impl Game {
         if let Target::Champion(aimed) = target
             && aimed != player
         {
+            // Aiming at a rival gives away where you stand.
+            self.reveal(player, RevealReason::Aimed, events);
             let mut eligible = vec![aimed];
             let at = self.hex_of(aimed);
-            eligible.extend(self.initiative_after(player).into_iter().filter(|&p| {
-                p != aimed && self.hex_of(p).unsigned_distance_to(at) <= REACTION_RANGE
-            }));
+            eligible.extend(
+                self.watchers(player, at)
+                    .into_iter()
+                    .filter(|&p| p != aimed),
+            );
             self.pending = Some(Pending {
                 caster: player,
                 card,
@@ -1296,6 +1348,7 @@ impl Game {
                 };
                 let (a, d) = (burned(attacker), burned(defender));
                 self.resolve_battle(attacker, defender, a, d, events);
+                self.ambush = None;
             }
             _ => {}
         }
@@ -1468,6 +1521,7 @@ impl Game {
                     self.raise_ward(t, element, events);
                 }
             }
+            Effect::Hide => self.hide(caster, events),
             Effect::Haste(x) => {
                 if caster == self.current_player() {
                     self.move_points += u32::from(n(x));
@@ -1499,7 +1553,18 @@ impl Game {
                 }
             }
             Effect::Blink => {
-                if let Target::Hex(to) = target {
+                // Fog drops the caster onto someone hiding there: the step
+                // fails and the one in hiding is seen.
+                if let Target::Hex(to) = target
+                    && let Some(hidden) = self.hidden_at(to)
+                {
+                    events.push(Event::Stumbled {
+                        mover: caster,
+                        hidden,
+                        hex: to,
+                    });
+                    self.reveal(hidden, RevealReason::Stumbled, events);
+                } else if let Target::Hex(to) = target {
                     let from = self.hex_of(caster);
                     self.champ_mut(caster).hex = to;
                     events.push(Event::Blinked {
@@ -1683,12 +1748,15 @@ impl Game {
             .flat_map(|r| home.ring(r).collect::<Vec<_>>())
             .find(|&h| {
                 self.board.contains(h)
-                    && self.occupant(h).is_none_or(|p| p == player)
+                    && self.champion_at(h).is_none_or(|p| p == player)
                     && !self.guard_at(h)
             })
             .unwrap_or(home);
+        // Whoever falls wakes at home, in plain sight.
+        self.reveal(player, stealth::RevealReason::Stumbled, events);
         let champ = self.champ_mut(player);
         champ.hex = respawn;
+        champ.seen_at = respawn;
         champ.hp = champ.body;
         champ.ward = None;
         champ.rooted = false;
@@ -1841,6 +1909,7 @@ impl Game {
 
 mod battle;
 mod guard;
+mod stealth;
 mod story;
 mod style;
 mod victory;
@@ -1849,6 +1918,7 @@ mod wish;
 mod world;
 pub use battle::Score;
 pub use guard::{GUARD_DICE, GUARD_RELIEF, GUARD_STEPS, Guard};
+pub use stealth::RevealReason;
 pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
 pub use victory::{Check, CheckKind, Condition, OPEN_COUNT};

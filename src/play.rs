@@ -614,6 +614,8 @@ impl Match {
             match event {
                 Event::Moved { player, to, .. } => self.steps.push((*player, *to)),
                 Event::Blinked { player, to, .. } => self.steps.push((*player, *to)),
+                // Seen again: the token goes where they really are.
+                Event::Revealed { player, hex, .. } => self.steps.push((*player, *hex)),
                 Event::ChampionFell {
                     player, respawn, ..
                 } => {
@@ -734,6 +736,19 @@ impl Match {
         }
     }
 
+    /// "натыкается на Тришну": the seat's name in the accusative.
+    pub fn name_accusative(&self, player: PlayerId) -> String {
+        let god = self
+            .game
+            .champion(player)
+            .map_or("?", |c| names::god_accusative(c.god));
+        if player == self.human {
+            format!("{god} (тебя)")
+        } else {
+            god.to_string()
+        }
+    }
+
     pub fn name(&self, player: PlayerId) -> String {
         let god = self
             .game
@@ -824,6 +839,17 @@ impl Match {
                 names::element(*ward)
             ),
             Event::Rooted { player } => format!("{} скован.", self.name(*player)),
+            Event::Hid { player, .. } => format!("{} уходит в тень.", self.name(*player)),
+            Event::Revealed { player, why, .. } => format!(
+                "{} выходит из тени: {}.",
+                self.name(*player),
+                names::reveal(*why)
+            ),
+            Event::Stumbled { mover, hidden, .. } => format!(
+                "{} натыкается на {} — засада!",
+                self.name(*mover),
+                self.name_accusative(*hidden)
+            ),
             Event::TrapSet { player, .. } if *player == me => "Ловушка поставлена.".into(),
             Event::TrapSprung {
                 owner, victim, def, ..
