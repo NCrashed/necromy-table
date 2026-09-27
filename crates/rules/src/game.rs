@@ -812,6 +812,11 @@ impl Game {
         self.deck.len()
     }
 
+    /// Cards spent and waiting to be shuffled back when the deck runs out.
+    pub fn discard_len(&self) -> usize {
+        self.discard.len()
+    }
+
     /// Every event since the match began, in order.
     pub fn log(&self) -> &[Event] {
         &self.log

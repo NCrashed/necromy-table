@@ -42,6 +42,11 @@ pub struct CardArt {
     frames: [Handle<Image>; 6],
     art: HashMap<&'static str, Handle<Image>>,
     spirit: Handle<Image>,
+    back: Handle<Image>,
+    /// The five gods' seal on the back, 64 px shown at 2×.
+    emblem: Handle<Image>,
+    /// A card back as a 7×10 icon, for hand sizes.
+    pub mini: Handle<Image>,
 }
 
 /// The illustration of each card, by its name in the pool.
@@ -172,6 +177,152 @@ fn frame(element: Option<Element>) -> Image {
     }
     image
 }
+/// The back of every card: the same bronze rim, a night-violet field with a
+/// lattice, a gold inner border with element-coloured corner gems, and a
+/// ring of light behind the emblem (the five gods' seal, drawn on top).
+fn back() -> Image {
+    let (w, h) = (CARD_W as u32, CARD_H as u32);
+    let mut image = Image::new_fill(
+        Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0, 0, 0, 0],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    let ink = [20, 15, 24];
+    let bronze = [[212, 170, 96], [168, 120, 60], [92, 62, 36]];
+    let gold = [250, 214, 120];
+    let field = [34, 26, 48];
+    let lattice = [50, 39, 70];
+    let knot = [78, 62, 104];
+    let (cx, cy) = (w as i32 / 2, h as i32 / 2);
+    let data = image.data.as_mut().expect("new_fill allocates pixel data");
+    let mut put = |x: u32, y: u32, c: [u8; 3]| {
+        let i = ((y * w + x) * 4) as usize;
+        data[i..i + 4].copy_from_slice(&[c[0], c[1], c[2], 255]);
+    };
+    for y in 0..h {
+        for x in 0..w {
+            let corner = (x < 2 || x >= w - 2) && (y < 2 || y >= h - 2);
+            if corner && (x.min(w - 1 - x) + y.min(h - 1 - y) < 2) {
+                continue;
+            }
+            let edge = x.min(w - 1 - x).min(y.min(h - 1 - y));
+            let lit = x < w - 1 - x && y < h - 1 - y;
+            let (dx, dy) = (x as i32 - cx, y as i32 - cy);
+            let r2 = dx * dx + dy * dy;
+            let c = match edge {
+                0 => ink,
+                1 if lit => bronze[0],
+                1 => bronze[2],
+                2 | 3 => bronze[1],
+                4 => ink,
+                9 => ink,
+                10 => bronze[1],
+                11 if lit => bronze[0],
+                11 => bronze[2],
+                12 => ink,
+                _ => {
+                    // A soft ring of light behind the emblem.
+                    let glow = if r2 < 62 * 62 {
+                        1.0 - r2 as f32 / (62.0 * 62.0)
+                    } else {
+                        0.0
+                    };
+                    let (u, v) = (x as i32 + y as i32, x as i32 - y as i32);
+                    let base = if u.rem_euclid(12) == 0 && v.rem_euclid(12) == 0 {
+                        knot
+                    } else if u.rem_euclid(12) == 0 || v.rem_euclid(12) == 0 {
+                        lattice
+                    } else {
+                        field
+                    };
+                    let k = 1.0 + 0.9 * glow;
+                    scale(base, k)
+                }
+            };
+            put(x, y, c);
+        }
+    }
+    // A gem of each element's colour at the inner border's corners, and
+    // the fifth at the top middle.
+    let elements = [
+        Element::Wood,
+        Element::Fire,
+        Element::Earth,
+        Element::Metal,
+        Element::Water,
+    ];
+    let spots = [
+        (10, 10),
+        (w - 12, 10),
+        (10, h - 12),
+        (w - 12, h - 12),
+        (w / 2 - 1, 10),
+    ];
+    for (element, (sx, sy)) in elements.into_iter().zip(spots) {
+        let tone = rgb(names::element_color(Some(element)));
+        for (dx, dy, c) in [
+            (0, -1, ink),
+            (-1, 0, ink),
+            (2, 0, ink),
+            (0, 2, ink),
+            (1, -1, ink),
+            (-1, 1, ink),
+            (2, 1, ink),
+            (1, 2, ink),
+            (0, 0, scale(tone, 1.3)),
+            (1, 0, tone),
+            (0, 1, tone),
+            (1, 1, scale(tone, 0.6)),
+        ] {
+            put((sx as i32 + dx) as u32, (sy as i32 + dy) as u32, c);
+        }
+    }
+    // Studs on the rim, like the fronts.
+    for (sx, sy) in [(3, 3), (w - 5, 3), (3, h - 5), (w - 5, h - 5)] {
+        for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            put(sx + dx, sy + dy, gold);
+        }
+    }
+    image
+}
+
+
+/// A tiny card back: bronze edge, violet field, a gold seal.
+fn mini_back() -> Image {
+    let (w, h) = (7u32, 10u32);
+    let mut image = Image::new_fill(
+        Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0, 0, 0, 0],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    let data = image.data.as_mut().expect("new_fill allocates pixel data");
+    for y in 0..h {
+        for x in 0..w {
+            let edge = x.min(w - 1 - x).min(y.min(h - 1 - y));
+            let c: [u8; 3] = match edge {
+                0 => [20, 15, 24],
+                1 => [168, 120, 60],
+                _ if (x, y) == (3, 4) || (x, y) == (3, 5) => [250, 214, 120],
+                _ => [50, 39, 70],
+            };
+            let i = ((y * w + x) * 4) as usize;
+            data[i..i + 4].copy_from_slice(&[c[0], c[1], c[2], 255]);
+        }
+    }
+    image
+}
 
 fn make_card_art(
     mut commands: Commands,
@@ -196,6 +347,9 @@ fn make_card_art(
         frames,
         art,
         spirit: assets.load("cards/spirit-crystal.png"),
+        back: images.add(back()),
+        emblem: assets.load("cards/card-back.png"),
+        mini: images.add(mini_back()),
     });
 }
 
@@ -218,6 +372,28 @@ fn at(left: f32, top: f32, width: f32, height: f32) -> Node {
         height: px(height),
         ..default()
     }
+}
+
+/// A card face down, `CARD_W`×`CARD_H`.
+pub fn card_back(commands: &mut Commands, art: &CardArt) -> Entity {
+    let emblem = commands
+        .spawn((
+            ImageNode::new(art.emblem.clone()),
+            at((CARD_W - 128.0) / 2.0, (CARD_H - 128.0) / 2.0, 128.0, 128.0),
+        ))
+        .id();
+    commands
+        .spawn((
+            Node {
+                width: px(CARD_W),
+                height: px(CARD_H),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            ImageNode::new(art.back.clone()),
+        ))
+        .add_child(emblem)
+        .id()
 }
 
 /// One card as a UI node, `CARD_W`×`CARD_H`.

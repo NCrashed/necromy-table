@@ -8,14 +8,19 @@ use necromy_rules::{CardId, Game, WindowKind};
 
 use crate::ui_skin::Frame;
 use crate::board::{Board, Hovered};
-use crate::card_art::{CARD_H, CardArt, CardLook, card_node};
+use crate::card_art::{CARD_H, CARD_W, CardArt, CardLook, card_node};
+use crate::deck::DeckSlot;
 use crate::names;
 use crate::play::{self, IncomingCountdown, Match, Selection};
 use crate::stats::StatArt;
 
 /// How much of a card in hand hides below the screen until it is hovered:
 /// the illustration, name and kind stay in sight.
-const CARD_TUCK: f32 = CARD_H - 142.0;
+pub const CARD_TUCK: f32 = CARD_H - 142.0;
+/// Between the deck and the first card in hand.
+const DECK_GAP: f32 = 20.0;
+/// Room the hand leaves on each side for the sheet and the portraits.
+const HAND_MARGIN: f32 = 280.0;
 
 pub struct HudPlugin;
 
@@ -95,7 +100,11 @@ struct Tooltip;
 struct Incoming;
 
 #[derive(Component)]
-struct HandCard(CardId);
+pub struct HandCard(pub CardId);
+
+/// The row of cards in hand, right of the deck.
+#[derive(Component)]
+struct HandCards;
 
 pub const INK: Color = Color::srgb(0.95, 0.92, 0.85);
 
@@ -158,10 +167,14 @@ fn spawn_hud(mut commands: Commands, font: Res<UiFont>) {
             left: px(0.0),
             right: px(0.0),
             justify_content: JustifyContent::Center,
-            column_gap: px(8.0),
+            column_gap: px(DECK_GAP),
             ..default()
         },
-    ));
+    ))
+    .with_children(|hand| {
+        hand.spawn((DeckSlot, Node::default()));
+        hand.spawn((HandCards, Node::default()));
+    });
 }
 
 fn update_text(game: Res<Match>, mut panels: Query<(&Panel, &mut Text)>) {
@@ -172,6 +185,7 @@ fn update_text(game: Res<Match>, mut panels: Query<(&Panel, &mut Text)>) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn rebuild_hand(
     mut commands: Commands,
     game: Res<Match>,
@@ -179,9 +193,20 @@ fn rebuild_hand(
     font: Res<UiFont>,
     card_art: Res<CardArt>,
     stat_art: Res<StatArt>,
-    hand: Single<Entity, With<Hand>>,
+    hand: Single<(Entity, &mut Node), With<HandCards>>,
+    window: Single<&Window, With<PrimaryWindow>>,
 ) {
-    commands.entity(*hand).despawn_related::<Children>();
+    let (hand, mut row) = hand.into_inner();
+    commands.entity(hand).despawn_related::<Children>();
+    // Cards overlap when they do not fit between the side panels.
+    let n = game.game.hand(game.human).len() as f32;
+    let room = window.width() - 2.0 * HAND_MARGIN - CARD_W - DECK_GAP;
+    let gap = if n > 1.0 {
+        ((room - n * CARD_W) / (n - 1.0)).clamp(-CARD_W * 0.6, 8.0)
+    } else {
+        8.0
+    };
+    row.column_gap = px(gap);
     let playable = game.game.playable(game.human);
     let burning = game.game.battle_dice(game.human).is_some() && game.human_awaited();
     for &card in game.game.hand(game.human) {
@@ -202,8 +227,10 @@ fn rebuild_hand(
             def,
             look,
         );
-        commands.entity(entity).insert((HandCard(card), Button));
-        commands.entity(*hand).add_child(entity);
+        commands
+            .entity(entity)
+            .insert((HandCard(card), Button, ZIndex(0)));
+        commands.entity(hand).add_child(entity);
     }
 }
 
@@ -476,11 +503,16 @@ fn tooltip(
 
 /// A card in hand rises into full view while hovered, aimed or marked to
 /// burn, like drawing it out of the hand.
-fn raise_cards(selection: Res<Selection>, mut cards: Query<(&Interaction, &HandCard, &mut Node)>) {
-    for (interaction, card, mut node) in &mut cards {
+fn raise_cards(
+    selection: Res<Selection>,
+    mut cards: Query<(&Interaction, &HandCard, &mut Node, &mut ZIndex)>,
+) {
+    for (interaction, card, mut node, mut z) in &mut cards {
         let chosen = selection.card == Some(card.0) || selection.burn.contains(&card.0);
         let up = chosen || *interaction != Interaction::None;
         let top = if up { px(-CARD_TUCK) } else { px(0.0) };
+        // A raised card comes in front of the ones overlapping it.
+        z.set_if_neq(ZIndex(if up { 1 } else { 0 }));
         if node.top != top {
             node.top = top;
         }

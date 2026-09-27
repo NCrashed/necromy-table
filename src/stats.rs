@@ -93,7 +93,7 @@ struct MyPanel;
 struct Seats;
 
 #[derive(Component)]
-struct Seat(PlayerId);
+pub struct Seat(pub PlayerId);
 
 #[derive(Component)]
 struct Popup;
@@ -210,6 +210,8 @@ fn rebuild_seats(
     mut commands: Commands,
     game: Res<Match>,
     art: Res<StatArt>,
+    card_art: Res<crate::card_art::CardArt>,
+    font: Res<UiFont>,
     seats: Single<Entity, With<Seats>>,
 ) {
     commands.entity(*seats).despawn_related::<Children>();
@@ -254,7 +256,21 @@ fn rebuild_seats(
             ))
             .id();
         let hp = bar(&mut commands, c.hp, c.body, HEALTH, None, 5.0, 7.0);
-        commands.entity(seat).add_children(&[crown, portrait, hp]);
+        // Cards in hand: a small back and the count.
+        let hand = row(&mut commands);
+        let back = commands
+            .spawn((
+                ImageNode::new(card_art.mini.clone()),
+                Node {
+                    width: px(14.0),
+                    height: px(20.0),
+                    ..default()
+                },
+            ))
+            .id();
+        let count = label(&mut commands, &font, &g.hand(p).len().to_string(), 12.0, true);
+        commands.entity(hand).add_children(&[back, count]);
+        commands.entity(seat).add_children(&[crown, portrait, hp, hand]);
         commands.entity(*seats).add_child(seat);
     }
 }

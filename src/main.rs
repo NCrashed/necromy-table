@@ -3,6 +3,7 @@ mod battle_ui;
 mod board;
 mod camera;
 mod card_art;
+mod deck;
 mod dice;
 mod hud;
 mod icons;
@@ -55,6 +56,7 @@ fn main() {
             card_art::CardArtPlugin,
             ui_skin::UiSkinPlugin,
             dice::DicePlugin,
+            deck::DeckPlugin,
         ))
         // The screens: more plugins than one tuple holds.
         .add_plugins((
