@@ -2,6 +2,7 @@ mod ambient;
 mod battle_ui;
 mod board;
 mod camera;
+mod card_art;
 mod dice;
 mod hud;
 mod icons;
@@ -50,6 +51,7 @@ fn main() {
             lighting::LightingPlugin,
             token::TokenPlugin,
             hud::HudPlugin,
+            card_art::CardArtPlugin,
             dice::DicePlugin,
         ))
         // The screens: more plugins than one tuple holds.

@@ -4,13 +4,17 @@
 use bevy::prelude::*;
 use bevy::text::{FontSize, FontSource};
 use bevy::window::PrimaryWindow;
-use necromy_rules::{CardDef, CardId, Game, WindowKind};
+use necromy_rules::{CardId, Game, WindowKind};
 
 use crate::board::{Board, Hovered};
+use crate::card_art::{CARD_H, CardArt, CardLook, card_node};
 use crate::names;
 use crate::play::{self, IncomingCountdown, Match, Selection};
+use crate::stats::StatArt;
 
-const CARD_WIDTH: f32 = 150.0;
+/// How much of a card in hand hides below the screen until it is hovered:
+/// the illustration, name and kind stay in sight.
+const CARD_TUCK: f32 = CARD_H - 142.0;
 
 pub struct HudPlugin;
 
@@ -31,7 +35,13 @@ impl Plugin for HudPlugin {
             )
             .add_systems(
                 crate::InGame,
-                (click_cards, tooltip, skip_incoming, expire_incoming_result),
+                (
+                    click_cards,
+                    raise_cards,
+                    tooltip,
+                    skip_incoming,
+                    expire_incoming_result,
+                ),
             );
     }
 }
@@ -144,7 +154,7 @@ fn spawn_hud(mut commands: Commands, font: Res<UiFont>) {
         Hand,
         Node {
             position_type: PositionType::Absolute,
-            bottom: px(10.0),
+            bottom: px(10.0 - CARD_TUCK),
             left: px(0.0),
             right: px(0.0),
             justify_content: JustifyContent::Center,
@@ -162,90 +172,13 @@ fn update_text(game: Res<Match>, mut panels: Query<(&Panel, &mut Text)>) {
     }
 }
 
-/// How a card is drawn: frame colour and width, opacity, extra lines.
-struct CardLook {
-    border: Color,
-    border_px: f32,
-    alpha: f32,
-    extra: Vec<(String, Color)>,
-}
-
-/// One card as a UI node: name, element and timing, text, stage note, battle
-/// face and any extra lines.
-fn spawn_card(
-    commands: &mut Commands,
-    font: &UiFont,
-    g: &Game,
-    def: &CardDef,
-    look: CardLook,
-) -> Entity {
-    let alpha = look.alpha;
-    let element = def.element.map_or("без стихии", names::element);
-    let cost = if def.cost > 0 {
-        format!(" · дух {}", def.cost)
-    } else {
-        String::new()
-    };
-    let lines = [
-        (def.name.to_string(), font.bold(14.0), INK),
-        (
-            format!(
-                "{element} · {} · {}{cost}",
-                names::kind(def.kind),
-                names::timing(def.timing)
-            ),
-            font.text(11.0),
-            names::element_color(def.element),
-        ),
-        (
-            def.text.to_string(),
-            font.text(12.0),
-            Color::srgb(0.84, 0.82, 0.76),
-        ),
-        (
-            stage_note(g, def),
-            font.text(11.0),
-            Color::srgb(0.75, 0.70, 0.95),
-        ),
-        (
-            format!("в бою: {}", names::face(def.burn_face())),
-            font.text(11.0),
-            Color::srgb(0.95, 0.55, 0.45),
-        ),
-    ];
-    let card = commands
-        .spawn((
-            Node {
-                width: px(CARD_WIDTH),
-                min_height: px(120.0),
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::all(px(6.0)),
-                row_gap: px(4.0),
-                border: UiRect::all(px(look.border_px)),
-                ..default()
-            },
-            BorderColor::all(look.border),
-            BackgroundColor(Color::srgba(0.10, 0.09, 0.12, alpha)),
-        ))
-        .id();
-    let extra = look.extra.into_iter().map(|(t, c)| (t, font.text(11.0), c));
-    for (text, font, color) in lines.into_iter().chain(extra) {
-        if text.is_empty() {
-            continue;
-        }
-        let line = commands
-            .spawn((Text::new(text), font, TextColor(color.with_alpha(alpha))))
-            .id();
-        commands.entity(card).add_child(line);
-    }
-    card
-}
-
 fn rebuild_hand(
     mut commands: Commands,
     game: Res<Match>,
     selection: Res<Selection>,
     font: Res<UiFont>,
+    card_art: Res<CardArt>,
+    stat_art: Res<StatArt>,
     hand: Single<Entity, With<Hand>>,
 ) {
     commands.entity(*hand).despawn_related::<Children>();
@@ -256,16 +189,19 @@ fn rebuild_hand(
         let usable = playable.contains(&card) || burning;
         let selected = selection.card == Some(card) || selection.burn.contains(&card);
         let look = CardLook {
-            border: if selected {
-                Color::srgb(1.0, 0.82, 0.3)
-            } else {
-                names::element_color(def.element)
-            },
-            border_px: if selected { 3.0 } else { 2.0 },
-            alpha: if usable || selected { 0.95 } else { 0.55 },
+            usable: usable || selected,
+            outline: selected.then_some(Color::srgb(1.0, 0.82, 0.3)),
             extra: Vec::new(),
         };
-        let entity = spawn_card(&mut commands, &font, &game.game, def, look);
+        let entity = card_node(
+            &mut commands,
+            &font,
+            &card_art,
+            &stat_art,
+            &game.game,
+            def,
+            look,
+        );
         commands.entity(entity).insert((HandCard(card), Button));
         commands.entity(*hand).add_child(entity);
     }
@@ -279,6 +215,8 @@ fn rebuild_incoming(
     game: Res<Match>,
     countdown: Res<IncomingCountdown>,
     font: Res<UiFont>,
+    card_art: Res<CardArt>,
+    stat_art: Res<StatArt>,
     incoming: Single<(Entity, &mut Visibility), With<Incoming>>,
 ) {
     let (panel, mut visibility) = incoming.into_inner();
@@ -303,13 +241,8 @@ fn rebuild_incoming(
             extra.push((format!("цепочка: +{bonus}"), Color::srgb(1.0, 0.82, 0.3)));
         }
         let look = CardLook {
-            border: if at_me {
-                red
-            } else {
-                names::element_color(g.def(card).element)
-            },
-            border_px: 3.0,
-            alpha: 0.97,
+            usable: true,
+            outline: at_me.then_some(red),
             extra,
         };
         let awaited = game.human_awaited();
@@ -332,9 +265,8 @@ fn rebuild_incoming(
     } else if let Some(hit) = game.incoming_result.as_ref() {
         let lines = hit.lines.iter().map(|l| (format!("→ {l}"), red)).collect();
         let look = CardLook {
-            border: red,
-            border_px: 3.0,
-            alpha: 0.97,
+            usable: true,
+            outline: Some(red),
             extra: lines,
         };
         (
@@ -363,7 +295,15 @@ fn rebuild_incoming(
             BackgroundColor(PANEL),
         ))
         .id();
-    let card = spawn_card(&mut commands, &font, g, g.def(card), look);
+    let card = card_node(
+        &mut commands,
+        &font,
+        &card_art,
+        &stat_art,
+        g,
+        g.def(card),
+        look,
+    );
     let mut children = vec![header, card];
     if !footer.is_empty() {
         let f = commands
@@ -447,7 +387,7 @@ fn click_cards(
 }
 
 /// How the card's god's stage bends it right now (§5); empty at mid stage.
-fn stage_note(g: &Game, def: &necromy_rules::CardDef) -> String {
+pub fn stage_note(g: &Game, def: &necromy_rules::CardDef) -> String {
     let Some(element) = def.element.filter(|_| def.effect.scales()) else {
         return String::new();
     };
@@ -534,4 +474,17 @@ fn tooltip(
         }
     }
     text.0 = lines.join("\n");
+}
+
+/// A card in hand rises into full view while hovered, aimed or marked to
+/// burn, like drawing it out of the hand.
+fn raise_cards(selection: Res<Selection>, mut cards: Query<(&Interaction, &HandCard, &mut Node)>) {
+    for (interaction, card, mut node) in &mut cards {
+        let chosen = selection.card == Some(card.0) || selection.burn.contains(&card.0);
+        let up = chosen || *interaction != Interaction::None;
+        let top = if up { px(-CARD_TUCK) } else { px(0.0) };
+        if node.top != top {
+            node.top = top;
+        }
+    }
 }
