@@ -17,6 +17,7 @@ use bevy_sprite3d::prelude::*;
 use necromy_rules::{God, Hex, Terrain};
 
 use crate::board::Board;
+use crate::lighting::{Glow, lamp};
 use crate::play::Match;
 use crate::token::Billboard;
 
@@ -47,7 +48,44 @@ struct PropKind {
     px_below: f32,
     /// How far from the hex centre it stands.
     radius: f32,
+    /// A chimney mouth, in the sprite's pixels, if smoke comes out.
+    chimney: Option<(f32, f32)>,
+    /// A light it gives, by night or always (`lighting.rs`).
+    light: Option<PropLight>,
 }
+
+#[derive(Clone, Copy)]
+struct PropLight {
+    color: Color,
+    glow: Glow,
+    /// Height above the base, in metres.
+    height: f32,
+    range: f32,
+}
+
+const fn with_light(kind: PropKind, color: Color, glow: Glow, height: f32, range: f32) -> PropKind {
+    PropKind {
+        light: Some(PropLight {
+            color,
+            glow,
+            height,
+            range,
+        }),
+        ..kind
+    }
+}
+
+const FIRE: Color = Color::srgb(1.0, 0.55, 0.2);
+const WINDOW: Color = Color::srgb(1.0, 0.75, 0.42);
+const TURQUOISE: Color = Color::srgb(0.25, 0.95, 0.88);
+const GROWTH: Color = Color::srgb(0.55, 1.0, 0.4);
+const WHITE_GOLD: Color = Color::srgb(1.0, 0.9, 0.65);
+const LANTERN_VIOLET: Color = Color::srgb(0.72, 0.5, 1.0);
+/// A fire burns by day too, but only night shows it.
+const FIRE_GLOW: Glow = Glow {
+    day: 400.0,
+    night: 5_500.0,
+};
 
 const fn kind(file: &'static str, height: f32, px_high: f32, px_below: f32) -> PropKind {
     PropKind {
@@ -56,6 +94,15 @@ const fn kind(file: &'static str, height: f32, px_high: f32, px_below: f32) -> P
         px_high,
         px_below,
         radius: SPOT_RADIUS,
+        chimney: None,
+        light: None,
+    }
+}
+
+const fn with_chimney(kind: PropKind, x: f32, y: f32) -> PropKind {
+    PropKind {
+        chimney: Some((x, y)),
+        ..kind
     }
 }
 
@@ -75,8 +122,20 @@ const PINE_SMALL: PropKind = kind("pine-small", 0.85, 43.0, 2.0);
 const BIRCH: PropKind = kind("birch", 1.2, 62.0, 1.0);
 const BUSH: PropKind = kind("bush", 0.45, 31.0, 5.0);
 const DEAD_TREE: PropKind = kind("dead-tree", 1.1, 61.0, 1.0);
-const COTTAGE_RED: PropKind = kind("cottage-red", 0.95, 60.0, 1.0);
-const COTTAGE_THATCH: PropKind = kind("cottage-thatch", 0.95, 61.0, 1.0);
+const COTTAGE_RED: PropKind = with_light(
+    kind("cottage-red", 0.95, 60.0, 1.0),
+    WINDOW,
+    Glow::night(4_000.0),
+    0.3,
+    1.8,
+);
+const COTTAGE_THATCH: PropKind = with_light(
+    with_chimney(kind("cottage-thatch", 0.95, 61.0, 1.0), 42.0, 4.0),
+    WINDOW,
+    Glow::night(4_000.0),
+    0.3,
+    1.8,
+);
 const WELL: PropKind = kind("well", 0.7, 57.0, 4.0);
 const PEAK: PropKind = kind("peak", 1.3, 53.0, 2.0);
 const BOULDER: PropKind = kind("boulder", 0.4, 29.0, 9.0);
@@ -86,21 +145,81 @@ const WALL: PropKind = kind("wall", 0.75, 60.0, 3.0);
 const REEDS: PropKind = kind("reeds", 0.6, 58.0, 3.0);
 const BONES: PropKind = kind("bones", 0.35, 37.0, 7.0);
 const BANNER: PropKind = kind("banner-ahamar", 1.1, 61.0, 1.0);
-const BRAZIER: PropKind = kind("brazier", 0.55, 50.0, 6.0);
+const BRAZIER: PropKind = with_light(kind("brazier", 0.55, 50.0, 6.0), FIRE, FIRE_GLOW, 0.5, 2.6);
 const GRAVESTONE: PropKind = kind("gravestone", 0.45, 41.0, 8.0);
 // Each god's temple, two looks (§5): Bhava has no face, only his growth.
-const TEMPLE_BHAVA_OAK: PropKind = landmark("temple-bhava-oak", 1.6, 63.0, 1.0);
-const TEMPLE_BHAVA_RING: PropKind = landmark("temple-bhava-ring", 1.3, 55.0, 1.0);
-const TEMPLE_TRISHNA_ALTAR: PropKind = landmark("temple-trishna-altar", 1.2, 57.0, 2.0);
-const TEMPLE_TRISHNA_TENT: PropKind = landmark("temple-trishna-tent", 1.4, 62.0, 1.0);
+const TEMPLE_BHAVA_OAK: PropKind = with_light(
+    landmark("temple-bhava-oak", 1.6, 63.0, 1.0),
+    GROWTH,
+    Glow::night(3_500.0),
+    0.4,
+    2.2,
+);
+const TEMPLE_BHAVA_RING: PropKind = with_light(
+    landmark("temple-bhava-ring", 1.3, 55.0, 1.0),
+    GROWTH,
+    Glow::night(3_500.0),
+    0.5,
+    2.2,
+);
+const TEMPLE_TRISHNA_ALTAR: PropKind = with_light(
+    landmark("temple-trishna-altar", 1.2, 57.0, 2.0),
+    FIRE,
+    FIRE_GLOW,
+    0.4,
+    2.6,
+);
+const TEMPLE_TRISHNA_TENT: PropKind = with_light(
+    landmark("temple-trishna-tent", 1.4, 62.0, 1.0),
+    FIRE,
+    FIRE_GLOW,
+    0.35,
+    2.6,
+);
 const TEMPLE_ZAGA_CHAPEL: PropKind = landmark("temple-zaga-chapel", 1.5, 63.0, 0.0);
-const TEMPLE_ZAGA_CELL: PropKind = landmark("temple-zaga-cell", 1.3, 55.0, 5.0);
-const TEMPLE_AHAMAR_PORTICO: PropKind = landmark("temple-ahamar-portico", 1.4, 61.0, 2.0);
-const TEMPLE_AHAMAR_DOME: PropKind = landmark("temple-ahamar-dome", 1.5, 62.0, 1.0);
-const TEMPLE_MAYA_RUIN: PropKind = landmark("temple-maya-ruin", 1.4, 60.0, 2.0);
-const TEMPLE_MAYA_ARCH: PropKind = landmark("temple-maya-arch", 1.4, 58.0, 3.0);
+const TEMPLE_ZAGA_CELL: PropKind = with_light(
+    landmark("temple-zaga-cell", 1.3, 55.0, 5.0),
+    LANTERN_VIOLET,
+    Glow::night(2_500.0),
+    0.6,
+    2.0,
+);
+const TEMPLE_AHAMAR_PORTICO: PropKind = with_light(
+    landmark("temple-ahamar-portico", 1.4, 61.0, 2.0),
+    WHITE_GOLD,
+    Glow::night(3_000.0),
+    0.5,
+    2.2,
+);
+const TEMPLE_AHAMAR_DOME: PropKind = with_light(
+    landmark("temple-ahamar-dome", 1.5, 62.0, 1.0),
+    WHITE_GOLD,
+    Glow::night(3_000.0),
+    0.5,
+    2.2,
+);
+const TEMPLE_MAYA_RUIN: PropKind = with_light(
+    landmark("temple-maya-ruin", 1.4, 60.0, 2.0),
+    TURQUOISE,
+    Glow::night(4_500.0),
+    0.5,
+    2.4,
+);
+const TEMPLE_MAYA_ARCH: PropKind = with_light(
+    landmark("temple-maya-arch", 1.4, 58.0, 3.0),
+    TURQUOISE,
+    Glow::night(4_500.0),
+    0.6,
+    2.4,
+);
 /// Ahamar's Table, the centre of the board.
-const TABLE: PropKind = landmark("table-dais", 1.15, 47.0, 6.0);
+const TABLE: PropKind = with_light(
+    landmark("table-dais", 1.15, 47.0, 6.0),
+    WHITE_GOLD,
+    Glow::night(3_500.0),
+    0.6,
+    2.4,
+);
 /// Nothing on this spot: a choice that leaves the ground bare.
 const BARE: PropKind = kind("", 0.0, 1.0, 0.0);
 
@@ -276,22 +395,44 @@ fn spawn_prop(commands: &mut Commands, images: &PropImages, kind: PropKind, hex:
     let Some(image) = images.0.get(kind.file) else {
         return;
     };
-    commands.spawn((
+    let pixels_per_metre = kind.px_high / kind.height;
+    let mut prop = commands.spawn((
         Prop(hex),
         Billboard,
         NotShadowCaster,
         NotShadowReceiver,
         Sprite::from_image(image.clone()),
         Sprite3d {
-            pixels_per_metre: kind.px_high / kind.height,
+            pixels_per_metre,
             // Stand on the base, not on the empty rows under it.
             pivot: Some(Vec2::new(0.5, kind.px_below / 64.0)),
             alpha_mode: AlphaMode::Mask(0.5),
-            unlit: true,
+            // Lit: night falls on props too (`lighting.rs`).
+            unlit: false,
             ..default()
         },
         Transform::from_translation(at),
     ));
+    // Smoke comes out of the chimney mouth, which turns with the billboard.
+    if let Some((x, y)) = kind.chimney {
+        let local = Vec3::new(
+            (x - 32.0) / pixels_per_metre,
+            (64.0 - y - kind.px_below) / pixels_per_metre,
+            0.01,
+        );
+        let seed = (hex.x * 31 + hex.y * 17).unsigned_abs();
+        prop.with_child((
+            crate::ambient::Chimney::new(seed),
+            Transform::from_translation(local),
+        ));
+    }
+    // A light a little in front of the sprite, so it lights its own face.
+    if let Some(light) = kind.light {
+        prop.with_child((
+            lamp(light.color, light.glow, light.range),
+            Transform::from_xyz(0.0, light.height, 0.25),
+        ));
+    }
 }
 
 /// Props still sharing the library's material.
@@ -317,9 +458,12 @@ fn own_materials(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     for (entity, mut material) in &mut props {
-        let Some(copy) = materials.get(&material.0).cloned() else {
+        let Some(mut copy) = materials.get(&material.0).cloned() else {
             continue;
         };
+        // Matte: painted props have no glints.
+        copy.perceptual_roughness = 1.0;
+        copy.reflectance = 0.0;
         material.0 = materials.add(copy);
         commands.entity(entity).insert(Fade { faded: false });
     }

@@ -1,9 +1,11 @@
+mod ambient;
 mod battle_ui;
 mod board;
 mod camera;
 mod dice;
 mod hud;
 mod icons;
+mod lighting;
 mod lobby;
 mod names;
 mod play;
@@ -44,9 +46,14 @@ fn main() {
             play::PlayPlugin,
             board::BoardPlugin,
             props::PropsPlugin,
+            ambient::AmbientPlugin,
+            lighting::LightingPlugin,
             token::TokenPlugin,
             hud::HudPlugin,
             dice::DicePlugin,
+        ))
+        // The screens: more plugins than one tuple holds.
+        .add_plugins((
             stats::StatsPlugin,
             battle_ui::BattleUiPlugin,
             turn_ui::TurnUiPlugin,
@@ -64,13 +71,18 @@ fn setup_scene(mut commands: Commands) {
     commands.spawn((
         TableCamera,
         Camera3d::default(),
+        // The table's own sky light; `lighting.rs` turns it to night.
+        AmbientLight::default(),
         Transform::from_xyz(0.0, 18.0, 15.5).looking_at(Vec3::new(0.0, 0.0, 2.6), Vec3::Y),
     ));
 
     commands.spawn((
+        lighting::Sun,
         DirectionalLight {
-            illuminance: 8_000.0,
-            shadow_maps_enabled: true,
+            illuminance: 2_600.0,
+            // Nothing on the board casts a shadow: billboards would cast
+            // paper-thin ones.
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_xyz(4.0, 10.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -115,12 +127,14 @@ const SCREENSHOT_SETTLE_SECS: f32 = 0.3;
 /// Time for the capture to reach the disk before quitting.
 const SCREENSHOT_SAVE_SECS: f32 = 1.0;
 
+#[allow(clippy::too_many_arguments)]
 fn auto_screenshot(
     mut commands: Commands,
     time: Res<Time>,
     dice: Res<dice::DiceShow>,
     game: Option<Res<play::Match>>,
     front: Res<lobby::Front>,
+    day_night: Res<lighting::DayNight>,
     mut shot: ResMut<AutoScreenshot>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -146,6 +160,8 @@ fn auto_screenshot(
             game.told.is_some() && game.wish_reply.is_none() && !dice.busy()
         }
         (Some("wishpanel"), Some(game)) => game.game.wish_due() == Some(game.human),
+        // Full night: the lights of the world are on.
+        (Some("night"), Some(_)) => day_night.night >= 1.0,
         // Someone slipped out of sight (§11.6).
         (Some("hidden"), Some(game)) => game.game.players().any(|p| game.game.is_hidden(p)),
         (Some("incoming"), Some(game)) => matches!(

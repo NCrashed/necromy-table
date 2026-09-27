@@ -38,7 +38,8 @@ impl Plugin for BoardPlugin {
                 .run_if(
                     resource_changed::<Match>
                         .or_else(resource_changed::<Selection>)
-                        .or_else(resource_changed::<Hovered>),
+                        .or_else(resource_changed::<Hovered>)
+                        .or_else(resource_changed::<crate::lighting::DayNight>),
                 ),
         );
     }
@@ -212,8 +213,10 @@ fn spawn_board(
             base_color: ground_color(tile, texture.is_some(), stage),
             base_color_texture: texture.clone(),
             alpha_mode: AlphaMode::Mask(0.5),
-            // Flat colour, no shading: the board reads like a painted table.
-            unlit: true,
+            // Lit, so night falls on it (`lighting.rs`); matte, no glints on
+            // painted ground.
+            perceptual_roughness: 1.0,
+            reflectance: 0.0,
             ..default()
         });
         let (ground_mesh, ground_at) = if texture.is_some() {
@@ -276,8 +279,10 @@ fn spawn_board(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sync_tiles(
     game: Res<Match>,
+    day_night: Res<crate::lighting::DayNight>,
     selection: Res<Selection>,
     hovered: Res<Hovered>,
     icon_materials: Res<IconMaterials>,
@@ -355,7 +360,7 @@ fn sync_tiles(
         };
         if let Some(mut m) = materials.get_mut(&material.0) {
             let region = game.game.board().tile(tile.0).and_then(|t| t.region);
-            m.base_color = highlight_color(lit, region);
+            m.base_color = highlight_color(lit, region, day_night.night);
         }
     }
 }
@@ -496,11 +501,15 @@ fn ground_color(tile: &RulesTile, painted: bool, stage: Option<u8>) -> Color {
 
 /// The veil over a hex: the highlight when it is lit, else a wash of its
 /// region's god so wedges read at a glance.
-fn highlight_color(lit: Lit, region: Option<God>) -> Color {
+/// `night` (0..1) darkens the region wash: the veil is unlit, and a bright
+/// wash on dark ground would glow like stained glass. Highlights stay bright
+/// at any hour.
+fn highlight_color(lit: Lit, region: Option<God>, night: f32) -> Color {
     match lit {
         Lit::No => region.map_or(Color::NONE, |g| {
-            let [r, g, b] = g.accent();
-            Color::srgba_u8(r, g, b, 46)
+            let dim = 1.0 - 0.8 * night;
+            let [r, g, b] = g.accent().map(|c| c as f32 / 255.0 * dim);
+            Color::srgba(r, g, b, 46.0 / 255.0)
         }),
         Lit::Reach => Color::srgba(1.0, 0.97, 0.85, 0.3),
         Lit::Hover => Color::srgba(1.0, 1.0, 1.0, 0.15),

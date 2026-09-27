@@ -187,7 +187,9 @@ fn spawn_tokens(
                     pixels_per_metre: SHEET_PIXELS_PER_METRE,
                     pivot: Some(Vec2::new(0.5, SHEET_FEET_PX / SHEET_FRAME as f32)),
                     alpha_mode: AlphaMode::Mask(0.5),
-                    unlit: true,
+                    // Lit: night falls on champions too; their own glow keeps
+                    // them readable.
+                    unlit: false,
                     ..default()
                 },
                 Some(TextureAtlas {
@@ -202,7 +204,9 @@ fn spawn_tokens(
                     // Feet on the tile, not the sprite centre.
                     pivot: Some(Vec2::new(0.5, 0.0)),
                     alpha_mode: AlphaMode::Mask(0.5),
-                    unlit: true,
+                    // Lit: night falls on champions too; their own glow keeps
+                    // them readable.
+                    unlit: false,
                     ..default()
                 },
                 None,
@@ -220,6 +224,16 @@ fn spawn_tokens(
             },
             sprite3d,
             Transform::from_translation(at),
+        ));
+        // At night a champion carries a little light, so the piece reads in
+        // the dark (`lighting.rs`).
+        entity.with_child((
+            crate::lighting::lamp(
+                Color::srgb(1.0, 0.9, 0.75),
+                crate::lighting::Glow::night(2_200.0),
+                2.0,
+            ),
+            Transform::from_xyz(0.0, 1.1, 0.35),
         ));
         match atlas {
             Some(atlas) => {
@@ -410,7 +424,9 @@ fn sync_guard(
                     pixels_per_metre: PIXELS_PER_METRE,
                     pivot: Some(Vec2::new(0.5, 0.0)),
                     alpha_mode: AlphaMode::Mask(0.5),
-                    unlit: true,
+                    // Lit: night falls on champions too; their own glow keeps
+                    // them readable.
+                    unlit: false,
                     ..default()
                 },
                 Transform::from_translation(board.hex_to_world(guard.hex)),
