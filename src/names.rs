@@ -252,6 +252,45 @@ pub fn wish(kind: necromy_rules::WishKind) -> &'static str {
     }
 }
 
+/// A whole wish in the Dominant's words: its acts, one after the other.
+pub fn wish_phrase(wish: &necromy_rules::Wish) -> String {
+    let parts: Vec<String> = wish
+        .acts
+        .iter()
+        .enumerate()
+        .map(|(i, act)| {
+            let phrase = self::wish(act.kind());
+            if i == 0 {
+                phrase.to_string()
+            } else {
+                // The second act joins the first in lower case.
+                let mut lower = phrase.chars();
+                lower
+                    .next()
+                    .map(|c| c.to_lowercase().chain(lower).collect())
+                    .unwrap_or_default()
+            }
+        })
+        .collect();
+    parts.join(", и ")
+}
+
+/// What the Dominant gave for a wish, `card` naming a card of theirs.
+pub fn price(
+    price: necromy_rules::Price,
+    card: impl Fn(necromy_rules::CardId) -> String,
+) -> String {
+    use necromy_rules::Price;
+    match price {
+        Price::Card(c) => format!("карту «{}»", card(c)),
+        Price::Health(1) => "1 здоровья".into(),
+        Price::Health(n) => format!("{n} здоровья"),
+        Price::Style(1) => "1 Стиль".into(),
+        Price::Style(n) => format!("{n} Стиля"),
+        Price::Claim(_) => "свою землю".into(),
+    }
+}
+
 /// What a god likes to be asked, as a hint in the wish panel.
 pub fn god_likes(god: God) -> &'static str {
     match god {

@@ -346,9 +346,11 @@ fn level(name: &str) -> f32 {
     match name {
         "step" => 0.25,
         "card-draw" | "card-flip" | "die-die" => 0.45,
-        "die-table" | "dice-shake" | "swing" | "spirit" | "offer" | "guard-march" => 0.55,
+        "die-table" | "dice-shake" | "swing" | "spirit" | "offer" | "guard-march"
+        | "poison-bite" => 0.55,
         "card-play" | "chain" | "block" | "hurt" | "heal" | "trap-set" | "hide" | "reveal"
-        | "blink" | "haste" | "corpse" | "window" => 0.65,
+        | "blink" | "haste" | "corpse" | "window" | "poison-laid" | "poison-fed"
+        | "poison-cured" => 0.65,
         "dawn" | "dusk" | "turn" => 0.7,
         _ => 0.8,
     }
@@ -825,10 +827,10 @@ fn hear_events(
             Event::WardRaised { player, .. } => (Sound::new("ward-raise"), by(*player)),
             Event::WardBroken { player, .. } => (Sound::new("ward-break"), by(*player)),
             Event::Rooted { player } => (Sound::new("root"), by(*player)),
-            // Poison borrows the curse sounds until it has its own.
-            Event::Poisoned { player, .. } => (Sound::new("curse-laid").at(0.7), by(*player)),
-            Event::PoisonBit { player, .. } => (Sound::new("curse-bit").at(0.7), by(*player)),
-            Event::PoisonCured { player, .. } => (Sound::new("heal"), by(*player)),
+            Event::Poisoned { player, .. } => (Sound::new("poison-laid"), by(*player)),
+            Event::PoisonBit { player, .. } => (Sound::new("poison-bite"), by(*player)),
+            Event::PoisonFed { player, .. } => (Sound::new("poison-fed"), by(*player)),
+            Event::PoisonCured { player, .. } => (Sound::new("poison-cured"), by(*player)),
             Event::Hasted { player, .. } => (Sound::new("haste"), by(*player)),
             Event::Blinked { player, .. } => (Sound::new("blink"), by(*player)),
             Event::TrapSet { player, .. } => (Sound::new("trap-set"), by(*player)),

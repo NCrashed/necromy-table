@@ -302,10 +302,12 @@ fn wish(game: &Game, player: PlayerId) -> Intent {
             .max_by_key(|&p| (game.style(p), p.0))
             .expect("a rival")
     });
+    let Some(act) = crate::Act::of(kind, target) else {
+        return Intent::RefuseWish;
+    };
     Intent::Wish {
         god,
-        kind,
-        target,
+        wish: crate::Wish::one(act),
         said: None,
     }
 }

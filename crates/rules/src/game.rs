@@ -136,12 +136,11 @@ pub enum Intent {
     Burn {
         cards: Vec<CardId>,
     },
-    /// The Dominant at dawn: ask `god` for `kind`, at `target` if the wish
-    /// needs a rival (§7).
+    /// The Dominant at dawn: ask `god` for `wish`, one or two acts and
+    /// perhaps a price (§7.3).
     Wish {
         god: God,
-        kind: wish::WishKind,
-        target: Option<PlayerId>,
+        wish: wish::Wish,
         /// A model's reading of a free-text wish; `None` for a prepared one.
         said: Option<wish::Said>,
     },
@@ -365,13 +364,20 @@ pub enum Event {
         player: PlayerId,
     },
     /// The god heard; its effects follow as ordinary events.
+    /// What the god granted: the acts the budget covered (`dropped` more
+    /// were asked) and the price given.
     WishGranted {
         player: PlayerId,
         god: God,
-        kind: wish::WishKind,
-        target: Option<PlayerId>,
+        wish: wish::Wish,
+        dropped: u8,
         grade: u8,
         said: Option<wish::Said>,
+    },
+    /// The Dominant gave this up for their wish, before the god answered.
+    PricePaid {
+        player: PlayerId,
+        price: wish::Price,
     },
     TerrainChanged {
         hex: Hex,
@@ -1191,20 +1197,9 @@ impl Game {
             }
             let mut events = Vec::new();
             match intent {
-                Intent::Wish {
-                    god,
-                    kind,
-                    target,
-                    said,
-                } => {
-                    let fits = match target {
-                        Some(t) => kind.needs_target() && t != player && self.champion(t).is_some(),
-                        None => !kind.needs_target(),
-                    };
-                    if !fits {
-                        return Err(RuleError::InvalidWish);
-                    }
-                    self.grant_wish(player, god, kind, target, said, &mut events);
+                Intent::Wish { god, wish, said } => {
+                    self.check_wish(player, &wish)?;
+                    self.grant_wish(player, god, wish, said, &mut events);
                 }
                 Intent::RefuseWish => {
                     self.wish_due = None;
@@ -2333,7 +2328,7 @@ pub use stealth::RevealReason;
 pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
 pub use victory::{Check, CheckKind, Condition, OPEN_COUNT, REFUSAL_THREAT, SECRET_FROM_ROUND};
-pub use wish::{Said, WishKind, god_terrain, taste_for};
+pub use wish::{Act, MAX_ACTS, Price, Said, Wish, WishKind, god_terrain, likes_a_stake, taste_for};
 pub use world::{Pantheon, STAGE_THRESHOLD, STAGES, TRISHNA_DRIFT};
 
 #[cfg(test)]

@@ -578,13 +578,16 @@ fn buttons(
                     continue;
                 }
                 let Some(kind) = draft.kind else { continue };
+                // A prepared wish: one act, no price (§7.7).
+                let Some(act) = necromy_rules::Act::of(kind, draft.target) else {
+                    continue;
+                };
                 if game
                     .act(
                         human,
                         Intent::Wish {
                             god,
-                            kind,
-                            target: draft.target,
+                            wish: necromy_rules::Wish::one(act),
                             said: None,
                         },
                     )
@@ -662,7 +665,7 @@ fn rebuild_reply(
             .id()
     };
     match reply.wish {
-        Some((god, kind, grade)) => {
+        Some((god, ref wish, grade, dropped)) => {
             let head = stats::row(&mut commands);
             let icon = stats::icon_node(&mut commands, art.gods[god.index()].clone(), 28.0, true);
             let who = stats::label(
@@ -690,11 +693,28 @@ fn rebuild_reply(
             commands.entity(head).add_children(&[icon, who, stars]);
             rows.push(head);
             // The words: the player's own, or the prepared phrase.
+            let phrase = names::wish_phrase(wish);
             let asked = match &reply.said {
-                Some(said) => format!("«{}» — понято как «{}»", said.text, names::wish(kind)),
-                None => format!("«{}»", names::wish(kind)),
+                Some(said) => format!("«{}» — понято как «{phrase}»", said.text),
+                None => format!("«{phrase}»"),
             };
             rows.push(block(&mut commands, asked, 14.0, INK));
+            // The sacrifice, and what the grade could not cover.
+            if let Some(price) = wish.price {
+                let paid = format!(
+                    "Отдано богу: {}.",
+                    names::price(price, |c| game.game.def(c).name.to_string())
+                );
+                rows.push(block(&mut commands, paid, 12.0, INK));
+            }
+            if dropped > 0 {
+                rows.push(block(
+                    &mut commands,
+                    "Всего бог не дал: оценка не покрыла второе.".into(),
+                    12.0,
+                    INK,
+                ));
+            }
             // The god's answer: the model's, then any written later, then the template.
             let speech = reply
                 .said

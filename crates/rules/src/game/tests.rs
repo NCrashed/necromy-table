@@ -1548,7 +1548,16 @@ fn bot_matches_end_in_many_ways() {
 
 // ---- Wishes (§7) ----
 
-use crate::game::WishKind;
+use crate::game::{Act, Price, Wish, WishKind};
+
+/// A prepared wish: one act of `kind`, no price. With no rival for a kind
+/// that needs one, no act at all (the rules turn that away).
+fn wish_of(kind: WishKind, target: Option<PlayerId>) -> Wish {
+    Wish {
+        acts: Act::of(kind, target).into_iter().collect(),
+        price: None,
+    }
+}
 
 /// Crowns `me` at a dawn and returns the events.
 fn crown(g: &mut Game, me: PlayerId) -> Vec<Event> {
@@ -1573,8 +1582,7 @@ fn the_dominant_owes_a_wish_before_play_goes_on() {
         me,
         Intent::Wish {
             god: God::Bhava,
-            kind: WishKind::Land,
-            target: None,
+            wish: wish_of(WishKind::Land, None),
             said: None,
         },
     )
@@ -1595,8 +1603,7 @@ fn gods_grade_by_nature_and_novelty() {
         me,
         Intent::Wish {
             god: God::Bhava,
-            kind: WishKind::Land,
-            target: None,
+            wish: wish_of(WishKind::Land, None),
             said: None,
         },
     )
@@ -1619,8 +1626,7 @@ fn a_wish_without_style_comes_with_a_curse() {
             me,
             Intent::Wish {
                 god: God::Trishna,
-                kind: WishKind::Fortune,
-                target: None,
+                wish: wish_of(WishKind::Fortune, None),
                 said: None,
             },
         )
@@ -1683,8 +1689,7 @@ fn weaken_needs_a_rival_and_passes_wards() {
             me,
             Intent::Wish {
                 god: God::Ahamar,
-                kind: WishKind::Weaken,
-                target: None,
+                wish: wish_of(WishKind::Weaken, None),
                 said: None,
             },
         ),
@@ -1695,8 +1700,7 @@ fn weaken_needs_a_rival_and_passes_wards() {
             me,
             Intent::Wish {
                 god: God::Ahamar,
-                kind: WishKind::Weaken,
-                target: Some(me),
+                wish: wish_of(WishKind::Weaken, Some(me)),
                 said: None,
             },
         ),
@@ -1708,8 +1712,7 @@ fn weaken_needs_a_rival_and_passes_wards() {
         me,
         Intent::Wish {
             god: God::Ahamar,
-            kind: WishKind::Weaken,
-            target: Some(foe),
+            wish: wish_of(WishKind::Weaken, Some(foe)),
             said: None,
         },
     )
@@ -1731,8 +1734,7 @@ fn every_god_twists_the_wish() {
         me,
         Intent::Wish {
             god: God::Ahamar,
-            kind: WishKind::Land,
-            target: None,
+            wish: wish_of(WishKind::Land, None),
             said: None,
         },
     )
@@ -1748,8 +1750,7 @@ fn every_god_twists_the_wish() {
             me,
             Intent::Wish {
                 god: God::Maya,
-                kind: WishKind::Peace,
-                target: None,
+                wish: wish_of(WishKind::Peace, None),
                 said: None,
             },
         )
@@ -1854,8 +1855,8 @@ fn bots_wish_in_many_ways() {
             g.apply(p, intent).unwrap();
         }
         for e in g.log() {
-            if let Event::WishGranted { god, kind, .. } = e {
-                kinds.insert(*kind);
+            if let Event::WishGranted { god, wish, .. } = e {
+                kinds.extend(wish.acts.iter().map(|a| a.kind()));
                 gods.insert(*god);
             }
         }
@@ -2416,4 +2417,114 @@ fn poison_traps_poison() {
     g.pass_all();
     let poison = g.champion(me).unwrap().poison.unwrap();
     assert_eq!((poison.element, poison.stacks), (Element::Water, 2));
+}
+
+#[test]
+fn a_price_is_paid_first_and_buys_budget_and_strength() {
+    let (mut g, me, foe) = duel(3);
+    let card = g.give(me, "Бинт");
+    crown(&mut g, me);
+    // Zaga (earth) likes a stake: its grade rises with a price.
+    let plain = Wish::one(Act::Peace);
+    let priced = Wish {
+        acts: vec![Act::Peace, Act::Weaken { target: foe }],
+        price: Some(Price::Card(card)),
+    };
+    assert_eq!(
+        g.wish_grade_of(God::Zaga, &priced),
+        (g.wish_grade_of(God::Zaga, &plain) + 1).min(3)
+    );
+    let events = g
+        .apply(
+            me,
+            Intent::Wish {
+                god: God::Zaga,
+                wish: priced,
+                said: None,
+            },
+        )
+        .unwrap();
+    let paid = events
+        .iter()
+        .position(|e| matches!(e, Event::PricePaid { .. }))
+        .expect("the price is paid");
+    let granted = events
+        .iter()
+        .position(|e| matches!(e, Event::WishGranted { .. }))
+        .unwrap();
+    assert!(paid < granted, "the price goes before the answer");
+    assert!(!g.hand(me).contains(&card));
+    // Budget covered both acts: the rival was hit and held.
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::WishGranted { wish, dropped: 0, .. } if wish.acts.len() == 2
+    )));
+    assert!(g.champion(foe).unwrap().rooted);
+}
+
+#[test]
+fn a_wish_beyond_its_budget_is_cut_and_a_price_must_be_payable() {
+    let (mut g, me, foe) = duel(3);
+    crown(&mut g, me);
+    // Health that would kill, Style one has not, a card not in hand.
+    let hp = g.champion(me).unwrap().hp;
+    for price in [
+        Price::Health(hp.min(2)),
+        Price::Style(2),
+        Price::Card(crate::cards::CardId(9999)),
+    ] {
+        g.style[me.0 as usize] = 0;
+        g.champ_mut(me).hp = 2;
+        let wish = Wish {
+            acts: vec![Act::Peace],
+            price: Some(price),
+        };
+        assert_eq!(
+            g.apply(
+                me,
+                Intent::Wish {
+                    god: God::Zaga,
+                    wish,
+                    said: None,
+                },
+            ),
+            Err(RuleError::InvalidWish),
+            "{price:?}"
+        );
+    }
+    g.champ_mut(me).hp = hp;
+    // Three acts are too many; two at grade 0 are cut to one.
+    let too_many = Wish {
+        acts: vec![Act::Peace, Act::Land, Act::Dead],
+        price: None,
+    };
+    assert_eq!(
+        g.apply(
+            me,
+            Intent::Wish {
+                god: God::Zaga,
+                wish: too_many,
+                said: None,
+            },
+        ),
+        Err(RuleError::InvalidWish)
+    );
+    let crude_pair = Wish {
+        acts: vec![Act::Fortune, Act::Weaken { target: foe }],
+        price: None,
+    };
+    let events = g
+        .apply(
+            me,
+            Intent::Wish {
+                god: God::Zaga,
+                wish: crude_pair,
+                said: None,
+            },
+        )
+        .unwrap();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::WishGranted { grade: 0, dropped: 1, wish, .. } if wish.acts == [Act::Fortune]
+    )));
 }

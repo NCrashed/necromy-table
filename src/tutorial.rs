@@ -16,7 +16,6 @@ use bevy::prelude::*;
 use necromy_rules::board::Board;
 use necromy_rules::{
     Condition, Event, Game, God, Hex, Intent, PlayerId, Scenario, SceneSeat, Target, Terrain,
-    WishKind,
 };
 
 use crate::hud::{INK, UiFont};
@@ -682,8 +681,7 @@ fn land_steps() -> Vec<Step> {
             |_, _| {
                 Some(Intent::Wish {
                     god: God::Trishna,
-                    kind: WishKind::Strength,
-                    target: None,
+                    wish: necromy_rules::Wish::one(necromy_rules::Act::Strength),
                     said: None,
                 })
             },

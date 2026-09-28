@@ -6,6 +6,7 @@ mod camera;
 mod card_art;
 mod deck;
 mod dice;
+mod effects;
 mod feed;
 mod fight;
 mod god_pick;
@@ -62,6 +63,7 @@ fn main() {
             board::BoardPlugin,
             props::PropsPlugin,
             ambient::AmbientPlugin,
+            effects::EffectsPlugin,
             lighting::LightingPlugin,
             token::TokenPlugin,
             hud::HudPlugin,
@@ -225,6 +227,15 @@ fn auto_screenshot(
         // The human has a trap on the board.
         (Some("trap"), Some(game)) => game.game.traps().iter().any(|t| t.owner == game.human),
         (Some("hidden"), Some(game)) => game.game.players().any(|p| game.game.is_hidden(p)),
+        // The human carries poison and nothing covers their token: bubbles
+        // rise over it.
+        (Some("bubbles"), Some(game)) => {
+            game.game.champion(game.human).is_some_and(|c| c.poison.is_some())
+                && game.battle.is_none()
+                && game.incoming_result.is_none()
+                && game.told.is_none()
+                && !dice.busy()
+        }
         // The human is poisoned: the drop on their sheet.
         (Some("poison"), Some(game)) => game
             .game

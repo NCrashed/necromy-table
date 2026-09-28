@@ -1,10 +1,13 @@
 //! What the gods are told, and how their answers are read (§7.2–7.4, §8).
 //!
-//! The model only ever picks from closed sets: one of the prepared wishes,
-//! one of the rivals, a grade from 0 to 3. The rules apply the effects. The
-//! words it writes (the god's answer, a story line's voice) are colour.
+//! The model only ever picks from closed sets: one or two acts of the wish
+//! vocabulary with their rivals, a price from what the asker has (§7.3),
+//! a grade from 0 to 3. The rules apply the effects. The words it writes
+//! (the god's answer, a story line's voice) are colour.
 
-use necromy_rules::{Game, God, Line, LineKind, PlayerId, Said, TimeOfDay, WishKind};
+use necromy_rules::{
+    Act, Game, God, Line, LineKind, MAX_ACTS, PlayerId, Price, Said, TimeOfDay, Wish, WishKind,
+};
 
 use crate::client::Message;
 
@@ -134,9 +137,13 @@ pub fn wish(
         .log()
         .iter()
         .filter_map(|e| match e {
-            necromy_rules::Event::WishGranted { god: g, kind, .. } if *g == god => {
-                Some(kind_phrase(*kind).to_string())
-            }
+            necromy_rules::Event::WishGranted { god: g, wish, .. } if *g == god => Some(
+                wish.acts
+                    .iter()
+                    .map(|a| kind_phrase(a.kind()))
+                    .collect::<Vec<_>>()
+                    .join(" и "),
+            ),
             _ => None,
         })
         .collect();
@@ -151,12 +158,17 @@ pub fn wish(
         "Идёт партия настольной игры, которую устроил Ахамар для пяти чемпионов богов. \
          На рассвете носитель Венца загадывает желание одному богу. Бог исполняет \
          желания по своей природе и никогда не буквально.\n\n\
-         Пойми желание и выбери действие, ближайшее по смыслу:\n\
-         - strength: сила самому просящему (здоровье, Дух, оберег)\n\
-         - weaken: удар по одному сопернику (урон и оковы); укажи target\n\
-         - land: земля вокруг просящего становится землёй бога\n\
-         - dead: вокруг просящего появляются тела\n\
-         - peace: Угроза просящего падает, гвардия теряет интерес\n\
+         Пойми желание и выбери действие, ближайшее по смыслу. Второе действие бери, \
+         только если в желании прямо названы две разные просьбы; ничего не добавляй от \
+         себя (бог исполнит, сколько позволит оценка):\n\
+         - strength: сила самому просящему (здоровье, Дух, оберег, «дай сил»)\n\
+         - weaken: вред одному сопернику: урон и оковы, «пусть споткнётся, ослабнет, \
+         потеряет ход»; укажи target\n\
+         - land: земля вокруг просящего становится землёй бога, «пусть земля, лес, \
+         камень, болото»\n\
+         - dead: вокруг просящего появляются тела, «подними мёртвых, мертвецов»\n\
+         - peace: тишина для самого просящего: «уйми шум», «спрячь меня», «пусть \
+         гвардия отстанет»; Угроза просящего падает. Это не вред сопернику\n\
          - fortune: просьба о богатстве, золоте, очках, Стиле\n\
          - doom: просьба о победе, о смерти всех врагов, об уничтожении\n\n\
          Оцени стиль желания от 0 до 3:\n\
@@ -168,33 +180,72 @@ pub fn wish(
          Примеры: «дай мне сто золотых» — fortune, 0. «убей всех моих врагов» — doom, 0. \
          «дай мне победу» — doom, 0. «пусть Майя ослабнет» — weaken, 1. \
          «накорми меня досыта перед боем» у Тришны — strength, 2. \
-         «пусть тот, кто громче всех хвалится, подавится моим угощением» у Тришны — weaken, 3.\n\n\
-         target — имя соперника, если действие weaken, иначе \"none\". speech — ответ бога \
+         «пусть тот, кто громче всех хвалится, подавится моим угощением» у Тришны — weaken, 3. \
+         «возьми мою карту и уйми шум вокруг меня» у Заги — peace, плата card, 2. \
+         «накорми меня и подними мёртвых на пир» у Тришны — strength и dead, 2.\n\n\
+         target — имя соперника для weaken, иначе \"none\". price — жертва, которую \
+         просящий сам предлагает за желание: card (назови карту из его руки), health или \
+         style (amount 1–2), land (своё поселение или храм); \"none\", если жертвы не \
+         предлагают. Бери жертву, только если просящий прямо её называет, и только ту \
+         карту, которую он назвал. Ставка и жертва поднимают оценку, \
+         особенно у Ахамара и Заги. speech — ответ бога \
          просящему: одно-два коротких предложения от первого лица, в характере бога, \
          по-русски. reason — почему такая оценка, не длиннее двенадцати слов.\n\n\
          {}\n{}\n{asked}",
         persona(god),
         likes(god),
     );
+    let hand: Vec<&'static str> = game
+        .hand(player)
+        .iter()
+        .map(|&c| game.def(c).name)
+        .collect();
     let user = format!(
-        "{}\nТвоя стадия сейчас: {} из 3.\n\nЖелание чемпиона {}: «{}»",
+        "{}\nТвоя стадия сейчас: {} из 3.\nКарты в руке просящего: {}.\n\nЖелание чемпиона {}: «{}»",
         situation(game, player),
         game.stage(god) + 1,
+        if hand.is_empty() {
+            "нет".to_string()
+        } else {
+            hand.join(", ")
+        },
         champion_name(game, player),
         text.trim()
     );
     let mut targets: Vec<serde_json::Value> = rivals.iter().map(|r| serde_json::json!(r)).collect();
     targets.push(serde_json::json!("none"));
+    let mut cards: Vec<serde_json::Value> = hand.iter().map(|n| serde_json::json!(n)).collect();
+    cards.push(serde_json::json!("none"));
     let schema = serde_json::json!({
         "type": "object",
         "properties": {
-            "kind": { "enum": WishKind::ALL.map(kind_id) },
-            "target": { "enum": targets },
+            "acts": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": MAX_ACTS,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "kind": { "enum": WishKind::ALL.map(kind_id) },
+                        "target": { "enum": targets }
+                    },
+                    "required": ["kind", "target"]
+                }
+            },
+            "price": {
+                "type": "object",
+                "properties": {
+                    "kind": { "enum": ["none", "card", "health", "style", "land"] },
+                    "amount": { "type": "integer", "minimum": 0, "maximum": 2 },
+                    "card": { "enum": cards }
+                },
+                "required": ["kind", "amount", "card"]
+            },
             "grade": { "type": "integer", "minimum": 0, "maximum": 3 },
             "speech": { "type": "string", "maxLength": 300 },
             "reason": { "type": "string", "maxLength": 200 }
         },
-        "required": ["kind", "target", "grade", "speech", "reason"]
+        "required": ["acts", "price", "grade", "speech", "reason"]
     });
     (vec![Message::system(system), Message::user(user)], schema)
 }
@@ -205,27 +256,47 @@ pub fn read_wish(
     player: PlayerId,
     text: &str,
     reply: &str,
-) -> Result<(WishKind, Option<PlayerId>, Said), String> {
+) -> Result<(Wish, Said), String> {
     let v: serde_json::Value =
         serde_json::from_str(reply).map_err(|_| format!("not json: {reply}"))?;
-    let kind = WishKind::ALL
-        .into_iter()
-        .find(|k| v["kind"].as_str() == Some(kind_id(*k)))
-        .ok_or_else(|| format!("unknown kind in {reply}"))?;
-    let target_name = v["target"].as_str().unwrap_or("none");
-    let target = game
-        .players()
-        .filter(|&p| p != player)
-        .find(|&p| champion_name(game, p) == target_name);
-    // A weakening needs someone: the leader in Style, if the model named none.
-    let target = if kind.needs_target() {
-        target.or_else(|| {
+    // One act per item; a reply of the older shape ({kind, target}) is one.
+    let items: Vec<&serde_json::Value> = match v["acts"].as_array() {
+        Some(acts) => acts.iter().take(MAX_ACTS).collect(),
+        None => vec![&v],
+    };
+    let mut acts = Vec::new();
+    for item in items {
+        let kind = WishKind::ALL
+            .into_iter()
+            .find(|k| item["kind"].as_str() == Some(kind_id(*k)))
+            .ok_or_else(|| format!("unknown kind in {reply}"))?;
+        let target_name = item["target"].as_str().unwrap_or("none");
+        let named = game
+            .players()
+            .filter(|&p| p != player)
+            .find(|&p| champion_name(game, p) == target_name);
+        // A weakening needs someone: the leader in Style, if the model named none.
+        let target = named.or_else(|| {
             game.players()
                 .filter(|&p| p != player)
                 .max_by_key(|&p| (game.style(p), p.0))
-        })
+        });
+        acts.extend(Act::of(kind, target));
+    }
+    if acts.is_empty() {
+        return Err(format!("no act in {reply}"));
+    }
+    // A price only if the words offer it: models like to invent a sacrifice.
+    let price = read_price(game, player, &v["price"]).filter(|&p| offered(game, text, p));
+    let wish = Wish { price, acts };
+    // A price the asker cannot pay is dropped, not the wish.
+    let wish = if game.check_wish(player, &wish).is_ok() {
+        wish
     } else {
-        None
+        Wish {
+            price: None,
+            ..wish
+        }
     };
     let said = Said {
         text: text.trim().to_string(),
@@ -233,7 +304,45 @@ pub fn read_wish(
         speech: v["speech"].as_str().unwrap_or("").trim().to_string(),
         reason: v["reason"].as_str().unwrap_or("").trim().to_string(),
     };
-    Ok((kind, target, said))
+    Ok((wish, said))
+}
+
+/// Whether the wish's own words offer this sacrifice: the card by its name,
+/// health, Style or land by a word for it. The model's reading is checked
+/// against the text, since it tends to add a price nobody offered.
+fn offered(game: &Game, text: &str, price: Price) -> bool {
+    let text = text.to_lowercase();
+    let says = |stems: &[&str]| stems.iter().any(|s| text.contains(s));
+    match price {
+        Price::Card(card) => text.contains(&game.def(card).name.to_lowercase()),
+        Price::Health(_) => says(&["здоров", "кров", "жизн", "плоть"]),
+        Price::Style(_) => says(&["стил", "слав"]),
+        Price::Claim(_) => says(&["земл", "поселен", "храм", "владен", "дом"]),
+    }
+}
+
+/// The sacrifice the model read out of the words, in the asker's own terms:
+/// a card of their hand by name, health or Style, the first land they hold.
+fn read_price(game: &Game, player: PlayerId, v: &serde_json::Value) -> Option<Price> {
+    let amount = v["amount"].as_u64().unwrap_or(1).clamp(1, 2) as u8;
+    match v["kind"].as_str()? {
+        "card" => {
+            let name = v["card"].as_str()?;
+            let card = game
+                .hand(player)
+                .iter()
+                .copied()
+                .find(|&c| game.def(c).name == name)?;
+            Some(Price::Card(card))
+        }
+        "health" => Some(Price::Health(amount)),
+        "style" => Some(Price::Style(amount)),
+        "land" => game
+            .claims()
+            .find(|&(_, p)| p == player)
+            .map(|(hex, _)| Price::Claim(hex)),
+        _ => None,
+    }
 }
 
 /// Messages for a god answering a prepared wish (the bots'): plain text.
@@ -241,9 +350,10 @@ pub fn wish_speech(
     game: &Game,
     player: PlayerId,
     god: God,
-    kind: WishKind,
+    wish: &Wish,
     grade: u8,
 ) -> Vec<Message> {
+    let asked: Vec<&str> = wish.acts.iter().map(|a| kind_phrase(a.kind())).collect();
     let mood = match grade {
         0 => "грубо и без стиля; ты исполнил урезанно и проклял просящего",
         1 => "обычно; ты исполнил со своим подвохом",
@@ -258,7 +368,7 @@ pub fn wish_speech(
         Message::user(format!(
             "Чемпион {} попросил тебя: «{}». Просьба прозвучала {mood}. Ответь ему.",
             champion_name(game, player),
-            kind_phrase(kind)
+            asked.join(" и ")
         )),
     ]
 }
@@ -314,31 +424,83 @@ mod tests {
         assert!(messages[0].content.contains("Тришна"));
         assert!(messages[1].content.contains("пусть пир не кончается"));
         assert!(messages[1].content.contains("Раунд 1"));
-        let targets = schema["properties"]["target"]["enum"].as_array().unwrap();
+        assert!(messages[1].content.contains("Карты в руке"));
+        let act = &schema["properties"]["acts"];
+        assert_eq!(act["maxItems"], serde_json::json!(MAX_ACTS));
+        let targets = act["items"]["properties"]["target"]["enum"]
+            .as_array()
+            .unwrap();
         assert_eq!(targets.len(), 5, "four rivals and none");
         assert!(
             !targets.contains(&serde_json::json!("Тришна")),
             "not yourself"
+        );
+        let cards = schema["properties"]["price"]["properties"]["card"]["enum"]
+            .as_array()
+            .unwrap();
+        assert_eq!(
+            cards.len(),
+            g.hand(PlayerId(1)).len() + 1,
+            "the asker's hand and none"
         );
     }
 
     #[test]
     fn a_judgement_reads_into_rules_terms() {
         let g = game();
-        let reply =
-            r#"{"kind":"weaken","target":"Майя","grade":3,"speech":"Будет.","reason":"Изящно."}"#;
-        let (kind, target, said) = read_wish(&g, PlayerId(1), " текст ", reply).unwrap();
-        assert_eq!(kind, WishKind::Weaken);
-        assert_eq!(target, Some(PlayerId(4)));
+        let card = g.def(g.hand(PlayerId(1))[0]).name;
+        let reply = format!(
+            r#"{{"acts":[{{"kind":"weaken","target":"Майя"}},{{"kind":"peace","target":"none"}}],
+                "price":{{"kind":"card","amount":1,"card":"{card}"}},
+                "grade":3,"speech":"Будет.","reason":"Изящно."}}"#
+        );
+        let text = format!(" отдаю «{card}» ");
+        let (wish, said) = read_wish(&g, PlayerId(1), &text, &reply).unwrap();
+        assert_eq!(
+            wish.acts,
+            [
+                Act::Weaken {
+                    target: PlayerId(4)
+                },
+                Act::Peace
+            ]
+        );
+        assert_eq!(wish.price, Some(Price::Card(g.hand(PlayerId(1))[0])));
         assert_eq!(said.grade, 3);
-        assert_eq!(said.text, "текст");
+        assert_eq!(said.text, format!("отдаю «{card}»"));
+    }
+
+    #[test]
+    fn a_price_the_words_do_not_offer_is_dropped() {
+        let g = game();
+        let card = g.def(g.hand(PlayerId(1))[0]).name;
+        let reply = format!(
+            r#"{{"acts":[{{"kind":"peace","target":"none"}}],
+                "price":{{"kind":"card","amount":1,"card":"{card}"}},
+                "grade":2,"speech":"","reason":""}}"#
+        );
+        let (wish, _) = read_wish(&g, PlayerId(1), "спрячь меня в тумане", &reply).unwrap();
+        assert_eq!(wish.acts, [Act::Peace]);
+        assert_eq!(wish.price, None, "nobody offered a card");
+    }
+
+    #[test]
+    fn a_price_the_asker_cannot_pay_is_dropped_not_the_wish() {
+        let g = game();
+        let reply = r#"{"acts":[{"kind":"strength","target":"none"}],
+            "price":{"kind":"style","amount":2,"card":"none"},
+            "grade":2,"speech":"","reason":""}"#;
+        let (wish, _) = read_wish(&g, PlayerId(1), "x", reply).unwrap();
+        assert_eq!(wish.acts, [Act::Strength]);
+        assert_eq!(wish.price, None, "no Style to give at the start");
     }
 
     #[test]
     fn a_weakening_without_a_named_rival_goes_to_the_leader() {
         let g = game();
         let reply = r#"{"kind":"weaken","target":"none","grade":1,"speech":"","reason":""}"#;
-        let (_, target, _) = read_wish(&g, PlayerId(1), "x", reply).unwrap();
+        let (wish, _) = read_wish(&g, PlayerId(1), "x", reply).unwrap();
+        let target = wish.acts[0].target();
         assert!(target.is_some() && target != Some(PlayerId(1)));
     }
 
@@ -347,5 +509,6 @@ mod tests {
         let g = game();
         assert!(read_wish(&g, PlayerId(1), "x", "не json").is_err());
         assert!(read_wish(&g, PlayerId(1), "x", r#"{"kind":"fly"}"#).is_err());
+        assert!(read_wish(&g, PlayerId(1), "x", r#"{"acts":[]}"#).is_err());
     }
 }

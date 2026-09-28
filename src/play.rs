@@ -108,6 +108,8 @@ pub struct Match {
     pub stage_shifts: u32,
     /// Events not yet sounded; `audio::hear_events` takes them.
     pub heard: Vec<Event>,
+    /// Events for `effects.rs` to show on the board, drained there.
+    pub effects: Vec<Event>,
     /// Another seat's wish as they write it: who, the god, the words.
     pub drafting: Option<(PlayerId, Option<God>, String)>,
     /// The last wish and the god's answer, shown for a moment (§7).
@@ -156,7 +158,8 @@ pub struct WishReply {
     /// The table's update it came in; its god's words are keyed by it.
     pub serial: u32,
     /// `None` when the Dominant refused to wish.
-    pub wish: Option<(God, necromy_rules::WishKind, u8)>,
+    /// God, what it granted, the grade and how many acts it left out.
+    pub wish: Option<(God, necromy_rules::Wish, u8, u8)>,
     /// The model's reading, for a wish written in free words.
     pub said: Option<necromy_rules::Said>,
     pub lines: Vec<String>,
@@ -490,6 +493,7 @@ impl Match {
             offerings: Vec::new(),
             dusk_news: Vec::new(),
             heard: Vec::new(),
+            effects: Vec::new(),
             drafting: None,
             stages_seen: God::ALL.map(|g| view.stage(g)),
             stage_shifts: 0,
@@ -708,6 +712,7 @@ impl Match {
 
     fn record(&mut self, events: &[Event]) {
         self.heard.extend_from_slice(events);
+        self.effects.extend_from_slice(events);
         if let Some(seen) = self.lesson_events.as_mut() {
             seen.extend_from_slice(events);
         }
@@ -725,15 +730,15 @@ impl Match {
                 Event::WishGranted {
                     player,
                     god,
-                    kind,
+                    wish,
+                    dropped,
                     grade,
                     said,
-                    ..
                 } => {
                     wished = Some(WishReply {
                         player: *player,
                         serial: self.serial,
-                        wish: Some((*god, *kind, *grade)),
+                        wish: Some((*god, wish.clone(), *grade, *dropped)),
                         said: said.clone(),
                         lines: Vec::new(),
                     });
@@ -1108,14 +1113,25 @@ impl Match {
             Event::WishGranted {
                 player,
                 god,
-                kind,
+                wish,
+                dropped,
                 grade,
                 ..
             } => format!(
-                "{} просит {}: «{}». Оценка {grade}/3.",
+                "{} просит {}: «{}». Оценка {grade}/3.{}",
                 self.name(*player),
                 names::god_accusative(*god),
-                names::wish(*kind)
+                names::wish_phrase(wish),
+                if *dropped > 0 {
+                    " Всего бог не дал: оценка не покрыла."
+                } else {
+                    ""
+                }
+            ),
+            Event::PricePaid { player, price } => format!(
+                "{} отдаёт богу {}.",
+                self.name(*player),
+                names::price(*price, |c| self.card_name(c).to_string())
             ),
             Event::TerrainChanged { terrain, .. } => {
                 format!(

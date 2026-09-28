@@ -572,8 +572,11 @@ impl Table {
             id,
             messages,
             schema: Some(schema),
-            max_tokens: 300,
-            temperature: 0.6,
+            // Two acts, a price and a Russian answer: Cyrillic takes tokens,
+            // and a cut-off reply is not JSON. Cool, to read the same words
+            // the same way.
+            max_tokens: 600,
+            temperature: 0.4,
         });
         self.send(seat, FromTable::Oracle(OracleNews::Listening(Some(god))));
     }
@@ -599,12 +602,12 @@ impl Table {
                 Event::WishGranted {
                     player,
                     god,
-                    kind,
+                    wish,
                     grade,
                     said: None,
                     ..
                 } => {
-                    let messages = prompt::wish_speech(&self.game, *player, *god, *kind, *grade);
+                    let messages = prompt::wish_speech(&self.game, *player, *god, wish, *grade);
                     self.job(Purpose::WishVoice { serial }, |id| voice_job(id, messages));
                 }
                 Event::LineTold { line } if self.seats[line.owner.0 as usize].watched() => {
@@ -658,11 +661,10 @@ impl Table {
                                 prompt::read_wish(&self.game, seat, &text, &reply)
                                     .map_err(|_| "бог ответил невнятно".to_string())
                             });
-                    let outcome = heard.and_then(|(kind, target, said)| {
+                    let outcome = heard.and_then(|(wish, said)| {
                         let intent = Intent::Wish {
                             god,
-                            kind,
-                            target,
+                            wish,
                             said: Some(said),
                         };
                         self.act(seat, intent)

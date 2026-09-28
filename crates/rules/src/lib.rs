@@ -19,11 +19,12 @@ pub mod cards;
 
 pub use cards::{CardDef, CardId, CardKind, DefId, Effect, TargetRule, Timing};
 pub use game::{
-    BodyVerb, CHOSEN, Champion, Character, Check, CheckKind, Condition, Cure, Deed, Event, Fighter,
-    GUARD_DICE, GUARD_RELIEF, GUARD_STEPS, GUARD_THRESHOLD, Game, Goal, Guard, Intent, Law, Line,
-    LineKind, Patronage, Phase, PlayerId, Poison, RevealReason, RuleError, SECRET_FROM_ROUND, SIGN,
-    STAGE_THRESHOLD, STAGES, Said, Scenario, SceneSeat, Score, Setup, StyleReason, TRISHNA_DRIFT,
-    Target, Taste, TasteKind, TimeOfDay, Trap, VOICE, Window, WindowKind, WishKind, WorldStir,
+    Act, BodyVerb, CHOSEN, Champion, Character, Check, CheckKind, Condition, Cure, Deed, Event,
+    Fighter, GUARD_DICE, GUARD_RELIEF, GUARD_STEPS, GUARD_THRESHOLD, Game, Goal, Guard, Intent,
+    Law, Line, LineKind, MAX_ACTS, Patronage, Phase, PlayerId, Poison, Price, RevealReason,
+    RuleError, SECRET_FROM_ROUND, SIGN, STAGE_THRESHOLD, STAGES, Said, Scenario, SceneSeat, Score,
+    Setup, StyleReason, TRISHNA_DRIFT, Target, Taste, TasteKind, TimeOfDay, Trap, VOICE, Window,
+    WindowKind, Wish, WishKind, WorldStir,
 };
 pub use gods::{Element, God};
 pub use hexx::Hex;

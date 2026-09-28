@@ -47,6 +47,11 @@ wish-granted	2.0	2	A god grants a wish, a radiant magical swell with sparkling b
 wish-refused	2.0	2	A god refuses a wish, a distant thunderclap and falling rumble
 curse-laid	1.5	2	A curse is laid, a dark whispering hiss and a low bell
 curse-bit	0.8	2	A curse strikes, a sharp dark crackle
+# Poison (docs/design.md §20.1)
+poison-laid	1.0	2	Poison splashes onto someone: a wet glassy splash of a vial and a thick bubbling hiss
+poison-bite	0.7	3	Poison stings from within: a short sickly bubbling gurgle with a small wet pop
+poison-fed	1.0	2	A poison grows stronger: a thick liquid bubbling swell rising in pitch
+poison-cured	1.2	2	Poison purged: a hissing sizzle of steam that clears into a clean soft chime
 crown	2.0	2	A royal crown is placed, a regal golden shimmer and a brass accent
 # Royal guard
 guard-arrive	1.5	3	The royal guard arrives: a heavy iron gate clanks open, armoured boots stamp twice and one war drum hits; no horn, no car horn, no beep

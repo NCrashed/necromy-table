@@ -13,8 +13,9 @@ use hexx::Hex;
 use serde::{Deserialize, Serialize};
 
 use super::style::StyleReason;
-use super::{Event, Game, PlayerId};
+use super::{Event, Game, PlayerId, RuleError};
 use crate::board::Terrain;
+use crate::cards::CardId;
 use crate::gods::God;
 
 /// What a model made of a free-text wish (§7.1): the words, its grade and
@@ -70,6 +71,124 @@ impl WishKind {
     pub const fn needs_target(self) -> bool {
         matches!(self, WishKind::Weaken)
     }
+}
+
+/// One thing a wish asks for (§7.3): a kind from the vocabulary and what
+/// that kind needs to know.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Act {
+    Strength,
+    Weaken { target: PlayerId },
+    Land,
+    Dead,
+    Peace,
+    Fortune,
+    Doom,
+}
+
+impl Act {
+    pub const fn kind(self) -> WishKind {
+        match self {
+            Act::Strength => WishKind::Strength,
+            Act::Weaken { .. } => WishKind::Weaken,
+            Act::Land => WishKind::Land,
+            Act::Dead => WishKind::Dead,
+            Act::Peace => WishKind::Peace,
+            Act::Fortune => WishKind::Fortune,
+            Act::Doom => WishKind::Doom,
+        }
+    }
+
+    pub const fn target(self) -> Option<PlayerId> {
+        match self {
+            Act::Weaken { target } => Some(target),
+            _ => None,
+        }
+    }
+
+    /// Budget the act takes (§7.3). Every act of the first set costs 1.
+    pub const fn cost(self) -> u8 {
+        1
+    }
+
+    /// The act of a prepared `kind`, aimed at `target` if it needs one.
+    pub fn of(kind: WishKind, target: Option<PlayerId>) -> Option<Act> {
+        Some(match kind {
+            WishKind::Strength => Act::Strength,
+            WishKind::Weaken => Act::Weaken { target: target? },
+            WishKind::Land => Act::Land,
+            WishKind::Dead => Act::Dead,
+            WishKind::Peace => Act::Peace,
+            WishKind::Fortune => Act::Fortune,
+            WishKind::Doom => Act::Doom,
+        })
+    }
+}
+
+/// What the Dominant gives up for a wish (§7.3): paid at once, before the
+/// god answers; it raises the budget and the strength of what is granted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Price {
+    /// A card from hand, into the discard.
+    Card(CardId),
+    /// Health, 1 or 2, never the last point.
+    Health(u8),
+    /// Style, 1 or 2.
+    Style(u8),
+    /// A settlement, temple or the Table the Dominant holds, let go.
+    Claim(Hex),
+}
+
+impl Price {
+    /// Budget the sacrifice adds.
+    pub const fn value(self) -> u8 {
+        match self {
+            Price::Card(_) => 1,
+            Price::Health(n) | Price::Style(n) => {
+                if n > 2 {
+                    2
+                } else {
+                    n
+                }
+            }
+            Price::Claim(_) => 2,
+        }
+    }
+}
+
+/// Acts a wish may ask for at most.
+pub const MAX_ACTS: usize = 2;
+
+/// A wish (§7.3): one or two acts, the first the main one, and what is
+/// given for them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Wish {
+    pub acts: Vec<Act>,
+    pub price: Option<Price>,
+}
+
+impl Wish {
+    pub fn one(act: Act) -> Wish {
+        Wish {
+            acts: vec![act],
+            price: None,
+        }
+    }
+
+    /// Any crude part makes the whole wish crude (§7.4).
+    pub fn is_crude(&self) -> bool {
+        self.acts.iter().any(|a| a.kind().is_crude())
+    }
+
+    /// The act that sets the grade: the first.
+    pub fn main(&self) -> Option<Act> {
+        self.acts.first().copied()
+    }
+}
+
+/// Gods that value a stake above the rest (§7.2): the contract, the price.
+pub const fn likes_a_stake(god: God) -> bool {
+    matches!(god, God::Ahamar | God::Zaga)
 }
 
 /// How a god likes being asked for something: +1, 0 or −1 to the grade.
@@ -134,109 +253,119 @@ impl Game {
             .map_or(&[][..], Vec::as_slice)
     }
 
+    /// The grade `god` would give `wish` offline: its main act's grade
+    /// (§7.4), one more with a price to a god that likes a stake; crude
+    /// wishes are 0.
+    pub fn wish_grade_of(&self, god: God, wish: &Wish) -> u8 {
+        let Some(main) = wish.main() else {
+            return 0;
+        };
+        if wish.is_crude() {
+            return 0;
+        }
+        let stake = u8::from(wish.price.is_some() && likes_a_stake(god));
+        (self.wish_grade(god, main.kind()) + stake).min(3)
+    }
+
+    /// Whether `player` may make `wish`: one or two acts, rivals who exist,
+    /// a price they can pay.
+    pub fn check_wish(&self, player: PlayerId, wish: &Wish) -> Result<(), RuleError> {
+        if wish.acts.is_empty() || wish.acts.len() > MAX_ACTS {
+            return Err(RuleError::InvalidWish);
+        }
+        for act in &wish.acts {
+            if let Some(t) = act.target()
+                && (t == player || self.champion(t).is_none())
+            {
+                return Err(RuleError::InvalidWish);
+            }
+        }
+        let payable = match wish.price {
+            None => true,
+            Some(Price::Card(card)) => self.hand(player).contains(&card),
+            Some(Price::Health(n)) => {
+                (1..=2).contains(&n) && self.champion(player).is_some_and(|c| c.hp > n)
+            }
+            Some(Price::Style(n)) => (1..=2).contains(&n) && self.style(player) >= u16::from(n),
+            Some(Price::Claim(hex)) => self.claims().any(|(h, p)| h == hex && p == player),
+        };
+        if payable {
+            Ok(())
+        } else {
+            Err(RuleError::InvalidWish)
+        }
+    }
+
     pub(super) fn grant_wish(
         &mut self,
         player: PlayerId,
         god: God,
-        kind: WishKind,
-        target: Option<PlayerId>,
+        wish: Wish,
         said: Option<Said>,
         events: &mut Vec<Event>,
     ) {
+        let crude = wish.is_crude();
         // A model judges the words; the rules still hold crude wishes at 0 and
         // make a repeated wish worth less (§7.4, §7.5).
         let grade = match &said {
-            Some(_) if kind.is_crude() => 0,
+            Some(_) if crude => 0,
             Some(s) => {
-                let repeat = u8::from(self.asked.contains(&(god, kind)));
-                s.grade.min(3).saturating_sub(repeat)
+                let repeat = wish
+                    .main()
+                    .is_some_and(|a| self.asked.contains(&(god, a.kind())));
+                s.grade.min(3).saturating_sub(u8::from(repeat))
             }
-            None => self.wish_grade(god, kind),
+            None => self.wish_grade_of(god, &wish),
         };
         // The god's Voice lifts a wish; a dark god grants grudgingly (§5.4).
-        let grade = if kind.is_crude() {
+        let grade = if crude {
             grade
         } else {
             let voice = u8::from(self.patronage(player, god) >= super::Patronage::Voice);
             let dark = u8::from(self.stage(god) == 2);
             (grade + voice).min(3).saturating_sub(dark)
         };
-        self.asked.push((god, kind));
+
+        // The price is given first: the god takes it whatever it grants.
+        if let Some(price) = wish.price {
+            self.pay(player, price, events);
+        }
+        let price_value = wish.price.map_or(0, Price::value);
+        let budget = (grade + price_value).max(1);
+        let mut spent = 0;
+        let granted: Vec<Act> = wish
+            .acts
+            .iter()
+            .copied()
+            .take_while(|a| {
+                spent += a.cost();
+                spent <= budget
+            })
+            .collect();
+        let dropped = (wish.acts.len() - granted.len()) as u8;
+
+        for act in &granted {
+            self.asked.push((god, act.kind()));
+        }
         self.wish_due = None;
         self.progress[player.0 as usize].refusals = 0;
         events.push(Event::WishGranted {
             player,
             god,
-            kind,
-            target,
+            wish: Wish {
+                acts: granted.clone(),
+                price: wish.price,
+            },
+            dropped,
             grade,
             said,
         });
         // Asking is an offering too.
         self.offer(Some(player), god, 1, events);
 
-        let power = grade + 1;
-        let me = self.hex_of(player);
-        match kind {
-            WishKind::Strength => {
-                self.heal(player, power, events);
-                self.gain_spirit(player, power, events);
-                self.raise_ward(player, god.element(), events);
-            }
-            WishKind::Weaken => {
-                if let Some(t) = target {
-                    // A god's hand passes any ward.
-                    self.damage(t, power.saturating_sub(1).max(1), events);
-                    self.root(t, events);
-                }
-            }
-            WishKind::Land => {
-                let terrain = god_terrain(god);
-                let spots: Vec<Hex> = me
-                    .all_neighbors()
-                    .into_iter()
-                    .chain(std::iter::once(me))
-                    .filter(|&h| {
-                        self.board.tile(h).is_some_and(|t| {
-                            t.terrain.can_grow_grove() || t.terrain == Terrain::Mountain
-                        }) && !self.guard_at(h)
-                    })
-                    .take(power as usize)
-                    .collect();
-                for hex in spots {
-                    if let Some(tile) = self.board.tile_mut(hex) {
-                        tile.terrain = terrain;
-                    }
-                    events.push(Event::TerrainChanged { hex, terrain });
-                }
-            }
-            WishKind::Dead => {
-                let free: Vec<Hex> = (1..=2)
-                    .flat_map(|r| me.ring(r).collect::<Vec<_>>())
-                    .filter(|&h| {
-                        self.board.tile(h).is_some_and(|t| t.corpse.is_none())
-                            && self.occupant(h).is_none()
-                    })
-                    .take(power as usize)
-                    .collect();
-                for hex in free {
-                    if let Some(tile) = self.board.tile_mut(hex) {
-                        tile.corpse = Some(crate::board::Corpse { age: 0 });
-                    }
-                    events.push(Event::CorpseAppeared { hex });
-                }
-            }
-            WishKind::Peace => {
-                self.add_threat(player, -(2 * power as i8), events);
-            }
-            WishKind::Fortune => {
-                self.add_style(player, 2, StyleReason::Wish, events);
-            }
-            WishKind::Doom => {
-                for p in self.players().filter(|&p| p != player).collect::<Vec<_>>() {
-                    self.damage(p, 1, events);
-                }
-            }
+        let power = (grade + 1 + u8::from(wish.price.is_some())).min(4);
+        for act in granted {
+            self.grant_act(player, god, act, power, events);
         }
 
         // A god in its light stage gives without a twist.
@@ -257,6 +386,97 @@ impl Game {
         if grade == 0 {
             self.curses[player.0 as usize].push(god);
             events.push(Event::CurseLaid { player, god });
+        }
+    }
+
+    /// The sacrifice goes to the god.
+    fn pay(&mut self, player: PlayerId, price: Price, events: &mut Vec<Event>) {
+        events.push(Event::PricePaid { player, price });
+        match price {
+            Price::Card(card) => {
+                let hand = &mut self.hands[player.0 as usize];
+                if let Some(i) = hand.iter().position(|&c| c == card) {
+                    hand.remove(i);
+                    self.discard.push(card);
+                }
+            }
+            // Checked to leave them standing.
+            Price::Health(n) => self.damage(player, n, events),
+            Price::Style(n) => self.add_style(player, -i16::from(n), StyleReason::Wish, events),
+            Price::Claim(hex) => {
+                self.claims.remove(&(hex.x(), hex.y()));
+            }
+        }
+    }
+
+    /// One act of a granted wish, at `power`.
+    fn grant_act(
+        &mut self,
+        player: PlayerId,
+        god: God,
+        act: Act,
+        power: u8,
+        events: &mut Vec<Event>,
+    ) {
+        let me = self.hex_of(player);
+        match act {
+            Act::Strength => {
+                self.heal(player, power, events);
+                self.gain_spirit(player, power, events);
+                self.raise_ward(player, god.element(), events);
+            }
+            Act::Weaken { target } => {
+                // A god's hand passes any ward.
+                self.damage(target, power.saturating_sub(1).max(1), events);
+                self.root(target, events);
+            }
+            Act::Land => {
+                let terrain = god_terrain(god);
+                let spots: Vec<Hex> = me
+                    .all_neighbors()
+                    .into_iter()
+                    .chain(std::iter::once(me))
+                    .filter(|&h| {
+                        self.board.tile(h).is_some_and(|t| {
+                            t.terrain.can_grow_grove() || t.terrain == Terrain::Mountain
+                        }) && !self.guard_at(h)
+                    })
+                    .take(power as usize)
+                    .collect();
+                for hex in spots {
+                    if let Some(tile) = self.board.tile_mut(hex) {
+                        tile.terrain = terrain;
+                    }
+                    events.push(Event::TerrainChanged { hex, terrain });
+                }
+            }
+            Act::Dead => {
+                let free: Vec<Hex> = (1..=2)
+                    .flat_map(|r| me.ring(r).collect::<Vec<_>>())
+                    .filter(|&h| {
+                        self.board.tile(h).is_some_and(|t| t.corpse.is_none())
+                            && self.occupant(h).is_none()
+                    })
+                    .take(power as usize)
+                    .collect();
+                for hex in free {
+                    if let Some(tile) = self.board.tile_mut(hex) {
+                        tile.corpse = Some(crate::board::Corpse { age: 0 });
+                    }
+                    events.push(Event::CorpseAppeared { hex });
+                }
+            }
+            Act::Peace => {
+                self.add_threat(player, -(2 * power as i8), events);
+            }
+            Act::Fortune => {
+                self.add_style(player, 2, StyleReason::Wish, events);
+            }
+            Act::Doom => {
+                for p in self.players().filter(|&p| p != player).collect::<Vec<_>>() {
+                    self.damage(p, 1, events);
+                }
+            }
         }
     }
 
