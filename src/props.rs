@@ -335,7 +335,7 @@ fn props_just_loaded(
 }
 
 /// A number from the hex's coordinates, the same on every client.
-fn hex_seed(hex: Hex, salt: i32) -> u32 {
+pub fn hex_seed(hex: Hex, salt: i32) -> u32 {
     let mix = hex.x.wrapping_mul(73_856_093)
         ^ hex.y.wrapping_mul(19_349_663)
         ^ salt.wrapping_mul(83_492_791);

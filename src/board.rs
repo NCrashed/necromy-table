@@ -39,7 +39,8 @@ impl Plugin for BoardPlugin {
                     resource_changed::<Match>
                         .or_else(resource_changed::<Selection>)
                         .or_else(resource_changed::<Hovered>)
-                        .or_else(resource_changed::<crate::lighting::DayNight>),
+                        .or_else(resource_changed::<crate::lighting::DayNight>)
+                        .or_else(corpse_art_loading),
                 ),
         );
     }
@@ -136,6 +137,10 @@ struct Marker {
 #[derive(Resource)]
 struct MarkerSprites {
     corpse: Handle<Image>,
+    /// Painted corpses by how long they have lain: fresh, rotting, sprouting
+    /// (`assets/props/corpse-<stage>-<n>.png`). The drawn `corpse` stands in
+    /// until they load.
+    corpse_art: [Vec<Handle<Image>>; 3],
     trap: Handle<Image>,
     /// Ownership flags, one per god (`God::index`).
     flags: [Handle<Image>; 5],
@@ -273,6 +278,13 @@ fn spawn_board(
     });
     commands.insert_resource(MarkerSprites {
         corpse: images.add(pixel_sprite(&CORPSE_ROWS, [0; 3])),
+        corpse_art: ["fresh", "rot", "sprout"].map(|stage| {
+            (1..)
+                .map(|n| format!("props/corpse-{stage}-{n}.png"))
+                .take_while(|path| std::path::Path::new("assets").join(path).exists())
+                .map(|path| assets.load(path))
+                .collect()
+        }),
         trap: images.add(pixel_sprite(&TRAP_ROWS, [0; 3])),
         flags: God::ALL.map(|g| images.add(pixel_sprite(&FLAG_ROWS, g.accent()))),
         trails: God::ALL.map(|g| images.add(pixel_sprite(&TRAIL_ROWS, g.accent()))),
@@ -365,19 +377,58 @@ fn sync_tiles(
     }
 }
 
+/// True while painted corpses are loading, and once more when they are all
+/// in, so the markers swap the stand-in for them.
+fn corpse_art_loading(
+    sprites: Option<Res<MarkerSprites>>,
+    images: Res<Assets<Image>>,
+    mut done: Local<bool>,
+) -> bool {
+    if *done {
+        return false;
+    }
+    let Some(sprites) = sprites else {
+        return false;
+    };
+    *done = sprites
+        .corpse_art
+        .iter()
+        .flatten()
+        .all(|h| images.contains(h));
+    true
+}
+
 /// Corpses for everyone; traps only for their owner, the human.
 fn sync_markers(
     mut commands: Commands,
     game: Res<Match>,
     board: Res<Board>,
     sprites: Res<MarkerSprites>,
+    images: Res<Assets<Image>>,
     markers: Query<(Entity, &Marker)>,
 ) {
-    let corpses = game
-        .game
-        .board()
-        .corpses()
-        .map(|(hex, _)| (hex, sprites.corpse.clone()));
+    // A corpse rots as it lies, and sprouts before it becomes a grove where
+    // a grove can grow; each hex keeps its own body.
+    let corpses = game.game.board().corpses().map(|(hex, corpse)| {
+        let grows = game
+            .game
+            .board()
+            .tile(hex)
+            .is_some_and(|t| t.terrain.can_grow_grove());
+        let stage = match corpse.age {
+            0 | 1 => 0,
+            a if a + 1 >= necromy_rules::board::GROVE_AGE && grows => 2,
+            _ => 1,
+        };
+        let art = &sprites.corpse_art[stage];
+        let painted = (!art.is_empty())
+            .then(|| &art[crate::props::hex_seed(hex, 7) as usize % art.len()])
+            .filter(|h| images.contains(*h));
+        match painted {
+            Some(image) => (hex, image.clone(), CORPSE_PPM),
+            None => (hex, sprites.corpse.clone(), 16.0),
+        }
+    });
     let traps = game
         .game
         .traps()
@@ -411,7 +462,7 @@ fn sync_markers(
         });
     let front = Vec3::new(0.0, 0.0, 0.35);
     // Pixels per metre: markers are small, the trail is drawn twice as big.
-    let corpses = corpses.map(|(h, i)| (h, i, front, 16.0));
+    let corpses = corpses.map(|(h, i, ppm)| (h, i, front, ppm));
     let traps = traps.map(|(h, i)| (h, i, front, 16.0));
     let wanted: Vec<_> = corpses.chain(traps).chain(flags).chain(trails).collect();
     // Despawning and respawning everything would blink every marker for a
@@ -534,6 +585,9 @@ fn hex_mesh(layout: &HexLayout) -> Mesh {
     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, info.uvs)
     .with_inserted_indices(Indices::U16(info.indices))
 }
+
+/// Painted corpses: about 0.75 m across for a 60 px body.
+const CORPSE_PPM: f32 = 80.0;
 
 /// A tiny shrouded body lying on its side.
 const CORPSE_ROWS: [&str; 5] = [
