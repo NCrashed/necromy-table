@@ -70,6 +70,13 @@ pub struct Rig {
     shown: (Vec3, f32, f32),
 }
 
+impl Rig {
+    /// The point on the table the camera looks at.
+    pub fn focus(&self) -> Vec3 {
+        self.focus
+    }
+}
+
 impl Default for Rig {
     fn default() -> Rig {
         Rig {

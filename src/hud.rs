@@ -219,6 +219,7 @@ fn rebuild_hand(
             outline: selected.then_some(Color::srgb(1.0, 0.82, 0.3)),
             extra: Vec::new(),
             badge: crate::ring_ui::badge(&game.game, game.human, card),
+            cost: Some(game.game.cost_of(game.human, card)),
         };
         let entity = card_node(
             &mut commands,
@@ -274,6 +275,7 @@ fn rebuild_incoming(
             outline: at_me.then_some(red),
             extra,
             badge: None,
+            cost: None,
         };
         let awaited = game.human_awaited();
         let footer = if !awaited {
@@ -299,6 +301,7 @@ fn rebuild_incoming(
             outline: Some(red),
             extra: lines,
             badge: None,
+            cost: None,
         };
         (
             format!("{} играет в тебя:", game.name(hit.caster)),

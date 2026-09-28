@@ -153,8 +153,17 @@ impl Game {
             }
             None => self.wish_grade(god, kind),
         };
+        // The god's Voice lifts a wish; a dark god grants grudgingly (§5.4).
+        let grade = if kind.is_crude() {
+            grade
+        } else {
+            let voice = u8::from(self.patronage(player, god) >= super::Patronage::Voice);
+            let dark = u8::from(self.stage(god) == 2);
+            (grade + voice).min(3).saturating_sub(dark)
+        };
         self.asked.push((god, kind));
         self.wish_due = None;
+        self.progress[player.0 as usize].refusals = 0;
         events.push(Event::WishGranted {
             player,
             god,
@@ -230,7 +239,10 @@ impl Game {
             }
         }
 
-        self.twist(player, god, events);
+        // A god in its light stage gives without a twist.
+        if self.stage(god) != 0 {
+            self.twist(player, god, events);
+        }
 
         // The grade becomes Style; a wish without style also carries a curse.
         // Kept small: a wish is power already, and Style keeps the Crown.

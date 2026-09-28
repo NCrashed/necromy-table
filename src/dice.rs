@@ -21,6 +21,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use necromy_dice::{DIE_HALF, FACE_AXES, Face, TICK_HZ, TRAY_HALF, Throw};
 
+use crate::audio::Sound;
 use crate::play::Match;
 
 /// Render layer of the dice scene.
@@ -58,6 +59,8 @@ struct Playing {
     started: f32,
     dice: Vec<Entity>,
     revealed: bool,
+    /// Impacts already sounded.
+    heard: usize,
 }
 
 impl Playing {
@@ -221,6 +224,7 @@ fn play_throws(
     mut game: ResMut<Match>,
     mut cameras: Query<&mut Camera, With<TrayCamera>>,
     mut transforms: Query<&mut Transform>,
+    mut sounds: MessageWriter<Sound>,
 ) {
     let now = time.elapsed_secs();
     // Read through `Match` without touching it: only closing the panel below
@@ -287,8 +291,25 @@ fn play_throws(
                 started: now,
                 dice,
                 revealed: false,
+                heard: 0,
             });
             show.settled_at = None;
+            sounds.write(Sound::new("dice-shake").at(0.6));
+        }
+
+        // Knocks as they happen in the replay, as loud as they hit; one right
+        // after another die's is the dice knocking together.
+        if let Some(p) = show.playing[side].as_mut() {
+            let tick = ((now - p.started) * TICK_HZ as f32) as u32;
+            while let Some(hit) = p.throw.impacts.get(p.heard).filter(|i| i.tick <= tick) {
+                let close = p.heard > 0 && {
+                    let before = &p.throw.impacts[p.heard - 1];
+                    before.die != hit.die && hit.tick - before.tick <= 2
+                };
+                let name = if close { "die-die" } else { "die-table" };
+                sounds.write(Sound::new(name).at((hit.strength / 8.0).clamp(0.25, 1.0)));
+                p.heard += 1;
+            }
         }
 
         if let Some(p) = &show.playing[side] {

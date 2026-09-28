@@ -98,9 +98,10 @@ impl Game {
         self.open
             .iter()
             .copied()
-            .chain(self.secret(player))
-            .map(|c| {
-                let checks = self.checks(player, c);
+            .map(|c| (c, false))
+            .chain(self.secret(player).map(|c| (c, true)))
+            .map(|(c, secret)| {
+                let checks = self.checks_as(player, c, secret);
                 let sum: u32 = checks
                     .iter()
                     .map(|k| u32::from(k.have.min(k.need)) * 100 / u32::from(k.need.max(1)))

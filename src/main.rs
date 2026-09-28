@@ -1,4 +1,5 @@
 mod ambient;
+mod audio;
 mod battle_ui;
 mod board;
 mod camera;
@@ -7,6 +8,7 @@ mod deck;
 mod dice;
 mod fight;
 mod god_pick;
+mod gods_ui;
 mod hud;
 mod icons;
 mod lighting;
@@ -71,7 +73,9 @@ fn main() {
             victory_ui::VictoryUiPlugin,
             wish_ui::WishUiPlugin,
             story_ui::StoryUiPlugin,
+            gods_ui::GodsUiPlugin,
             ring_ui::RingUiPlugin,
+            audio::SoundPlugin,
         ))
         .add_plugins(AutoScreenshotPlugin)
         .add_systems(Startup, setup_scene)
@@ -184,6 +188,9 @@ fn auto_screenshot(
         // Full night: the lights of the world are on.
         (Some("night"), Some(_)) => day_night.night >= 1.0,
         // Someone slipped out of sight (§11.6).
+        // A god shifted at dusk: its scene is up (§5).
+        // The view has no log: count the shifts the feed told.
+        (Some("dusk"), Some(game)) => game.stage_shifts > 0,
         // The human's action waits for a rival still acting (§11.2).
         (Some("held"), Some(game)) => {
             matches!(

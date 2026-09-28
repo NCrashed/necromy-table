@@ -1,0 +1,3 @@
+TrackType: Music, VocalType: Instrumental, Genre: Fantasy, Genre: Ambient.
+Background score for a fantasy board game in the vein of Warcraft III: warm, vivid orchestral and folk colours, clear melodic motifs, never muddy.
+Dark fantasy in mood (old gods, bargains, the dead); it may grow tense, but it never turns into harsh noise and can sit under play for a long time.

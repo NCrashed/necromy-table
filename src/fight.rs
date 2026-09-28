@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use necromy_rules::{God, PlayerId};
 
+use crate::audio::Sound;
 use crate::dice::DiceShow;
 use crate::hud::UiFont;
 use crate::play::{BattleInfo, Match};
@@ -128,6 +129,8 @@ struct Fight {
     start: Option<f32>,
     /// Blows whose impact has been shown (popups, shake).
     shown: usize,
+    /// Blows whose swing has been heard.
+    swung: usize,
     /// When the last blow landed, for the shake.
     shook_at: Option<f32>,
 }
@@ -346,6 +349,7 @@ fn direct(
     dice: Res<DiceShow>,
     mut fight: ResMut<Fight>,
     mut wounds: ResMut<Wounds>,
+    mut sounds: MessageWriter<Sound>,
 ) {
     let now = time.elapsed_secs();
     let Some(battle) = game.battle.as_ref() else {
@@ -370,6 +374,14 @@ fn direct(
     }
     let over = t >= blows.len() as f32 * BLOW_SECS;
     next.dead = battle.fell.map(|f| f && over);
+    if next
+        .dead
+        .iter()
+        .zip(wounds.dead)
+        .any(|(&now, before)| now && !before)
+    {
+        sounds.write(Sound::new("fall"));
+    }
     wounds.set_if_neq(next);
 }
 
@@ -517,6 +529,7 @@ fn pose(
 
 /// Each impact once: a number over the one hit (or "блок" off a shield),
 /// and the stage jolts when a blow gets through.
+#[allow(clippy::too_many_arguments)]
 fn shake(
     time: Res<Time>,
     game: Res<Match>,
@@ -525,6 +538,7 @@ fn shake(
     mut commands: Commands,
     font: Res<UiFont>,
     fighters: Query<(&Fighter, &ComputedNode, &UiGlobalTransform)>,
+    mut sounds: MessageWriter<Sound>,
 ) {
     let now = time.elapsed_secs();
     let (Some(battle), Some(start)) = (game.battle.as_ref(), fight.start) else {
@@ -535,6 +549,10 @@ fn shake(
     }
     let t = now - start - LEAD_IN;
     let blows = blows(battle);
+    while fight.swung < blows.len() && t >= fight.swung as f32 * BLOW_SECS {
+        fight.swung += 1;
+        sounds.write(Sound::new("swing"));
+    }
     while fight.shown < blows.len() && t >= fight.shown as f32 * BLOW_SECS + IMPACT {
         let blow = blows[fight.shown];
         fight.shown += 1;
@@ -542,6 +560,7 @@ fn shake(
         if blow.lands {
             fight.shook_at = Some(now);
         }
+        sounds.write(Sound::new(if blow.lands { "hit" } else { "block" }));
         let Some((_, node, at)) = fighters.iter().find(|(f, ..)| f.0 == target) else {
             continue;
         };

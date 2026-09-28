@@ -10,7 +10,6 @@
 use hexx::Hex;
 use serde::{Deserialize, Serialize};
 
-use super::style::GUARD_THRESHOLD;
 use super::{Event, Fighter, Game, PlayerId};
 use crate::gods::{Element, God};
 
@@ -39,7 +38,7 @@ impl Game {
     /// The loudest champion at or over the threshold; ties go by initiative.
     pub fn hunted(&self) -> Option<PlayerId> {
         let loudest = self.players().map(|p| self.threat(p)).max()?;
-        if loudest < GUARD_THRESHOLD {
+        if loudest < self.guard_threshold() {
             return None;
         }
         self.order
@@ -100,7 +99,10 @@ impl Game {
         self.last_fight = self.round;
         self.battles += 1;
         self.offer(None, God::Trishna, 1, events);
-        let g_faces = self.roll(Fighter::Guard, false, GUARD_DICE, Vec::new(), events);
+        // Zaga's Sentence: the guard strikes harder (§5.3).
+        let dice = GUARD_DICE
+            + u8::from(self.law_active(super::Law::Sentence) && !self.chosen(target, God::Zaga));
+        let g_faces = self.roll(Fighter::Guard, false, dice, Vec::new(), events);
         let count = self.dice_for(target, true);
         let t_faces = self.roll(Fighter::Champion(target), true, count, Vec::new(), events);
         // The guard fights with the kingdom's iron.

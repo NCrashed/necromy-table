@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use necromy_dice::Face;
 
-use crate::board::{Board, Corpse, GROVE_AGE, Terrain};
+use crate::board::{Board, Corpse, Terrain};
 use crate::cards::{
     self, CardDef, CardId, CardKind, DefId, Effect, TargetRule, Timing, TrapEffect,
 };
@@ -188,6 +188,8 @@ struct Turn {
     move_points: u32,
     /// Element of the last card played this turn (§4 chains).
     last_element: Option<Element>,
+    /// Cards played on their own turn so far (Zaga's Burden, §5.3).
+    cards: u8,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -269,6 +271,13 @@ pub enum Event {
     HoldDropped {
         player: PlayerId,
         why: RuleError,
+    },
+    /// A law of the world acted (§5.3): on `player`, at `hex`, or on the
+    /// whole table.
+    Law {
+        law: laws::Law,
+        player: Option<PlayerId>,
+        hex: Option<Hex>,
     },
     Moved {
         player: PlayerId,
@@ -715,6 +724,7 @@ impl Game {
                     phase: Phase::Done,
                     move_points: 0,
                     last_element: None,
+                    cards: 0,
                 };
                 champions_len
             ],
@@ -955,7 +965,7 @@ impl Game {
         if self.occupant(to).is_some() || self.guard_at(to) {
             return Err(RuleError::Occupied);
         }
-        Ok(tile.terrain.move_cost())
+        Ok(self.terrain_cost(player, tile.terrain))
     }
 
     /// Hexes `player` can reach this turn, with the cheapest cost.
@@ -1007,7 +1017,7 @@ impl Game {
                 if next == start || self.occupant(next).is_some() || self.guard_at(next) {
                     continue;
                 }
-                let total = cost + tile.terrain.move_cost();
+                let total = cost + self.terrain_cost(player, tile.terrain);
                 if total > points {
                     continue;
                 }
@@ -1057,11 +1067,9 @@ impl Game {
             }
         }
         let have = self.champions[player.0 as usize].spirit_points;
-        if def.cost > have {
-            return Err(RuleError::NotEnoughSpirit {
-                need: def.cost,
-                have,
-            });
+        let need = self.cost_of(player, card);
+        if need > have {
+            return Err(RuleError::NotEnoughSpirit { need, have });
         }
         Ok(())
     }
@@ -1170,9 +1178,10 @@ impl Game {
                 }
                 Intent::RefuseWish => {
                     self.wish_due = None;
-                    let streak = self.progress[player.0 as usize].crown_streak;
-                    self.progress[player.0 as usize].refused_at = streak;
+                    // Turning down what the table pays is loud (§10): +2 Threat.
+                    self.progress[player.0 as usize].refusals += 1;
                     events.push(Event::WishRefused { player });
+                    self.add_threat(player, REFUSAL_THREAT, &mut events);
                 }
                 _ => return Err(RuleError::WishPending),
             }
@@ -1479,6 +1488,20 @@ impl Game {
             target,
             response: false,
         });
+        // Zaga's Burden: past the second card a turn, every card is loud.
+        let turn = &mut self.turns[player.0 as usize];
+        turn.cards = turn.cards.saturating_add(1);
+        if turn.cards > BURDEN_FREE
+            && self.law_active(Law::Burden)
+            && !self.chosen(player, God::Zaga)
+        {
+            events.push(Event::Law {
+                law: Law::Burden,
+                player: Some(player),
+                hex: None,
+            });
+            self.add_threat(player, 1, events);
+        }
         let bonus = self.chain(player, self.def(card).element, events);
 
         if let Target::Champion(aimed) = target
@@ -1667,7 +1690,7 @@ impl Game {
 
     fn take_from_hand(&mut self, player: PlayerId, card: CardId, events: &mut Vec<Event>) {
         self.hands[player.0 as usize].retain(|&c| c != card);
-        let cost = self.def(card).cost;
+        let cost = self.cost_of(player, card);
         if cost > 0 {
             let champ = self.champ_mut(player);
             champ.spirit_points -= cost;
@@ -2026,6 +2049,8 @@ impl Game {
 
     /// Zero health: the champion leaves a body and wakes at home, whole.
     fn fall(&mut self, player: PlayerId, events: &mut Vec<Event>) {
+        // The Wager wants the Dominant standing through all its refusals.
+        self.progress[player.0 as usize].refusals = 0;
         let at = self.hex_of(player);
         if let Some(tile) = self.board.tile_mut(at)
             && tile.corpse.is_none()
@@ -2049,6 +2074,34 @@ impl Game {
         champ.hp = champ.body;
         champ.ward = None;
         champ.rooted = false;
+        // Maya's Rest: death is a release, the Spirit comes back whole.
+        if self.law_active(Law::Rest) {
+            let champ = self.champ_mut(player);
+            champ.spirit_points = champ.spirit;
+            let spirit = champ.spirit_points;
+            events.push(Event::Law {
+                law: Law::Rest,
+                player: Some(player),
+                hex: None,
+            });
+            events.push(Event::SpiritChanged { player, spirit });
+        }
+        // Maya's Wrath: the fallen leave something behind.
+        if self.law_active(Law::Wrath)
+            && !self.chosen(player, God::Maya)
+            && !self.hands[player.0 as usize].is_empty()
+        {
+            let hand = self.hands[player.0 as usize].clone();
+            if let Some(&card) = self.rng.pick(&hand) {
+                self.hands[player.0 as usize].retain(|&c| c != card);
+                self.discard.push(card);
+                events.push(Event::Law {
+                    law: Law::Wrath,
+                    player: Some(player),
+                    hex: None,
+                });
+            }
+        }
         if self.is_active(player) {
             self.turns[player.0 as usize].move_points = 0;
         }
@@ -2117,12 +2170,31 @@ impl Game {
             phase: Phase::Acting,
             move_points: MOVE_POINTS,
             last_element: None,
+            cards: 0,
         };
         let champ = self.champ_mut(player);
         let faded = champ.ward.take().is_some();
         let rooted = std::mem::take(&mut champ.rooted);
         if faded {
             events.push(Event::WardFaded { player });
+        }
+        // Trishna's Generosity: the settlement feeds its guest (§5.3).
+        let at = self.hex_of(player);
+        if self.law_active(Law::Generosity)
+            && self
+                .board
+                .tile(at)
+                .is_some_and(|t| t.terrain == Terrain::Settlement)
+        {
+            let c = &self.champions[player.0 as usize];
+            if c.hp < c.body {
+                events.push(Event::Law {
+                    law: Law::Generosity,
+                    player: Some(player),
+                    hex: Some(at),
+                });
+                self.heal(player, 1, events);
+            }
         }
         if rooted {
             self.turns[player.0 as usize].move_points = 0;
@@ -2142,10 +2214,11 @@ impl Game {
     /// Corpses age and sprout; the night leaves a new one behind.
     fn world_phase(&mut self, events: &mut Vec<Event>) {
         let corpses: Vec<(Hex, Corpse)> = self.board.corpses().collect();
+        let ripe = self.grove_age();
         for (hex, corpse) in corpses {
             let tile = self.board.tile_mut(hex).expect("corpse on the board");
             let age = corpse.age + 1;
-            if age < GROVE_AGE {
+            if age < ripe {
                 tile.corpse = Some(Corpse { age });
             } else if tile.terrain.can_grow_grove() {
                 tile.corpse = None;
@@ -2185,6 +2258,7 @@ impl Game {
 
 mod battle;
 mod guard;
+mod laws;
 mod stealth;
 mod story;
 mod style;
@@ -2194,10 +2268,11 @@ mod wish;
 mod world;
 pub use battle::Score;
 pub use guard::{GUARD_DICE, GUARD_RELIEF, GUARD_STEPS, Guard};
+pub use laws::{BURDEN_FREE, CHOSEN, CRACK_REACH, Law, Patronage, SENTENCE_THRESHOLD, SIGN, VOICE};
 pub use stealth::RevealReason;
 pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
-pub use victory::{Check, CheckKind, Condition, OPEN_COUNT};
+pub use victory::{Check, CheckKind, Condition, OPEN_COUNT, REFUSAL_THREAT, SECRET_FROM_ROUND};
 pub use wish::{Said, WishKind, god_terrain, taste_for};
 pub use world::{Pantheon, STAGE_THRESHOLD, STAGES, TRISHNA_DRIFT};
 

@@ -22,7 +22,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever a message changes shape; mismatched sides refuse.
-pub const PROTOCOL: u32 = 5;
+pub const PROTOCOL: u32 = 6;
 pub const DEFAULT_PORT: u16 = 7878;
 /// A view of the match is a few kilobytes; anything near this is garbage.
 const MAX_FRAME: usize = 4 << 20;

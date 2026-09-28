@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use necromy_rules::{GUARD_THRESHOLD, God, PlayerId};
+use necromy_rules::{God, PlayerId};
 
 use crate::board::Hovered;
 use crate::hud::{INK, UiFont};
@@ -31,8 +31,14 @@ pub struct StatsPlugin;
 impl Plugin for StatsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HoveredSeat>()
-            .add_systems(crate::MatchBegins, (make_art, spawn_panels).chain())
-            .add_systems(crate::InGame, (track_seat_hover, place_popup).chain())
+            .add_systems(
+                crate::MatchBegins,
+                (make_art, spawn_panels, spawn_god_tip).chain(),
+            )
+            .add_systems(
+                crate::InGame,
+                ((track_seat_hover, place_popup).chain(), god_tip),
+            )
             .add_systems(
                 crate::InGame,
                 (rebuild_mine, rebuild_seats, rebuild_gods).run_if(resource_changed::<Match>),
@@ -158,15 +164,22 @@ fn make_art(
 }
 
 fn spawn_panels(mut commands: Commands) {
-    commands.spawn((
-        GodsPanel,
-        Node {
+    // The right column: the gods, and under them the victory conditions,
+    // however tall the gods grow.
+    commands
+        .spawn(Node {
             position_type: PositionType::Absolute,
             top: px(10.0),
             right: px(10.0),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::FlexEnd,
+            row_gap: px(6.0),
             ..default()
-        },
-    ));
+        })
+        .with_children(|column| {
+            column.spawn((GodsPanel, Node::default()));
+            column.spawn((crate::victory_ui::Conditions, Node::default()));
+        });
     commands.spawn((
         MyPanel,
         Node {
@@ -396,15 +409,16 @@ fn stat_sheet(
 
     // What runs out: cells.
     let threat = g.threat(player);
+    let march = g.guard_threshold();
     for (icon, now, max, color, warn) in [
         (StatIcon::Health, c.hp, c.body, HEALTH, None),
         (StatIcon::Spirit, c.spirit_points, c.spirit, SPIRIT, None),
         (
             StatIcon::Threat,
             threat,
-            threat.max(GUARD_THRESHOLD),
+            threat.max(march),
             THREAT,
-            Some(GUARD_THRESHOLD),
+            Some(march),
         ),
     ] {
         let r = row(commands);
@@ -651,22 +665,27 @@ fn rebuild_gods(
         .add_child(ring_label)
         .id();
     commands.entity(title).add_children(&[name, spacer, ring]);
-    let legend = commands
-        .spawn((
-            Text::new("стадия · давление: ◀ светлеет | темнеет ▶ · твоя благосклонность"),
-            font.text(11.0),
-            TextColor(Color::srgb(0.75, 0.73, 0.68)),
-        ))
-        .id();
-    commands.entity(sheet).add_children(&[title, legend]);
+    commands.entity(sheet).add_child(title);
 
     for god in God::ALL {
-        let r = row(&mut commands);
         let accent = {
             let [red, green, blue] = god.accent();
             Color::srgb_u8(red, green, blue)
         };
-        let icon = icon_node(&mut commands, art.gods[god.index()].clone(), 24.0, true);
+        // One god: a button, hovered it tells the whole story (`god_tip`).
+        let block = commands
+            .spawn((
+                GodRow(god),
+                Button,
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::horizontal(px(4.0)),
+                    ..default()
+                },
+            ))
+            .id();
+        let r = row(&mut commands);
+        let icon = icon_node(&mut commands, art.gods[god.index()].clone(), 20.0, true);
         let name = fixed_label(&mut commands, &font, names::god(god), 13.0, true, 62.0);
 
         let stage = g.stage(god);
@@ -682,60 +701,57 @@ fn rebuild_gods(
                 1 => accent,
                 _ => accent.mix(&Color::BLACK, 0.55),
             };
-            let cell = cell(&mut commands, i <= stage, tone, tone);
+            let cell = cell(&mut commands, i == stage, tone, tone);
             commands.entity(cells).add_child(cell);
         }
-        let stage_name = fixed_label(
-            &mut commands,
-            &font,
-            names::stage(god, stage),
-            12.0,
-            false,
-            96.0,
-        );
-
-        let p = g.pressure(god);
-        let t = necromy_rules::STAGE_THRESHOLD;
-        let pressure = commands
-            .spawn(Node {
-                column_gap: px(2.0),
-                align_items: AlignItems::Center,
-                ..default()
-            })
-            .id();
-        // Left half fills from the middle outwards as relief builds.
-        for i in 0..t {
-            let c = cell(&mut commands, p <= -(t - i), RELIEF, HOLLOW);
-            commands.entity(pressure).add_child(c);
-        }
-        let divider = commands
+        let stage_name = commands
             .spawn((
+                Text::new(names::stage(god, stage)),
+                font.bold(12.0),
+                TextColor(accent.lighter(0.15)),
                 Node {
-                    width: px(2.0),
-                    height: px(18.0),
+                    width: px(104.0),
                     ..default()
                 },
-                BackgroundColor(INK),
             ))
             .id();
-        commands.entity(pressure).add_child(divider);
-        for i in 0..t {
-            let c = cell(&mut commands, p > i, PRESSURE, HOLLOW);
-            commands.entity(pressure).add_child(c);
-        }
 
-        let bowl = icon_node(&mut commands, art.offering.clone(), 20.0, true);
+        // Where dusk will take it: the pressure as a forecast.
+        let (forecast, tone) = forecast(g, god);
+        let dusk = fixed_label(&mut commands, &font, &forecast, 11.0, false, 104.0);
+        commands.entity(dusk).insert(TextColor(tone));
+
+        let bowl = icon_node(&mut commands, art.offering.clone(), 18.0, true);
+        let rung = g.patronage(game.human, god);
         let favor = label(
             &mut commands,
             &font,
-            &g.favor(game.human, god).to_string(),
-            13.0,
-            true,
+            &match rung {
+                necromy_rules::Patronage::None => g.favor(game.human, god).to_string(),
+                p => format!("{} {}", g.favor(game.human, god), names::patronage(p)),
+            },
+            12.0,
+            rung != necromy_rules::Patronage::None,
         );
         commands
             .entity(r)
-            .add_children(&[icon, name, cells, stage_name, pressure, bowl, favor]);
-        commands.entity(sheet).add_child(r);
+            .add_children(&[icon, name, cells, stage_name, dusk, bowl, favor]);
+        // The law in force, in words, under the god.
+        let law = necromy_rules::Law::of(god, stage);
+        let law_line = commands
+            .spawn((
+                Text::new(names::law_text(law)),
+                font.text(11.0),
+                TextColor(Color::srgb(0.82, 0.80, 0.74)),
+                Node {
+                    margin: UiRect::left(px(26.0)),
+                    max_width: px(360.0),
+                    ..default()
+                },
+            ))
+            .id();
+        commands.entity(block).add_children(&[r, law_line]);
+        commands.entity(sheet).add_child(block);
     }
     commands.entity(*panel).add_child(sheet);
 }
@@ -909,7 +925,7 @@ fn guard_sheet(commands: &mut Commands, art: &StatArt, font: &UiFont, m: &Match)
         let loud = row(commands);
         let threat = g.threat(target);
         let icon = icon_node(commands, art.icon(StatIcon::Threat), 24.0, true);
-        let t = necromy_rules::GUARD_THRESHOLD;
+        let t = g.guard_threshold();
         let b = bar(
             commands,
             threat,
@@ -931,7 +947,7 @@ fn guard_sheet(commands: &mut Commands, art: &StatArt, font: &UiFont, m: &Match)
                 "Выходит, когда у кого-то Угроза {} и больше, и идёт к самому шумному. \
                  Рядом с ним бьёт кубиками; удар снимает {} Угрозы. Грань «Стихия» \
                  гвардии ломает оберег дерева: железо рубит рост.",
-                necromy_rules::GUARD_THRESHOLD,
+                g.guard_threshold(),
                 necromy_rules::GUARD_RELIEF
             )),
             font.text(11.0),
@@ -946,4 +962,143 @@ fn guard_sheet(commands: &mut Commands, art: &StatArt, font: &UiFont, m: &Match)
     rows.push(rules);
     commands.entity(sheet).add_children(&rows);
     sheet
+}
+
+/// A god in the gods panel; hovered, `god_tip` explains it.
+#[derive(Component)]
+pub struct GodRow(pub God);
+
+/// Where dusk takes a god: darker, lighter or nowhere, with how close.
+fn forecast(g: &necromy_rules::Game, god: God) -> (String, Color) {
+    let t = necromy_rules::STAGE_THRESHOLD;
+    // Trishna's own pull comes at dusk too.
+    let drift = if god == God::Trishna && g.time() == necromy_rules::TimeOfDay::Day {
+        necromy_rules::TRISHNA_DRIFT
+    } else {
+        0
+    };
+    let p = g.pressure(god) + drift;
+    let stage = g.stage(god);
+    if p >= t && stage < 2 {
+        ("к закату темнеет".into(), PRESSURE)
+    } else if p <= -t && stage > 0 {
+        ("к закату светлеет".into(), RELIEF)
+    } else if p > 0 && stage < 2 {
+        (format!("темнеет {p}/{t}"), PRESSURE.mix(&HOLLOW, 0.3))
+    } else if p < 0 && stage > 0 {
+        (format!("светлеет {}/{t}", -p), RELIEF.mix(&HOLLOW, 0.3))
+    } else {
+        ("держится".into(), HOLLOW)
+    }
+}
+
+/// The explanation of a hovered god, left of the right column.
+#[derive(Component)]
+struct GodTip;
+
+fn spawn_god_tip(mut commands: Commands, font: Res<UiFont>) {
+    commands.spawn((
+        GodTip,
+        Text::new(""),
+        font.text(12.0),
+        TextColor(INK),
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(10.0),
+            right: px(440.0),
+            width: px(360.0),
+            padding: UiRect::all(px(10.0)),
+            ..default()
+        },
+        Frame::Tip,
+        GlobalZIndex(10),
+        Visibility::Hidden,
+    ));
+}
+
+/// What a god is doing to the world and what it gives the human (§5).
+fn god_tip(
+    game: Res<Match>,
+    rows: Query<(&Interaction, &GodRow)>,
+    tip: Single<(&mut Text, &mut Visibility), With<GodTip>>,
+) {
+    let (mut text, mut visibility) = tip.into_inner();
+    // Dev aid: `NECROMY_GOD_TIP=n` pins the explanation of god n.
+    let pinned = std::env::var("NECROMY_GOD_TIP")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .map(God::from_index);
+    let Some(god) = rows
+        .iter()
+        .find(|(i, _)| **i != Interaction::None)
+        .map(|(_, r)| r.0)
+        .or(pinned)
+    else {
+        visibility.set_if_neq(Visibility::Hidden);
+        return;
+    };
+    let g = &game.game;
+    let stage = g.stage(god);
+    let mut s = format!(
+        "{} · {} · сейчас «{}»\n",
+        names::god(god),
+        names::element(god.element()),
+        names::stage(god, stage)
+    );
+    s.push_str("Законы по стадиям, от светлой к тёмной:\n");
+    for i in 0..necromy_rules::STAGES {
+        let law = necromy_rules::Law::of(god, i);
+        let mark = if i == stage { "▶" } else { "·" };
+        s.push_str(&format!(
+            "{mark} {}: {}\n",
+            names::law_name(law),
+            names::law_text(law)
+        ));
+    }
+    s.push_str(&format!(
+        "\nДавление {:+} из ±{}: на закате +{} темнит, −{} светлит.\n",
+        g.pressure(god),
+        necromy_rules::STAGE_THRESHOLD,
+        necromy_rules::STAGE_THRESHOLD,
+        necromy_rules::STAGE_THRESHOLD
+    ));
+    let mut feeds = String::from(
+        "Кормят: её карты (карты тел — вдвое), сожжённые в бою карты, молитва в её храме, желание ей, её задания",
+    );
+    match god {
+        God::Trishna => {
+            feeds.push_str(", каждый бой и удар гвардии; и сама темнеет на 1 каждый закат")
+        }
+        God::Bhava => feeds.push_str(", каждая роща из нетронутого тела"),
+        _ => {}
+    }
+    s.push_str(&feeds);
+    s.push_str(".\n");
+    let cools = God::ALL[god.element().quenches().index()];
+    let cooled_by = God::ALL[god.element().quenched_by().index()];
+    s.push_str(&format!(
+        "Подношение {} остужает {}; её саму остужает служение {}.\n",
+        names::god_dative(god),
+        names::god_accusative(cools),
+        names::god_dative(cooled_by)
+    ));
+    let favor = g.favor(game.human, god);
+    let have = |need: u16| if favor >= need { "✓" } else { "·" };
+    s.push_str(&format!(
+        "\nТвоя благосклонность: {favor}.\n\
+         {} Знак ({}): её карты на 1 Дух дешевле.\n\
+         {} Голос ({}): желание ей на ступень выше.\n\
+         {} Избранник ({}): {}.",
+        have(necromy_rules::SIGN),
+        necromy_rules::SIGN,
+        have(necromy_rules::VOICE),
+        necromy_rules::VOICE,
+        have(necromy_rules::CHOSEN),
+        necromy_rules::CHOSEN,
+        names::chosen_gift(god)
+    ));
+    if text.0 != s {
+        text.0 = s;
+    }
+    visibility.set_if_neq(Visibility::Inherited);
 }

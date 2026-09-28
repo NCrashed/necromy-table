@@ -38,7 +38,7 @@ impl Game {
         if self.occupant(to).is_none_or(|p| p == player) {
             return Err(RuleError::InvalidTarget);
         }
-        let cost = tile.terrain.move_cost();
+        let cost = self.terrain_cost(player, tile.terrain);
         let have = self.move_points(player);
         if cost > have {
             return Err(RuleError::NotEnoughMovePoints { need: cost, have });
@@ -169,6 +169,20 @@ impl Game {
             self.battle_style(attacker, defender, events);
         } else if to_attacker > to_defender {
             self.battle_style(defender, attacker, events);
+        }
+        // Trishna's Thirst: whoever drew more blood drinks a Spirit (§5.3).
+        if self.law_active(super::Law::Thirst) && to_defender != to_attacker {
+            let winner = if to_defender > to_attacker {
+                attacker
+            } else {
+                defender
+            };
+            events.push(Event::Law {
+                law: super::Law::Thirst,
+                player: Some(winner),
+                hex: None,
+            });
+            self.gain_spirit(winner, 1, events);
         }
     }
 

@@ -13,6 +13,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_sprite3d::prelude::*;
 use necromy_rules::PlayerId;
 
+use crate::audio::Sound;
 use crate::board::Board;
 use crate::play::Match;
 
@@ -280,6 +281,8 @@ fn shade(image: &Image) -> Image {
 /// walk as the camera sees it, so a turned table turns the champion too.
 fn animate_tokens(
     time: Res<Time>,
+    game: Res<Match>,
+    mut sounds: MessageWriter<Sound>,
     camera: Single<&Transform, (With<crate::TableCamera>, Without<Token>)>,
     mut tokens: Query<(&Token, &Transform, &mut Animated, &mut Sprite)>,
 ) {
@@ -291,6 +294,7 @@ fn animate_tokens(
             .waypoints
             .front()
             .map(|target| *target - transform.translation);
+        let before = anim.clock;
         step_frame(
             &mut anim,
             &mut sprite,
@@ -300,6 +304,12 @@ fn animate_tokens(
             away,
             time.delta_secs(),
         );
+        // A footfall on the walk frames where a foot meets the ground.
+        let frame = |clock: f32| (clock / FRAME_SECS) as u32;
+        if walking && frame(anim.clock) != frame(before) && frame(anim.clock) % 3 == 0 {
+            let volume = if token.player == game.human { 1.0 } else { 0.6 };
+            sounds.write(Sound::new("step").at(volume));
+        }
     }
 }
 

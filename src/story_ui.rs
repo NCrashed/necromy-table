@@ -1,13 +1,23 @@
-//! The storyteller's lines on screen (docs/design.md §8).
+//! The storyteller's lines on screen (docs/design.md §8): the quests the
+//! gods give.
 //!
-//! Left, above the human's sheet: their open lines, each with the god who
-//! told it, what it asks (with progress), the deadline and the reward. When
-//! a god tells the human a new line, its voice shows in the middle for a few
-//! seconds. A pilgrimage's temple glows on the board (`board.rs`).
+//! - Left, above the human's sheet: their open lines under a scroll icon,
+//!   each with the god who told it, what it asks (with progress), rounds
+//!   left and the reward. A click on a line (or the header) opens the
+//!   journal.
+//! - The journal: every open line in full, the god's own words included,
+//!   until closed.
+//! - When a god tells the human a new line, its voice shows in the middle
+//!   until the human closes it (or `VOICE_SECS` pass); it stays readable in
+//!   the journal afterwards.
+//! - The goal hex of a line glows on the board and carries a scroll
+//!   (`board.rs`).
 
 use bevy::prelude::*;
+use necromy_rules::{Game, Line};
 
 use crate::hud::{INK, UiFont};
+use crate::icons::StatIcon;
 use crate::names;
 use crate::play::Match;
 use crate::stats::{self, StatArt};
@@ -15,19 +25,25 @@ use crate::ui_skin::{Accent, Frame};
 
 const VOICE: Color = Color::srgb(0.85, 0.80, 0.95);
 const DIM: Color = Color::srgb(0.72, 0.70, 0.64);
-/// How long a god's voice stays on screen.
-const VOICE_SECS: f32 = 6.0;
+const URGENT: Color = Color::srgb(0.95, 0.55, 0.4);
+/// A god's voice closes by itself after this long, if the human does not.
+const VOICE_SECS: f32 = 30.0;
 
 pub struct StoryUiPlugin;
 
 impl Plugin for StoryUiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn)
-            .add_systems(
-                crate::InGame,
-                (rebuild_lines, rebuild_voice).run_if(resource_changed::<Match>),
-            )
-            .add_systems(crate::InGame, expire_voice);
+        // Dev aid: `NECROMY_JOURNAL=1` opens the journal for screenshots.
+        app.insert_resource(Journal {
+            open: std::env::var_os("NECROMY_JOURNAL").is_some(),
+        })
+        .add_systems(Startup, spawn)
+        .add_systems(
+            crate::InGame,
+            (rebuild_lines, rebuild_voice, rebuild_journal)
+                .run_if(resource_changed::<Match>.or_else(resource_changed::<Journal>)),
+        )
+        .add_systems(crate::InGame, (expire_voice, clicks));
     }
 }
 
@@ -36,6 +52,25 @@ struct StoryPanel;
 
 #[derive(Component)]
 struct VoicePanel;
+
+#[derive(Component)]
+struct JournalPanel;
+
+/// Opens the journal (on a line: scrolled to it; there are few).
+#[derive(Component)]
+struct OpenJournal;
+
+#[derive(Component)]
+struct CloseJournal;
+
+#[derive(Component)]
+struct CloseVoice;
+
+/// The quest journal is open.
+#[derive(Resource, Default, PartialEq)]
+struct Journal {
+    open: bool,
+}
 
 fn spawn(mut commands: Commands) {
     commands.spawn((
@@ -61,6 +96,63 @@ fn spawn(mut commands: Commands) {
         GlobalZIndex(11),
         Visibility::Hidden,
     ));
+    commands.spawn((
+        JournalPanel,
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(90.0),
+            left: px(0.0),
+            right: px(0.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::FlexStart,
+            ..default()
+        },
+        GlobalZIndex(11),
+        Visibility::Hidden,
+    ));
+}
+
+fn reward(line: &Line) -> String {
+    if line.stake > 0 {
+        format!("+{} Стиля; провал — −{}", line.style, line.stake)
+    } else {
+        format!(
+            "+{} Стиля и благосклонность {}",
+            line.style,
+            names::god_genitive(line.god)
+        )
+    }
+}
+
+fn rounds_left(line: &Line, g: &Game) -> String {
+    match line.deadline.saturating_sub(g.round()) {
+        0 => "последний раунд".into(),
+        1 => "остался 1 раунд".into(),
+        n @ 2..=4 => format!("осталось {n} раунда"),
+        n => format!("осталось {n} раундов"),
+    }
+}
+
+/// The god's words for a line: the model's when they came, else the template.
+fn voice_of<'a>(game: &'a Match, line: &Line) -> &'a str {
+    game.oracle
+        .line_voices
+        .get(&line.id)
+        .map_or(names::line_voice(line.kind), String::as_str)
+}
+
+fn text(commands: &mut Commands, font: TextFont, s: String, color: Color, width: f32) -> Entity {
+    commands
+        .spawn((
+            Text::new(s),
+            font,
+            TextColor(color),
+            Node {
+                width: px(width),
+                ..default()
+            },
+        ))
+        .id()
 }
 
 fn rebuild_lines(
@@ -88,9 +180,41 @@ fn rebuild_lines(
             Frame::Panel,
         ))
         .id();
-    let title = stats::label(&mut commands, &font, "Сюжет", 14.0, true);
-    commands.entity(sheet).add_child(title);
+    // The header opens the journal too.
+    let header = commands
+        .spawn((
+            OpenJournal,
+            Button,
+            Node {
+                align_items: AlignItems::Center,
+                column_gap: px(6.0),
+                ..default()
+            },
+        ))
+        .id();
+    let scroll = stats::icon_node(&mut commands, art.icon(StatIcon::Quest), 20.0, true);
+    let title = stats::label(
+        &mut commands,
+        &font,
+        &format!("Задания ({})", lines.len()),
+        14.0,
+        true,
+    );
+    let hint = stats::label(&mut commands, &font, "подробно ›", 11.0, false);
+    commands.entity(header).add_children(&[scroll, title, hint]);
+    commands.entity(sheet).add_child(header);
     for line in lines {
+        let row = commands
+            .spawn((
+                OpenJournal,
+                Button,
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(2.0),
+                    ..default()
+                },
+            ))
+            .id();
         let head = stats::row(&mut commands);
         let icon = stats::icon_node(
             &mut commands,
@@ -106,43 +230,53 @@ fn rebuild_lines(
             true,
         );
         commands.entity(head).add_children(&[icon, name]);
-        let reward = if line.stake > 0 {
-            format!("+{} Стиля, провал −{}", line.style, line.stake)
-        } else {
-            format!("+{} Стиля", line.style)
-        };
-        let body = commands
-            .spawn((
-                Text::new(format!(
-                    "{} · до раунда {} · {reward}",
-                    names::line_goal(line, g),
-                    line.deadline
-                )),
-                font.text(11.0),
-                TextColor(DIM),
-                Node {
-                    width: px(234.0),
-                    ..default()
-                },
-            ))
-            .id();
-        commands.entity(sheet).add_children(&[head, body]);
+        let left = line.deadline.saturating_sub(g.round());
+        let body = text(
+            &mut commands,
+            font.text(11.0),
+            format!("{} · {}", names::line_goal(line, g), rounds_left(line, g)),
+            if left == 0 { URGENT } else { DIM },
+            234.0,
+        );
+        commands.entity(row).add_children(&[head, body]);
+        commands.entity(sheet).add_child(row);
     }
     commands.entity(*panel).add_child(sheet);
+}
+
+/// A small button: `marker` says what it does.
+fn button(commands: &mut Commands, font: &UiFont, label: &str, marker: impl Bundle) -> Entity {
+    let t = stats::label(commands, font, label, 13.0, true);
+    commands
+        .spawn((
+            marker,
+            Button,
+            Frame::Button,
+            Node {
+                padding: UiRect::axes(px(14.0), px(7.0)),
+                align_self: AlignSelf::FlexEnd,
+                ..default()
+            },
+        ))
+        .add_child(t)
+        .id()
 }
 
 fn rebuild_voice(
     mut commands: Commands,
     game: Res<Match>,
-
+    journal: Res<Journal>,
     art: Res<StatArt>,
     font: Res<UiFont>,
     panel: Single<(Entity, &mut Visibility), With<VoicePanel>>,
 ) {
     let (panel, mut visibility) = panel.into_inner();
     commands.entity(panel).despawn_related::<Children>();
-    // A wish's answer has the same spot; it goes first.
-    let Some(line) = game.told.filter(|_| game.wish_reply.is_none()) else {
+    // A wish's answer has the same spot, and the open journal says it all.
+    let Some(line) = game
+        .told
+        .filter(|_| game.wish_reply.is_none() && !journal.open)
+    else {
         visibility.set_if_neq(Visibility::Hidden);
         return;
     };
@@ -179,50 +313,180 @@ fn rebuild_voice(
         true,
     );
     commands.entity(head).add_children(&[icon, who]);
-    let voice = commands
-        .spawn((
-            // The model's words when they have come, the template until then.
-            Text::new(format!(
-                "«{}»",
-                game.oracle
-                    .line_voices
-                    .get(&line.id)
-                    .map_or(names::line_voice(line.kind), String::as_str)
-            )),
-            font.text(13.0),
-            TextColor(VOICE),
-            Node {
-                width: px(450.0),
-                ..default()
-            },
-        ))
-        .id();
-    let reward = if line.stake > 0 {
-        format!("+{} Стиля; провал — −{}", line.style, line.stake)
-    } else {
+    let voice = text(
+        &mut commands,
+        font.text(13.0),
+        format!("«{}»", voice_of(&game, &line)),
+        VOICE,
+        450.0,
+    );
+    let goal = text(
+        &mut commands,
+        font.text(12.0),
         format!(
-            "+{} Стиля и благосклонность {}",
-            line.style,
-            names::god_genitive(line.god)
-        )
-    };
-    let goal = commands
+            "Цель: {}, {}. Награда: {}.",
+            names::line_goal(&line, &game.game),
+            rounds_left(&line, &game.game),
+            reward(&line)
+        ),
+        INK,
+        450.0,
+    );
+    let note = text(
+        &mut commands,
+        font.text(11.0),
+        "Задание записано в журнал: свиток слева, над твоим листом.".into(),
+        DIM,
+        450.0,
+    );
+    let ok = button(&mut commands, &font, "Понятно", CloseVoice);
+    commands
+        .entity(frame)
+        .add_children(&[head, voice, goal, note, ok]);
+    commands.entity(panel).add_child(frame);
+}
+
+fn rebuild_journal(
+    mut commands: Commands,
+    game: Res<Match>,
+    journal: Res<Journal>,
+    art: Res<StatArt>,
+    font: Res<UiFont>,
+    panel: Single<(Entity, &mut Visibility), With<JournalPanel>>,
+) {
+    let (panel, mut visibility) = panel.into_inner();
+    commands.entity(panel).despawn_related::<Children>();
+    let g = &game.game;
+    let lines: Vec<_> = g.lines_of(game.human).collect();
+    if !journal.open {
+        visibility.set_if_neq(Visibility::Hidden);
+        return;
+    }
+    visibility.set_if_neq(Visibility::Inherited);
+    let frame = commands
         .spawn((
-            Text::new(format!(
-                "Цель: {} до раунда {}. Награда: {reward}.",
-                names::line_goal(&line, &game.game),
-                line.deadline
-            )),
-            font.text(12.0),
-            TextColor(INK),
             Node {
-                width: px(450.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: px(10.0),
+                padding: UiRect::all(px(20.0)),
+                width: px(520.0),
                 ..default()
             },
+            Frame::Plate,
         ))
         .id();
-    commands.entity(frame).add_children(&[head, voice, goal]);
+    let head = stats::row(&mut commands);
+    let scroll = stats::icon_node(&mut commands, art.icon(StatIcon::Quest), 28.0, true);
+    let title = stats::label(&mut commands, &font, "Задания богов", 17.0, true);
+    commands.entity(head).add_children(&[scroll, title]);
+    commands.entity(frame).add_child(head);
+    if lines.is_empty() {
+        let none = text(
+            &mut commands,
+            font.text(12.0),
+            "Пока никто из богов ничего не просит.".into(),
+            DIM,
+            480.0,
+        );
+        commands.entity(frame).add_child(none);
+    }
+    for line in lines {
+        let entry = commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(3.0),
+                    padding: UiRect::all(px(10.0)),
+                    ..default()
+                },
+                Frame::Tip,
+                Accent(names::element_color(Some(line.god.element()))),
+            ))
+            .id();
+        let top = stats::row(&mut commands);
+        let icon = stats::icon_node(
+            &mut commands,
+            art.gods[line.god.index()].clone(),
+            22.0,
+            true,
+        );
+        let name = stats::label(
+            &mut commands,
+            &font,
+            &format!(
+                "{}: «{}»",
+                names::god(line.god),
+                names::line_title(line.kind)
+            ),
+            14.0,
+            true,
+        );
+        commands.entity(top).add_children(&[icon, name]);
+        let voice = text(
+            &mut commands,
+            font.text(12.0),
+            format!("«{}»", voice_of(&game, line)),
+            VOICE,
+            460.0,
+        );
+        let left = line.deadline.saturating_sub(g.round());
+        let goal = text(
+            &mut commands,
+            font.text(12.0),
+            format!(
+                "Цель: {}. Срок: {} (до раунда {}).",
+                names::line_goal(line, g),
+                rounds_left(line, g),
+                line.deadline
+            ),
+            if left == 0 { URGENT } else { INK },
+            460.0,
+        );
+        let prize = text(
+            &mut commands,
+            font.text(12.0),
+            format!("Награда: {}.", reward(line)),
+            DIM,
+            460.0,
+        );
+        commands
+            .entity(entry)
+            .add_children(&[top, voice, goal, prize]);
+        commands.entity(frame).add_child(entry);
+    }
+    let close = button(&mut commands, &font, "Закрыть", CloseJournal);
+    commands.entity(frame).add_child(close);
     commands.entity(panel).add_child(frame);
+}
+
+#[allow(clippy::type_complexity)]
+fn clicks(
+    open: Query<&Interaction, (Changed<Interaction>, With<OpenJournal>)>,
+    close: Query<&Interaction, (Changed<Interaction>, With<CloseJournal>)>,
+    ok: Query<&Interaction, (Changed<Interaction>, With<CloseVoice>)>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut journal: ResMut<Journal>,
+    mut game: ResMut<Match>,
+) {
+    let hit = |mut i: std::slice::Iter<'_, Interaction>| i.any(|i| *i == Interaction::Pressed);
+    let (open, close, ok): (Vec<_>, Vec<_>, Vec<_>) = (
+        open.iter().copied().collect(),
+        close.iter().copied().collect(),
+        ok.iter().copied().collect(),
+    );
+    if hit(open.iter()) {
+        journal.set_if_neq(Journal { open: true });
+    }
+    if hit(close.iter()) || (journal.open && keys.just_pressed(KeyCode::Escape)) {
+        journal.set_if_neq(Journal { open: false });
+    }
+    if hit(ok.iter()) {
+        game.told = None;
+    }
+    // Reading the journal covers what the voice said.
+    if journal.open && game.told.is_some() {
+        game.told = None;
+    }
 }
 
 fn expire_voice(time: Res<Time>, mut shown: Local<(u32, f32)>, mut game: ResMut<Match>) {

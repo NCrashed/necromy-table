@@ -1,0 +1,835 @@
+//! Music and sound effects.
+//!
+//! Music: one piece at a time, crossfaded.
+//!
+//! A bed of day or night pieces (`DayNight`) turns every few minutes. When
+//! the camera rests in a god's land, that god's piece for its present stage
+//! takes over (light, mid, dark: the more it is fed, the darker). When a god
+//! changes stage, its new piece is heard for a while wherever the camera is,
+//! so the table hears the god sate or sour. The menu plays the day bed.
+//!
+//! Pieces are seamless loops in `assets/music/<name>.ogg` (made with
+//! `scripts/music-set.sh`); a missing one is skipped. `NECROMY_MUSIC=off`
+//! mutes it.
+//!
+//! Effects: any system sends a `Sound` (a name from `assets/sfx/`, made with
+//! `scripts/sfx-set.sh`); a variant is picked at random, never the same one
+//! twice running, with a slight change of pitch. What the rules report is
+//! sounded here from `Match::heard`; what is animated (dice, blows, steps) is
+//! sounded by its animation, on the frame it happens. `NECROMY_SFX=off`
+//! mutes effects.
+
+use std::path::Path;
+
+use bevy::audio::{AddAudioSource, Volume};
+use bevy::prelude::*;
+use necromy_rules::{Event, God};
+
+use crate::board::Board;
+use crate::camera::Rig;
+use crate::lighting::DayNight;
+use crate::play::Match;
+
+/// Loudness of music against everything else, linear.
+const MUSIC_GAIN: f32 = 0.5;
+/// Seconds for one piece to fade out and the next in.
+const FADE_SECS: f32 = 4.0;
+/// Seconds the camera must stay in a god's land before its piece starts, so
+/// passing over a border does not flip the music.
+const SETTLE_SECS: f32 = 3.0;
+/// Seconds a bed piece plays before the next one of the bed takes over.
+const BED_SECS: f32 = 180.0;
+/// Seconds a god's new stage is heard after it changes.
+const HERALD_SECS: f32 = 40.0;
+
+const DAY: [&str; 5] = [
+    "day-fields",
+    "day-market",
+    "day-road",
+    "day-temple",
+    "day-dusk",
+];
+const NIGHT: [&str; 5] = [
+    "night-bells",
+    "night-forest",
+    "night-graves",
+    "night-vigil",
+    "night-moon",
+];
+const STAGES: [&str; 3] = ["light", "mid", "dark"];
+
+pub struct SoundPlugin;
+
+impl Plugin for SoundPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<Sound>()
+            .add_message::<Tone>()
+            .add_audio_source::<Blip>()
+            .init_resource::<Speaking>()
+            .add_systems(Update, (ui_sounds, speak, play_tones).chain())
+            .init_resource::<Effects>()
+            .add_systems(crate::InGame, hear_events)
+            .add_systems(Update, play_sounds);
+        if !off("NECROMY_MUSIC") {
+            app.insert_resource(Music::new())
+                .add_systems(Update, (conduct, fade).chain());
+        }
+    }
+}
+
+/// A piece of the set.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Piece {
+    Day(usize),
+    Night(usize),
+    God(God, u8),
+}
+
+impl Piece {
+    fn name(self) -> String {
+        match self {
+            Piece::Day(i) => DAY[i].to_string(),
+            Piece::Night(i) => NIGHT[i].to_string(),
+            Piece::God(god, stage) => format!(
+                "{}-{}",
+                god.name().to_lowercase(),
+                STAGES[(stage as usize).min(2)]
+            ),
+        }
+    }
+
+    fn path(self) -> String {
+        format!("music/{}.ogg", self.name())
+    }
+
+    fn exists(self) -> bool {
+        Path::new("assets").join(self.path()).exists()
+    }
+}
+
+#[derive(Resource)]
+struct Music {
+    /// The piece playing (or fading in) and its player.
+    playing: Option<(Piece, Entity)>,
+    /// Seconds the present piece has played.
+    played: f32,
+    /// Which piece of each bed comes next.
+    day: usize,
+    night: usize,
+    /// The god whose land the camera is in, and for how long.
+    land: Option<God>,
+    land_secs: f32,
+    /// Stages as last seen, to hear them change.
+    stages: Option<[u8; 5]>,
+    /// Gods whose new stage is to be heard, the one playing first, and
+    /// seconds it has had.
+    heralds: Vec<(God, u8)>,
+    herald_secs: f32,
+}
+
+impl Music {
+    fn new() -> Music {
+        // Start the beds somewhere different every run.
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.subsec_nanos() as usize);
+        Music {
+            playing: None,
+            played: 0.0,
+            day: t % DAY.len(),
+            night: (t / 7) % NIGHT.len(),
+            land: None,
+            land_secs: 0.0,
+            stages: None,
+            heralds: Vec::new(),
+            herald_secs: 0.0,
+        }
+    }
+
+    /// The first bed piece from `turn` on that exists.
+    fn bed(night: bool, turn: usize) -> Option<Piece> {
+        (0..5)
+            .map(|k| (turn + k) % 5)
+            .map(|i| {
+                if night {
+                    Piece::Night(i)
+                } else {
+                    Piece::Day(i)
+                }
+            })
+            .find(|p| p.exists())
+    }
+}
+
+/// A music player and how loud it should be.
+#[derive(Component)]
+struct Voice {
+    gain: f32,
+    target: f32,
+}
+
+/// Picks the piece for the moment and starts it when it changes.
+#[allow(clippy::too_many_arguments)]
+fn conduct(
+    mut commands: Commands,
+    mut music: ResMut<Music>,
+    mut voices: Query<&mut Voice>,
+    game: Option<Res<Match>>,
+    day_night: Option<Res<DayNight>>,
+    rig: Option<Res<Rig>>,
+    board: Option<Res<Board>>,
+    assets: Res<AssetServer>,
+    time: Res<Time>,
+) {
+    let dt = time.delta_secs();
+    music.played += dt;
+    let night = game.is_some() && day_night.is_some_and(|d| d.night > 0.5);
+
+    let mut god_piece = None;
+    if let Some(game) = &game {
+        let stages = God::ALL.map(|g| game.game.stage(g));
+        // A stage that changed is heralded; the first look only remembers.
+        if let Some(before) = music.stages {
+            for god in God::ALL {
+                let stage = stages[god.index()];
+                if stage != before[god.index()] {
+                    debug!("music: {god:?} stage {} -> {stage}", before[god.index()]);
+                    music.heralds.retain(|&(g, _)| g != god);
+                    music.heralds.push((god, stage));
+                }
+            }
+        }
+        music.stages = Some(stages);
+
+        let land = rig.zip(board).and_then(|(rig, board)| {
+            let hex = board.world_to_hex(rig.focus());
+            game.game.board().tile(hex).and_then(|t| t.region)
+        });
+        if land != music.land {
+            music.land = land;
+            music.land_secs = 0.0;
+        }
+        music.land_secs += dt;
+
+        if let Some(&(god, stage)) = music.heralds.first() {
+            music.herald_secs += dt;
+            if music.herald_secs > HERALD_SECS {
+                music.heralds.remove(0);
+                music.herald_secs = 0.0;
+            }
+            god_piece = Some(Piece::God(god, stage));
+        } else if let Some(god) = music.land
+            && music.land_secs > SETTLE_SECS
+        {
+            god_piece = Some(Piece::God(god, game.game.stage(god)));
+        }
+    } else {
+        music.stages = None;
+        music.heralds.clear();
+    }
+
+    let playing = music.playing.map(|(p, _)| p);
+    let wanted = god_piece.filter(|p| p.exists()).or_else(|| {
+        // Keep the bed piece that plays until its time is up.
+        match playing {
+            Some(p @ Piece::Night(_)) if night && music.played < BED_SECS => Some(p),
+            Some(p @ Piece::Day(_)) if !night && music.played < BED_SECS => Some(p),
+            _ => {
+                let turn = if night {
+                    &mut music.night
+                } else {
+                    &mut music.day
+                };
+                let piece = Music::bed(night, *turn);
+                *turn = (*turn + 1) % 5;
+                piece
+            }
+        }
+    });
+    if wanted == playing {
+        return;
+    }
+
+    if let Some((_, old)) = music.playing.take()
+        && let Ok(mut voice) = voices.get_mut(old)
+    {
+        voice.target = 0.0;
+    }
+    if wanted.is_none() {
+        debug!("music: silence (night {night})");
+    }
+    music.played = 0.0;
+    if let Some(piece) = wanted {
+        debug!(
+            "music: {} (night {night}, land {:?})",
+            piece.name(),
+            music.land
+        );
+        let player = commands
+            .spawn((
+                AudioPlayer::new(assets.load(piece.path())),
+                PlaybackSettings::LOOP.with_volume(Volume::SILENT),
+                Voice {
+                    gain: 0.0,
+                    target: 1.0,
+                },
+            ))
+            .id();
+        music.playing = Some((piece, player));
+    }
+}
+
+/// Eases each player's volume to its target; a silenced one goes away.
+fn fade(
+    mut commands: Commands,
+    mut voices: Query<(Entity, &mut Voice, Option<&mut AudioSink>)>,
+    time: Res<Time>,
+) {
+    let step = time.delta_secs() / FADE_SECS;
+    for (entity, mut voice, sink) in &mut voices {
+        voice.gain = if voice.gain < voice.target {
+            (voice.gain + step).min(voice.target)
+        } else {
+            (voice.gain - step).max(voice.target)
+        };
+        if let Some(mut sink) = sink {
+            // Equal-power curve: the crossfade does not dip in the middle.
+            let level = (voice.gain * std::f32::consts::FRAC_PI_2).sin();
+            sink.set_volume(Volume::Linear(level * MUSIC_GAIN));
+        }
+        if voice.gain == 0.0 && voice.target == 0.0 {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+fn off(var: &str) -> bool {
+    std::env::var(var).is_ok_and(|v| v == "off")
+}
+
+/// Loudness of effects against everything else, linear.
+const SFX_GAIN: f32 = 0.8;
+/// The same sound again sooner than this is dropped: a batch of events (a
+/// bot's whole action) must not stack one sound into a blare.
+const REPEAT_SECS: f32 = 0.08;
+/// At most this many effects start in one frame.
+const PER_FRAME: usize = 4;
+
+/// A sound effect to play: a name from `assets/sfx/` and a loudness, 1 is
+/// the sound's usual level.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct Sound {
+    pub name: &'static str,
+    pub volume: f32,
+}
+
+impl Sound {
+    pub const fn new(name: &'static str) -> Sound {
+        Sound { name, volume: 1.0 }
+    }
+
+    pub const fn at(self, volume: f32) -> Sound {
+        Sound { volume, ..self }
+    }
+}
+
+/// How loud each sound is against the others: takes are all peak-normalised,
+/// so busy little sounds are turned down and the rare big ones kept up.
+fn level(name: &str) -> f32 {
+    match name {
+        "step" => 0.25,
+        "card-draw" | "card-flip" | "die-die" => 0.45,
+        "die-table" | "dice-shake" | "swing" | "spirit" | "offer" | "guard-march" => 0.55,
+        "card-play" | "chain" | "block" | "hurt" | "heal" | "trap-set" | "hide" | "reveal"
+        | "blink" | "haste" | "corpse" | "window" => 0.65,
+        "dawn" | "dusk" | "turn" => 0.7,
+        _ => 0.8,
+    }
+}
+
+#[derive(Resource)]
+struct Effects {
+    /// Variants of each sound, as found in `assets/sfx/`.
+    bank: Vec<(String, Vec<Handle<AudioSource>>)>,
+    /// When each sound last started, and which variant.
+    last: Vec<(&'static str, f32, usize)>,
+    rng: u64,
+    muted: bool,
+}
+
+impl FromWorld for Effects {
+    fn from_world(world: &mut World) -> Effects {
+        let assets = world.resource::<AssetServer>();
+        let mut files: Vec<String> = std::fs::read_dir(Path::new("assets/sfx"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|f| f.ends_with(".ogg"))
+            .collect();
+        files.sort();
+        let mut bank: Vec<(String, Vec<Handle<AudioSource>>)> = Vec::new();
+        for file in files {
+            // NAME-K.ogg
+            let Some((name, _)) = file.trim_end_matches(".ogg").rsplit_once('-') else {
+                continue;
+            };
+            let handle = assets.load(format!("sfx/{file}"));
+            match bank.iter_mut().find(|(n, _)| n == name) {
+                Some((_, variants)) => variants.push(handle),
+                None => bank.push((name.to_string(), vec![handle])),
+            }
+        }
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(1, |d| d.as_nanos() as u64);
+        Effects {
+            bank,
+            last: Vec::new(),
+            rng: seed | 1,
+            muted: off("NECROMY_SFX"),
+        }
+    }
+}
+
+impl Effects {
+    /// xorshift: effects only need to vary, not to agree between clients.
+    fn roll(&mut self, n: usize) -> usize {
+        self.rng ^= self.rng << 13;
+        self.rng ^= self.rng >> 7;
+        self.rng ^= self.rng << 17;
+        (self.rng % n.max(1) as u64) as usize
+    }
+}
+
+fn play_sounds(
+    mut commands: Commands,
+    mut sounds: MessageReader<Sound>,
+    mut effects: ResMut<Effects>,
+    time: Res<Time>,
+) {
+    let now = time.elapsed_secs();
+    let mut started = 0;
+    for sound in sounds.read() {
+        if effects.muted || started == PER_FRAME {
+            continue;
+        }
+        let Some(variants) = effects
+            .bank
+            .iter()
+            .find(|(n, _)| n == sound.name)
+            .map(|(_, v)| v.clone())
+        else {
+            warn_once!("no sound effect named {}", sound.name);
+            continue;
+        };
+        let last = effects.last.iter().position(|l| l.0 == sound.name);
+        if let Some(i) = last
+            && now - effects.last[i].1 < REPEAT_SECS
+        {
+            continue;
+        }
+        // A different variant from last time, when there is a choice.
+        let mut pick = effects.roll(variants.len());
+        if let Some(i) = last
+            && variants.len() > 1
+            && pick == effects.last[i].2
+        {
+            pick = (pick + 1) % variants.len();
+        }
+        match last {
+            Some(i) => effects.last[i] = (sound.name, now, pick),
+            None => effects.last.push((sound.name, now, pick)),
+        }
+        debug!("sfx: {} #{pick} at {:.2}", sound.name, sound.volume);
+        let speed = 0.94 + effects.roll(13) as f32 * 0.01;
+        commands.spawn((
+            AudioPlayer::new(variants[pick].clone()),
+            PlaybackSettings::DESPAWN
+                .with_volume(Volume::Linear(
+                    sound.volume.clamp(0.0, 1.5) * level(sound.name) * SFX_GAIN,
+                ))
+                .with_speed(speed),
+        ));
+        started += 1;
+    }
+}
+
+/// Sounds what the rules report. Battles are left to the fight on the
+/// battle panel, which deals their blows and deaths in its own time.
+fn hear_events(
+    mut game: ResMut<Match>,
+    mut sounds: MessageWriter<Sound>,
+    mut stages: Local<Option<[u8; 5]>>,
+) {
+    let stages = stages.get_or_insert_with(|| God::ALL.map(|g| game.game.stage(g)));
+    if game.heard.is_empty() {
+        return;
+    }
+    let human = game.human;
+    // Harm and deaths after a battle resolves still come in its batch.
+    let mut in_battle = game.battle.is_some();
+    let heard = std::mem::take(&mut game.bypass_change_detection().heard);
+    // The human's own doings are heard fully, the rivals' a little softer.
+    let near = |p: necromy_rules::PlayerId| if p == human { 1.0 } else { 0.6 };
+    for event in &heard {
+        let sound = match event {
+            Event::Dawn { .. } => Sound::new("dawn"),
+            Event::Dusk { .. } => Sound::new("dusk"),
+            Event::TurnStarted { player, .. } if *player == human => Sound::new("turn"),
+            Event::CardDrawn { player, .. } => Sound::new("card-draw").at(near(*player)),
+            Event::CardPlayed { player, .. } => Sound::new("card-play").at(near(*player)),
+            Event::Chain { .. } => Sound::new("chain"),
+            Event::WindowOpened { eligible, .. } if eligible.contains(&human) => {
+                Sound::new("window")
+            }
+            Event::Canceled { .. } | Event::Fizzled { .. } => Sound::new("fizzle"),
+            Event::Damaged { player, .. } if !in_battle => Sound::new("hurt").at(near(*player)),
+            Event::ChampionFell { .. } if !in_battle => Sound::new("fall"),
+            Event::Healed { player, .. } => Sound::new("heal").at(near(*player)),
+            Event::WardRaised { player, .. } => Sound::new("ward-raise").at(near(*player)),
+            Event::WardBroken { .. } => Sound::new("ward-break"),
+            Event::Rooted { .. } => Sound::new("root"),
+            Event::Hasted { player, .. } => Sound::new("haste").at(near(*player)),
+            Event::Blinked { player, .. } => Sound::new("blink").at(near(*player)),
+            Event::TrapSet { .. } => Sound::new("trap-set"),
+            Event::TrapSprung { .. } => Sound::new("trap-sprung"),
+            Event::Hid { player, .. } => Sound::new("hide").at(near(*player)),
+            Event::Revealed { .. } => Sound::new("reveal"),
+            Event::CorpseAppeared { .. } => Sound::new("corpse").at(0.7),
+            Event::CorpseTaken { .. } => Sound::new("corpse-taken"),
+            Event::GroveGrew { .. } => Sound::new("grove"),
+            Event::TerrainChanged { .. } => Sound::new("terrain"),
+            // Nearly every card is an offering too: only the human's own are heard.
+            Event::Offered {
+                player: Some(player),
+                ..
+            } if *player == human => Sound::new("offer"),
+            Event::StageChanged { god, stage } => {
+                // A higher stage is a darker one.
+                let before = std::mem::replace(&mut stages[god.index()], *stage);
+                Sound::new(if *stage > before {
+                    "stage-dark"
+                } else {
+                    "stage-light"
+                })
+            }
+            Event::WishGranted { .. } => Sound::new("wish-granted"),
+            Event::WishRefused { .. } => Sound::new("wish-refused"),
+            Event::CurseLaid { .. } => Sound::new("curse-laid"),
+            Event::CurseBit { player, .. } => Sound::new("curse-bit").at(near(*player)),
+            Event::Crowned { .. } => Sound::new("crown"),
+            Event::GuardSpawned { .. } => Sound::new("guard-horn"),
+            Event::BattleStarted { .. } | Event::GuardStruck { .. } => {
+                in_battle = true;
+                Sound::new("battle-start")
+            }
+            Event::Burned { .. } => Sound::new("card-burn"),
+            Event::Victory { player, .. } => Sound::new(if *player == human {
+                "victory"
+            } else {
+                "defeat"
+            }),
+            _ => continue,
+        };
+        sounds.write(sound);
+    }
+}
+
+// Procedural blips: clicks, keys and the gods' voices, drawn sample by
+// sample on the spot. Each is a few dozen milliseconds, so it is rendered
+// whole into a buffer and played like any other source.
+
+const SYNTH_RATE: u32 = 44_100;
+/// Loudness of blips against everything else, linear.
+const BLIP_GAIN: f32 = 0.35;
+/// Letters a god speaks per second when its words are typed out.
+const LETTERS_PER_SEC: f32 = 32.0;
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Wave {
+    Sine,
+    Triangle,
+    /// A pulse with this share of the period up.
+    Pulse(f32),
+    Noise,
+}
+
+/// One blip: a wave at a pitch that slides, under a short envelope.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct Tone {
+    pub wave: Wave,
+    pub hz: f32,
+    /// Pitch at the end against the start: 0.5 falls an octave.
+    pub slide: f32,
+    pub secs: f32,
+    pub volume: f32,
+    /// A second partial an octave and a fifth up, for a bell-like ring.
+    pub ring: f32,
+}
+
+impl Tone {
+    const fn new(wave: Wave, hz: f32, secs: f32) -> Tone {
+        Tone {
+            wave,
+            hz,
+            slide: 1.0,
+            secs,
+            volume: 1.0,
+            ring: 0.0,
+        }
+    }
+
+    /// A button pressed.
+    pub const fn click() -> Tone {
+        Tone {
+            slide: 0.6,
+            volume: 0.8,
+            ..Tone::new(Wave::Pulse(0.5), 900.0, 0.035)
+        }
+    }
+
+    /// The pointer comes onto a button.
+    pub const fn hover() -> Tone {
+        Tone {
+            volume: 0.25,
+            ..Tone::new(Wave::Sine, 1500.0, 0.018)
+        }
+    }
+
+    /// A key typed into a field; a deletion a little lower.
+    pub const fn key(delete: bool) -> Tone {
+        Tone {
+            volume: 0.45,
+            ..Tone::new(Wave::Noise, if delete { 2200.0 } else { 3400.0 }, 0.014)
+        }
+    }
+
+    /// One letter in a god's voice. Its element sets the timbre and the
+    /// register; the letter itself nudges the pitch, so a word sounds the
+    /// same every time it is said.
+    pub fn voice(god: God, letter: char) -> Tone {
+        let base = match god {
+            // Wood: a hollow knock, middle voice.
+            God::Bhava => Tone::new(Wave::Triangle, 330.0, 0.05),
+            // Fire: a bright buzz, quick and high.
+            God::Trishna => Tone {
+                volume: 0.6,
+                ..Tone::new(Wave::Pulse(0.5), 520.0, 0.04)
+            },
+            // Earth: low and slow.
+            God::Zaga => Tone {
+                slide: 0.9,
+                ..Tone::new(Wave::Triangle, 170.0, 0.07)
+            },
+            // Metal: a thin pulse that rings.
+            God::Ahamar => Tone {
+                volume: 0.5,
+                ring: 0.35,
+                ..Tone::new(Wave::Pulse(0.25), 400.0, 0.05)
+            },
+            // Water: a pure tone that falls away.
+            God::Maya => Tone {
+                slide: 0.8,
+                ..Tone::new(Wave::Sine, 460.0, 0.06)
+            },
+        };
+        let step = (letter.to_lowercase().next().unwrap_or(letter) as u32 % 7) as f32 - 3.0;
+        Tone {
+            hz: base.hz * 2f32.powf(step * 2.0 / 12.0),
+            ..base
+        }
+    }
+
+    fn render(self, seed: u32) -> Vec<f32> {
+        let n = (self.secs * SYNTH_RATE as f32) as usize;
+        let attack = (0.003 * SYNTH_RATE as f32) as usize;
+        let mut phase = 0.0f32;
+        let mut noise = seed | 1;
+        let mut held = 0.0f32;
+        (0..n)
+            .map(|i| {
+                let x = i as f32 / n as f32;
+                let hz = self.hz * self.slide.powf(x);
+                let before = phase;
+                phase = (phase + hz / SYNTH_RATE as f32).fract();
+                let v = match self.wave {
+                    Wave::Sine => (phase * std::f32::consts::TAU).sin(),
+                    Wave::Triangle => 1.0 - 4.0 * (phase - 0.5).abs(),
+                    Wave::Pulse(duty) => {
+                        if phase < duty {
+                            0.7
+                        } else {
+                            -0.7
+                        }
+                    }
+                    // Noise held for one period of the pitch: higher is hissier.
+                    Wave::Noise => {
+                        if phase < before {
+                            noise ^= noise << 13;
+                            noise ^= noise >> 17;
+                            noise ^= noise << 5;
+                            held = noise as f32 / u32::MAX as f32 * 2.0 - 1.0;
+                        }
+                        held
+                    }
+                };
+                let ring = self.ring * (phase * 3.0 * std::f32::consts::TAU).sin();
+                // A quick rise, then a fall that ends at silence: no clicks.
+                let env = (i as f32 / attack.max(1) as f32).min(1.0) * (1.0 - x).powi(2);
+                (v + ring) * env * self.volume
+            })
+            .collect()
+    }
+}
+
+/// A rendered blip, played as an audio source.
+#[derive(Asset, TypePath, Clone)]
+pub struct Blip(std::sync::Arc<[f32]>);
+
+pub struct BlipSamples {
+    samples: std::sync::Arc<[f32]>,
+    at: usize,
+}
+
+impl Iterator for BlipSamples {
+    type Item = bevy::audio::Sample;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let s = self.samples.get(self.at).copied();
+        self.at += 1;
+        s
+    }
+}
+
+impl bevy::audio::Source for BlipSamples {
+    fn current_span_len(&self) -> Option<usize> {
+        Some(self.samples.len() - self.at.min(self.samples.len()))
+    }
+
+    fn channels(&self) -> bevy::audio::ChannelCount {
+        bevy::audio::ChannelCount::MIN
+    }
+
+    fn sample_rate(&self) -> bevy::audio::SampleRate {
+        bevy::audio::SampleRate::new(SYNTH_RATE).expect("non-zero rate")
+    }
+
+    fn total_duration(&self) -> Option<std::time::Duration> {
+        Some(std::time::Duration::from_secs_f32(
+            self.samples.len() as f32 / SYNTH_RATE as f32,
+        ))
+    }
+}
+
+impl bevy::audio::Decodable for Blip {
+    type Decoder = BlipSamples;
+
+    fn decoder(&self) -> BlipSamples {
+        BlipSamples {
+            samples: self.0.clone(),
+            at: 0,
+        }
+    }
+}
+
+fn play_tones(
+    mut commands: Commands,
+    mut tones: MessageReader<Tone>,
+    mut blips: ResMut<Assets<Blip>>,
+    mut effects: ResMut<Effects>,
+) {
+    for tone in tones.read() {
+        if effects.muted {
+            continue;
+        }
+        let seed = effects.roll(u32::MAX as usize) as u32;
+        let blip = blips.add(Blip(tone.render(seed).into()));
+        commands.spawn((
+            AudioPlayer(blip),
+            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(BLIP_GAIN)),
+        ));
+    }
+}
+
+/// Buttons click when pressed and tick when the pointer comes onto them;
+/// a hand card whispers as it rises.
+#[allow(clippy::type_complexity)]
+fn ui_sounds(
+    buttons: Query<
+        (
+            &Interaction,
+            Option<&crate::ui_skin::Frame>,
+            Has<crate::hud::HandCard>,
+        ),
+        (Changed<Interaction>, With<Button>),
+    >,
+    mut tones: MessageWriter<Tone>,
+    mut sounds: MessageWriter<Sound>,
+) {
+    for (interaction, frame, card) in &buttons {
+        match interaction {
+            Interaction::Pressed => {
+                tones.write(Tone::click());
+            }
+            Interaction::Hovered if card => {
+                sounds.write(Sound::new("card-draw").at(0.4));
+            }
+            Interaction::Hovered if frame == Some(&crate::ui_skin::Frame::Button) => {
+                tones.write(Tone::hover());
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Words a god says, typed out letter by letter in its voice. The first
+/// `from` characters (who speaks) show at once. Panels that rebuild often
+/// keep the same `key` for the same words, and the typing carries on.
+#[derive(Component)]
+pub struct Speech {
+    pub key: u64,
+    pub god: God,
+    pub text: String,
+    pub from: usize,
+}
+
+/// The words being typed out now: their key, when they began, letters voiced.
+#[derive(Resource, Default)]
+struct Speaking {
+    key: Option<u64>,
+    since: f32,
+    voiced: usize,
+}
+
+fn speak(
+    time: Res<Time>,
+    mut speaking: ResMut<Speaking>,
+    mut texts: Query<(&Speech, &mut Text)>,
+    mut tones: MessageWriter<Tone>,
+) {
+    let now = time.elapsed_secs();
+    for (speech, mut text) in &mut texts {
+        if speaking.key != Some(speech.key) {
+            *speaking = Speaking {
+                key: Some(speech.key),
+                since: now,
+                voiced: 0,
+            };
+        }
+        let typed = ((now - speaking.since) * LETTERS_PER_SEC) as usize;
+        let shown: String = speech.text.chars().take(speech.from + typed).collect();
+        if text.0 != shown {
+            text.0 = shown;
+        }
+        // Every other letter voiced: each one is a babble.
+        let letters: Vec<char> = speech.text.chars().skip(speech.from).take(typed).collect();
+        while speaking.voiced < letters.len() {
+            let letter = letters[speaking.voiced];
+            if letter.is_alphabetic() && speaking.voiced.is_multiple_of(2) {
+                tones.write(Tone::voice(speech.god, letter));
+            }
+            speaking.voiced += 1;
+        }
+    }
+}

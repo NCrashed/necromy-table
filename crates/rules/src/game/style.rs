@@ -252,8 +252,15 @@ impl Game {
     /// Dawn: land pays Style, then the Crown goes to the leader (§6.1).
     pub(super) fn dawn(&mut self, events: &mut Vec<Event>) {
         self.stealth_at_dawn(events);
+        // Ahamar's Crack: land far from its owner pays nothing (§5.3).
+        let crack = self.law_active(super::Law::Crack);
         let income: Vec<(PlayerId, u8)> = self
             .claims()
+            .filter(|&(hex, p)| {
+                !crack
+                    || self.chosen(p, crate::gods::God::Ahamar)
+                    || self.hex_of(p).unsigned_distance_to(hex) <= super::CRACK_REACH
+            })
             .filter_map(|(hex, p)| {
                 let w = match self.board.tile(hex)?.terrain {
                     Terrain::Settlement => self.taste.settlement,
@@ -266,6 +273,21 @@ impl Game {
             .collect();
         for (p, w) in income {
             self.add_style(p, i16::from(w), StyleReason::Territory, events);
+        }
+        // Ahamar's Mask: whoever holds any land looks respectable.
+        if self.law_active(super::Law::Mask) {
+            let holders: Vec<PlayerId> = self
+                .players()
+                .filter(|&p| self.claims().any(|(_, o)| o == p))
+                .collect();
+            for p in holders {
+                events.push(Event::Law {
+                    law: super::Law::Mask,
+                    player: Some(p),
+                    hex: None,
+                });
+                self.add_style(p, 1, StyleReason::Territory, events);
+            }
         }
 
         let best = self.players().map(|p| self.style(p)).max().unwrap_or(0);

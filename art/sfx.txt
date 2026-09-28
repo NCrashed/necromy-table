@@ -1,0 +1,58 @@
+# Sound effects for scripts/sfx-set.sh: NAME <tab> SECONDS <tab> VARIANTS <tab> prompt.
+# art/sfx-style.txt is appended to every prompt. The game picks a variant at
+# random each time (assets/sfx/NAME-K.ogg).
+# Dice (dice.rs replays impacts with their strength)
+die-table	0.6	4	A single carved bone die hits a felt-covered wooden table once, sharp clack
+die-die	0.5	3	Two bone dice knock against each other once, small dry click
+dice-shake	1.2	3	A handful of bone dice rattled in a cupped hand, then released
+# Movement and cards
+step	0.5	4	One footstep of a heavy boot on packed earth and grass
+card-draw	0.6	3	A playing card slides off the top of a deck, quick paper swish
+card-flip	0.5	3	A stiff playing card flipped over on a table, crisp snap
+card-play	1.0	3	A magic card slapped down on the table, a paper slap followed by a bright arcane whoosh
+card-burn	1.5	2	A paper card catches fire and burns away in a quick magical flare
+chain	1.0	3	A rising magical chime, a link added to a chain of spells, glassy and bright
+fizzle	1.0	2	A spell fizzles out, sputtering sparks and a deflating hiss
+# Battle
+battle-start	1.5	2	Short war horn blast and a clash of steel, a fight begins
+swing	0.5	4	A heavy weapon swung fast through the air, whoosh
+hit	0.5	4	A heavy weapon strikes a body in armour, meaty thud with a metal clank
+block	0.5	3	A blow stopped by a raised shield, solid wooden and iron thunk
+fall	1.5	2	An armoured warrior collapses to the ground, metal and body falling, dust settles
+hurt	0.5	3	A sharp magical hit lands on someone, a stinging crack
+heal	1.2	2	Warm healing magic, a soft rising shimmer of bells
+spirit	0.8	2	A small glowing spirit crystal gained, sparkling chime
+# Wards, traps, stealth, movement magic
+ward-raise	1.0	2	A magical shield flickers up around a warrior, humming shimmer
+ward-break	1.0	2	A magical shield shatters like enchanted glass
+trap-set	0.8	2	A hidden snare trap is primed, mechanical click and creak of rope
+trap-sprung	0.8	2	A snare trap snaps shut, sharp wooden and iron snap
+hide	1.0	2	A figure vanishes into a puff of smoke, soft poof and a whisper of wind
+reveal	0.8	2	Smoke parts and a hidden figure is revealed, quick whoosh
+blink	0.8	2	A magical teleport, a sharp pop and a shimmering zip
+root	1.0	2	Thick roots burst from the ground and bind someone's feet, creaking wood
+haste	0.8	2	A burst of wind speed magic, rushing gust
+# Corpses and the land
+corpse	0.8	2	A body drops onto the ground, dull heavy thud
+grove	2.0	2	A grove of trees sprouts from the earth in seconds, creaking wood and rustling leaves
+corpse-taken	1.2	2	Dark magic draws life from a corpse, a hollow ghostly inhale
+terrain	1.5	2	The ground shifts and changes its shape, rumbling earth and cracking stone
+# Gods and the world
+dawn	2.0	2	Morning comes, a single clear bell and birds waking
+dusk	2.0	2	Evening falls, a deep soft gong fading out
+offer	1.2	2	An offering placed on a temple altar, a small bell and a candle flame
+stage-dark	2.5	2	A god grows darker and hungrier, an ominous low rumble swelling up
+stage-light	2.5	2	A god grows calmer and lighter, a warm radiant swell of chimes
+wish-granted	2.0	2	A god grants a wish, a radiant magical swell with sparkling bells
+wish-refused	2.0	2	A god refuses a wish, a distant thunderclap and falling rumble
+curse-laid	1.5	2	A curse is laid, a dark whispering hiss and a low bell
+curse-bit	0.8	2	A curse strikes, a sharp dark crackle
+crown	2.0	2	A royal crown is placed, a regal golden shimmer and a brass accent
+# Royal guard
+guard-horn	2.0	2	A royal patrol horn in the distance, two short notes
+guard-march	1.0	3	A squad of armoured guards marching, synchronized heavy steps and chainmail
+# Turns and the end
+turn	1.0	2	Short bright notification, your turn: a resonant bell strike
+window	0.8	2	A tense moment to respond, a quick rising tick and a held breath of air
+victory	4.0	2	Short triumphant brass fanfare with drums, victory
+defeat	4.0	2	Short sombre low brass phrase with a muffled drum, defeat

@@ -33,8 +33,10 @@ impl Plugin for VictoryUiPlugin {
     }
 }
 
+/// Where the conditions panel goes: under the gods, in the right column
+/// (`stats.rs` spawns it there).
 #[derive(Component)]
-struct Conditions;
+pub struct Conditions;
 
 /// One condition line, for its hover explanation.
 #[derive(Component)]
@@ -57,15 +59,6 @@ enum EndButton {
 }
 
 fn spawn(mut commands: Commands, font: Res<UiFont>) {
-    commands.spawn((
-        Conditions,
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(205.0),
-            right: px(10.0),
-            ..default()
-        },
-    ));
     commands.spawn((
         ConditionTip,
         Text::new(""),
@@ -158,7 +151,7 @@ fn condition_row(
     secret: bool,
 ) -> Entity {
     let g = &m.game;
-    let checks = g.checks(m.human, condition);
+    let checks = g.checks_as(m.human, condition, secret);
     let done = checks.iter().filter(|c| c.met()).count();
     let row = commands
         .spawn((
@@ -207,6 +200,7 @@ fn condition_row(
 }
 
 fn condition_tip(
+    game: Res<Match>,
     rows: Query<(&Interaction, &ConditionRow)>,
     tip: Single<(&mut Text, &mut Visibility), With<ConditionTip>>,
 ) {
@@ -220,7 +214,17 @@ fn condition_tip(
         return;
     };
     let (name, explain) = names::condition(condition);
-    let wanted = format!("{name}: {explain}");
+    let secret = game.game.secret(game.human) == Some(condition)
+        && !game.game.open_conditions().contains(&condition);
+    let wanted = if secret {
+        format!(
+            "{name}: {explain}\nТайное условие — запасной путь: соперники его не видят, \
+             но оно выигрывает не раньше {}-го раунда.",
+            necromy_rules::SECRET_FROM_ROUND
+        )
+    } else {
+        format!("{name}: {explain}")
+    };
     if text.0 != wanted {
         text.0 = wanted;
     }
@@ -289,23 +293,31 @@ fn rebuild_end(
         ))
         .id();
     let (name, explain) = names::condition(condition);
-    let secret = game.game.secret(winner) == Some(condition)
-        && !game.game.open_conditions().contains(&condition);
-    let who = stats::label(
-        &mut commands,
-        &font,
-        &format!(
-            "{} — {name}{}",
-            game.name(winner),
-            if secret {
-                " (тайное условие)"
-            } else {
-                ""
-            }
-        ),
-        17.0,
-        true,
-    );
+    // A rival's secret is hidden in our view; whatever won and is not
+    // open was theirs.
+    let secret = !game.game.open_conditions().contains(&condition);
+    // Who, then how, each on its own line and wrapping inside the plate:
+    // "Тришна (ты)" and "Пари Ахамара (тайное условие)" do not fit one.
+    let who = commands
+        .spawn((
+            Text::new(format!(
+                "{}\n{name}{}",
+                game.name(winner),
+                if secret {
+                    " (тайное условие)"
+                } else {
+                    ""
+                }
+            )),
+            font.bold(17.0),
+            TextColor(INK),
+            TextLayout::justify(Justify::Center),
+            Node {
+                max_width: px(400.0),
+                ..default()
+            },
+        ))
+        .id();
     let why = commands
         .spawn((
             Text::new(explain),

@@ -15,6 +15,7 @@ use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 use necromy_rules::{God, Intent, PlayerId, WishKind};
 
+use crate::audio::{Speech, Tone};
 use crate::hud::{INK, UiFont};
 use crate::names;
 use crate::play::Match;
@@ -413,7 +414,7 @@ fn rebuild_panel(
         &mut commands,
         &font,
         WishButton::Refuse,
-        "Отказаться от желания",
+        "Отказаться от желания (+2 Угрозы)",
         false,
     );
     commands.entity(actions).add_child(refuse);
@@ -434,7 +435,7 @@ fn rebuild_panel(
         let note = stats::label(
             &mut commands,
             &font,
-            "Твоё тайное — Пари Ахамара: отказ засчитывается.",
+            "Твоё тайное — Пари Ахамара: отказ идёт в счёт; желание или смерть его обнуляют.",
             12.0,
             false,
         );
@@ -476,6 +477,7 @@ fn type_wish(
     mut keys: MessageReader<KeyboardInput>,
     mut draft: ResMut<WishDraft>,
     mut game: ResMut<Match>,
+    mut tones: MessageWriter<Tone>,
 ) {
     if !writing(&game, &draft) {
         keys.clear();
@@ -487,7 +489,9 @@ fn type_wish(
         }
         match &key.logical_key {
             Key::Backspace => {
-                draft.text.pop();
+                if draft.text.pop().is_some() {
+                    tones.write(Tone::key(true));
+                }
             }
             Key::Enter => {
                 if let Some(god) = draft.god
@@ -503,6 +507,7 @@ fn type_wish(
                     && draft.text.chars().count() < MAX_WISH
                 {
                     draft.text.push_str(text);
+                    tones.write(Tone::key(false));
                 }
             }
         }
@@ -664,12 +669,16 @@ fn rebuild_reply(
                 .filter(|s| !s.is_empty())
                 .or_else(|| game.oracle.wish_voices.get(&reply.serial).cloned())
                 .unwrap_or_else(|| names::god_speech(god, grade).to_string());
-            rows.push(block(
-                &mut commands,
-                format!("{}: «{speech}»", names::god(god)),
-                13.0,
-                VOICE,
-            ));
+            // Typed out in the god's voice.
+            let head = format!("{}: «", names::god(god));
+            let spoken = block(&mut commands, head.clone(), 13.0, VOICE);
+            commands.entity(spoken).insert(Speech {
+                key: u64::from(reply.serial),
+                god,
+                from: head.chars().count(),
+                text: format!("{head}{speech}»"),
+            });
+            rows.push(spoken);
             if let Some(said) = &reply.said
                 && !said.reason.is_empty()
             {

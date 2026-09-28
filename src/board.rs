@@ -150,6 +150,8 @@ struct MarkerSprites {
     flags: [Handle<Image>; 5],
     /// Where a hidden rival was last seen, one per god (§11.6).
     trails: [Handle<Image>; 5],
+    /// Over the goal of the human's quest (§8).
+    quest: Handle<Image>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -299,6 +301,7 @@ fn spawn_board(
         trap: images.add(pixel_sprite(&TRAP_ROWS, [0; 3])),
         flags: God::ALL.map(|g| images.add(pixel_sprite(&FLAG_ROWS, g.accent()))),
         trails: God::ALL.map(|g| images.add(pixel_sprite(&TRAIL_ROWS, g.accent()))),
+        quest: images.add(pixel_sprite(&QUEST_ROWS, [250, 214, 120])),
     });
 }
 
@@ -487,8 +490,31 @@ fn sync_markers(
     let corpses = corpses.map(|(h, i, ppm)| (h, i, Vec3::ZERO, ppm, true));
     let traps = traps.map(|(h, i, ppm)| (h, i, Vec3::ZERO, ppm, true));
     let flags = flags.map(|(h, i, o, ppm)| (h, i, o, ppm, false));
+    // The goal of a quest the human carries: a golden mark over the hex.
+    let quest_marks: Vec<_> = game
+        .game
+        .lines_of(game.human)
+        .filter_map(|l| match l.goal {
+            necromy_rules::Goal::ReachHex(h) => Some(h),
+            _ => None,
+        })
+        .map(|h| {
+            (
+                h,
+                sprites.quest.clone(),
+                Vec3::new(0.3, 0.9, -0.1),
+                TEXELS,
+                false,
+            )
+        })
+        .collect();
     let trails = trails.map(|(h, i, o, ppm)| (h, i, o, ppm, false));
-    let wanted: Vec<_> = corpses.chain(traps).chain(flags).chain(trails).collect();
+    let wanted: Vec<_> = corpses
+        .chain(traps)
+        .chain(flags)
+        .chain(trails)
+        .chain(quest_marks)
+        .collect();
     // Despawning and respawning everything would blink every marker for a
     // frame (this runs on each hover): keep what is still wanted.
     let mut kept = Vec::new();
@@ -643,6 +669,32 @@ const CORPSE_ROWS: [&str; 5] = [
 
 /// Iron teeth of a hidden trap; drawn only for its owner.
 const TRAP_ROWS: [&str; 4] = [".r...r...r.", "#r#.#r#.#r#", "#xxxxxxxxx#", ".#########."];
+
+/// A golden exclamation mark: the goal of a quest.
+const QUEST_ROWS: [&str; 22] = [
+    "..#####..",
+    ".#FFFFF#.",
+    "#FFfffFF#",
+    "#Ffffffd#",
+    "#fffffdd#",
+    ".#fffdd#.",
+    ".#fffdd#.",
+    ".#fffdd#.",
+    "..#fdd#..",
+    "..#fdd#..",
+    "..#fdd#..",
+    "...#d#...",
+    "...#d#...",
+    "....#....",
+    ".........",
+    ".........",
+    "..#####..",
+    ".#FFFFd#.",
+    ".#Fffdd#.",
+    ".#fffdd#.",
+    "..#ddd#..",
+    "...###...",
+];
 
 /// A question mark in the hidden rival's colour: last seen here.
 const TRAIL_ROWS: [&str; 14] = [

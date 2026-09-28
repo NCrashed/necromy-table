@@ -364,6 +364,8 @@ pub struct CardLook {
     /// A chip at the foot of the illustration, in sight while the card is
     /// tucked in hand: what the ring does to it now (chain, answer).
     pub badge: Option<(String, Color)>,
+    /// The Spirit this player pays, when a god's Sign takes some off.
+    pub cost: Option<u8>,
 }
 
 fn at(left: f32, top: f32, width: f32, height: f32) -> Node {
@@ -477,7 +479,9 @@ pub fn card_node(
         children.push(row);
     }
 
-    // Spirit cost in a gem, top left.
+    // Spirit cost in a gem, top left; green when a god's Sign lowers it.
+    let cost = look.cost.unwrap_or(def.cost);
+    let cheaper = cost < def.cost;
     if def.cost > 0 {
         let gem = commands
             .spawn((
@@ -491,9 +495,13 @@ pub fn card_node(
             .id();
         let n = commands
             .spawn((
-                Text::new(def.cost.to_string()),
+                Text::new(cost.to_string()),
                 font.bold(18.0),
-                TextColor(Color::WHITE.with_alpha(text_alpha)),
+                TextColor(if cheaper {
+                    Color::srgb(0.55, 1.0, 0.55)
+                } else {
+                    Color::WHITE.with_alpha(text_alpha)
+                }),
                 TextShadow::default(),
             ))
             .id();

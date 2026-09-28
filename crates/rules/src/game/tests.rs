@@ -1,4 +1,5 @@
 use super::*;
+use crate::board::GROVE_AGE;
 use crate::cards::POOL;
 use necromy_dice::Face;
 
@@ -1758,10 +1759,11 @@ fn every_god_twists_the_wish() {
 fn the_wager_is_won_by_refusing_the_crowned_wish() {
     let (mut g, me, _) = duel(3);
     g.open = vec![];
-    g.secrets = vec![Some(Condition::Wager { dawns: 2 }); 5];
+    g.secrets = vec![Some(Condition::Wager { refusals: 2 }); 5];
+    g.round = crate::game::SECRET_FROM_ROUND;
     crown(&mut g, me);
     g.apply(me, Intent::RefuseWish).unwrap();
-    assert_eq!(g.winner(), None, "one dawn is not the bet");
+    assert_eq!(g.winner(), None, "one refusal is not the bet");
     let mut ev = Vec::new();
     g.dawn(&mut ev);
     let events = g.apply(me, Intent::RefuseWish).unwrap();
@@ -1770,6 +1772,61 @@ fn the_wager_is_won_by_refusing_the_crowned_wish() {
             .iter()
             .any(|e| matches!(e, Event::Victory { player, .. } if *player == me))
     );
+}
+
+#[test]
+fn a_wish_made_starts_the_wager_over() {
+    let (mut g, me, _) = duel(3);
+    g.open = vec![];
+    g.secrets = vec![Some(Condition::Wager { refusals: 2 }); 5];
+    g.round = crate::game::SECRET_FROM_ROUND;
+    crown(&mut g, me);
+    g.apply(me, Intent::RefuseWish).unwrap();
+    let mut ev = Vec::new();
+    g.dawn(&mut ev);
+    let intent = crate::bot::choose(&g, me);
+    assert_eq!(
+        intent,
+        Intent::RefuseWish,
+        "a bot holding the Wager refuses"
+    );
+    g.secrets = vec![None; 5];
+    let intent = crate::bot::choose(&g, me);
+    g.apply(me, intent).unwrap();
+    assert_eq!(g.progress[me.0 as usize].refusals, 0);
+    g.secrets = vec![Some(Condition::Wager { refusals: 2 }); 5];
+    g.dawn(&mut ev);
+    g.apply(me, Intent::RefuseWish).unwrap();
+    assert_eq!(g.winner(), None, "the wish in between broke the streak");
+}
+
+#[test]
+fn a_refusal_is_loud_and_a_fall_breaks_the_wager() {
+    let (mut g, me, _) = duel(3);
+    crown(&mut g, me);
+    let before = g.threat(me);
+    g.apply(me, Intent::RefuseWish).unwrap();
+    assert_eq!(g.threat(me), before + crate::game::REFUSAL_THREAT as u8);
+    assert_eq!(g.progress[me.0 as usize].refusals, 1);
+    let mut ev = Vec::new();
+    g.fall(me, &mut ev);
+    assert_eq!(g.progress[me.0 as usize].refusals, 0);
+}
+
+#[test]
+fn a_secret_is_a_fallback_that_waits_for_its_round() {
+    let (mut g, me, foe) = duel(3);
+    g.open = vec![];
+    g.secrets = vec![Some(Condition::Overthrow { wins: 1 }); 5];
+    g.dominant = Some(foe);
+    let mut ev = Vec::new();
+    g.battle_style(me, foe, &mut ev);
+    g.round = crate::game::SECRET_FROM_ROUND - 1;
+    g.check_victory(&mut ev);
+    assert_eq!(g.winner(), None, "too early for a secret");
+    g.round = crate::game::SECRET_FROM_ROUND;
+    g.check_victory(&mut ev);
+    assert_eq!(g.winner(), Some((me, Condition::Overthrow { wins: 1 })));
 }
 
 #[test]
@@ -1966,6 +2023,8 @@ fn night_in_the_woods_hides_and_dawn_in_the_open_reveals() {
 fn no_cover_by_day_or_next_to_a_rival() {
     let (mut g, me, _) = in_the_woods();
     g.time = TimeOfDay::Day;
+    // Not under Bhava's Thicket, which keeps the woods dark by day.
+    g.pantheon.stages[God::Bhava.index()] = 0;
     g.apply(me, Intent::EndTurn).unwrap();
     assert!(!g.is_hidden(me));
 
@@ -2126,4 +2185,102 @@ fn a_hidden_rival_holds_nobody_up() {
     let events = g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
     assert!(!events.iter().any(|e| matches!(e, Event::Held { .. })));
     assert_eq!(g.champion(me).unwrap().hex, Hex::new(1, 0));
+}
+
+// ---- Laws of the world and patronage (§5.3, §5.4) ----
+
+#[test]
+fn thicket_hides_in_the_woods_by_day() {
+    let (mut g, me, _) = in_the_woods();
+    g.time = TimeOfDay::Day;
+    g.pantheon.stages[God::Bhava.index()] = 1;
+    g.apply(me, Intent::EndTurn).unwrap();
+    assert!(g.is_hidden(me));
+}
+
+#[test]
+fn exposure_forbids_hiding_by_day_except_to_ahamars_chosen() {
+    let (mut g, me, _) = in_the_woods();
+    g.time = TimeOfDay::Day;
+    g.pantheon.stages[God::Bhava.index()] = 1;
+    g.pantheon.stages[God::Ahamar.index()] = 2;
+    g.apply(me, Intent::EndTurn).unwrap();
+    assert!(!g.is_hidden(me));
+
+    let (mut g, me, _) = in_the_woods();
+    g.time = TimeOfDay::Day;
+    g.pantheon.stages[God::Bhava.index()] = 1;
+    g.pantheon.stages[God::Ahamar.index()] = 2;
+    g.favor[me.0 as usize][God::Ahamar.index()] = CHOSEN;
+    g.apply(me, Intent::EndTurn).unwrap();
+    assert!(g.is_hidden(me));
+}
+
+#[test]
+fn stillness_quiets_everyone_at_dusk() {
+    let (mut g, me, foe) = duel(3);
+    g.pantheon.stages[God::Zaga.index()] = 0;
+    let mut ev = Vec::new();
+    g.add_threat(me, 2, &mut ev);
+    g.add_threat(foe, 1, &mut ev);
+    g.dusk(&mut ev);
+    assert_eq!((g.threat(me), g.threat(foe)), (1, 0));
+}
+
+#[test]
+fn burden_makes_the_third_card_loud() {
+    let (mut g, me, _) = duel(3);
+    g.pantheon.stages[God::Zaga.index()] = 1;
+    let before = g.threat(me);
+    for _ in 0..3 {
+        let bandage = g.give(me, "Бинт");
+        g.apply(
+            me,
+            Intent::Play {
+                card: bandage,
+                target: Target::Champion(me),
+            },
+        )
+        .unwrap();
+    }
+    assert_eq!(g.threat(me), before + 1);
+}
+
+#[test]
+fn a_gods_sign_takes_a_spirit_off_its_cards() {
+    let (mut g, me, _) = duel(3);
+    let resin = g.give(me, "Живица");
+    let full = g.def(resin).cost;
+    assert!(full > 0);
+    g.favor[me.0 as usize][God::Bhava.index()] = SIGN;
+    assert_eq!(g.cost_of(me, resin), full - 1);
+}
+
+#[test]
+fn devouring_starves_the_settled_but_not_trishnas_chosen() {
+    let (mut g, me, foe) = duel(3);
+    g.pantheon.stages[God::Trishna.index()] = 2;
+    g.board.tile_mut(Hex::new(0, 0)).unwrap().terrain = Terrain::Settlement;
+    g.board.tile_mut(Hex::new(3, 0)).unwrap().terrain = Terrain::Settlement;
+    g.favor[foe.0 as usize][God::Trishna.index()] = CHOSEN;
+    let (hp_me, hp_foe) = (g.champion(me).unwrap().hp, g.champion(foe).unwrap().hp);
+    let mut ev = Vec::new();
+    g.dusk_laws(&mut ev);
+    assert_eq!(g.champion(me).unwrap().hp, hp_me - 1);
+    assert_eq!(g.champion(foe).unwrap().hp, hp_foe);
+}
+
+#[test]
+fn wrath_shortens_the_reach_of_reactions() {
+    let (mut g, me, foe) = duel(4);
+    g.pantheon.stages[God::Maya.index()] = 2;
+    // Two hexes away is no longer close enough to react.
+    let events = g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    g.apply(me, Intent::Move { to: Hex::new(2, 0) }).unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, Event::WindowOpened { .. }))
+    );
+    assert!(g.to_answer(foe).is_none());
 }

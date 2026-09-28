@@ -96,6 +96,17 @@ pub struct Match {
     pub incoming_result: Option<IncomingResult>,
     /// Bumped for every new `incoming_result`.
     pub incoming_serial: u32,
+    /// Offerings since the UI last looked: who gave, to whom, how much
+    /// (§5.1). `gods_ui` drains it into little flights.
+    pub offerings: Vec<(Option<PlayerId>, God, u8)>,
+    /// Stages that shifted at the last dusk, for its scene: god, from, to.
+    pub dusk_news: Vec<(God, u8, u8)>,
+    /// Each god's stage as last told, to say where a shift came from.
+    stages_seen: [u8; 5],
+    /// Stage shifts told so far (the `=dusk` screenshot waits for one).
+    pub stage_shifts: u32,
+    /// Events not yet sounded; `audio::hear_events` takes them.
+    pub heard: Vec<Event>,
     /// The last wish and the god's answer, shown for a moment (§7).
     pub wish_reply: Option<WishReply>,
     /// Bumped for every new `wish_reply`.
@@ -389,6 +400,11 @@ impl Match {
             battle: None,
             incoming_result: None,
             incoming_serial: 0,
+            offerings: Vec::new(),
+            dusk_news: Vec::new(),
+            heard: Vec::new(),
+            stages_seen: God::ALL.map(|g| view.stage(g)),
+            stage_shifts: 0,
             wish_reply: None,
             wish_serial: 0,
             told: None,
@@ -564,6 +580,7 @@ impl Match {
     }
 
     fn record(&mut self, events: &[Event]) {
+        self.heard.extend_from_slice(events);
         // A wish in this batch, and the lines of what it did.
         let mut wished: Option<WishReply> = None;
         // Outcome of a card aimed at the human, gathered from this batch.
@@ -642,6 +659,17 @@ impl Match {
                     {
                         b.fell[side] = true;
                     }
+                }
+                Event::Offered {
+                    player,
+                    god,
+                    amount,
+                } => self.offerings.push((*player, *god, *amount)),
+                Event::StageChanged { god, stage } => {
+                    let seen = &mut self.stages_seen[god.index()];
+                    let from = std::mem::replace(seen, *stage);
+                    self.dusk_news.push((*god, from, *stage));
+                    self.stage_shifts += 1;
                 }
                 Event::BattleStarted { attacker, defender } => {
                     self.battle = Some(BattleInfo::new(Some(*attacker), *defender));
@@ -1018,10 +1046,20 @@ impl Match {
                 ts.shields
             ),
             Event::StageChanged { god, stage } => format!(
-                "{} переходит в стадию «{}».",
+                "{} переходит в стадию «{}»: {}.",
                 names::god(*god),
-                names::stage(*god, *stage)
+                names::stage(*god, *stage),
+                names::law_text(necromy_rules::Law::of(*god, *stage))
             ),
+            // A law of the world acted (§5.3).
+            Event::Law { law, player, .. } => {
+                let whom = player.map_or(String::new(), |p| format!(" ({})", self.name(p)));
+                format!(
+                    "Закон «{}»{whom}: {}.",
+                    names::law_name(*law),
+                    names::law_text(*law)
+                )
+            }
             Event::BattleStarted { attacker, defender } => {
                 format!(
                     "{} нападает на {}!",

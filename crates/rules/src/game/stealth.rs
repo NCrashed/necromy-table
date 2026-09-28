@@ -10,7 +10,7 @@
 use hexx::Hex;
 use serde::{Deserialize, Serialize};
 
-use super::{Event, Game, PlayerId, TimeOfDay};
+use super::{Event, Game, Law, PlayerId, TimeOfDay};
 use crate::board::Terrain;
 
 /// Why a hidden champion was seen again.
@@ -64,6 +64,20 @@ impl Game {
     }
 
     pub(super) fn hide(&mut self, player: PlayerId, events: &mut Vec<Event>) {
+        // Ahamar's Exposure: in daylight nobody slips away (§5.3).
+        if self.time == TimeOfDay::Day
+            && self.law_active(Law::Exposure)
+            && !self.chosen(player, crate::gods::God::Ahamar)
+        {
+            if !self.is_hidden(player) {
+                events.push(Event::Law {
+                    law: Law::Exposure,
+                    player: Some(player),
+                    hex: None,
+                });
+            }
+            return;
+        }
         let c = self.champ_mut(player);
         if c.hidden {
             return;
@@ -89,8 +103,18 @@ impl Game {
     /// next to a rival is seen.
     pub(super) fn stealth_at_turn_end(&mut self, player: PlayerId, events: &mut Vec<Event>) {
         let at = self.hex_of(player);
-        let cover = self.board.tile(at).is_some_and(|t| t.terrain.gives_cover());
-        if self.time == TimeOfDay::Night && cover && !self.rival_near(player, at) {
+        let terrain = self.board.tile(at).map(|t| t.terrain);
+        let cover = terrain.is_some_and(|t| t.gives_cover());
+        // At night under cover; Maya's Manipulation hides anywhere at night,
+        // Bhava's Thicket keeps the woods dark by day (§5.3).
+        let may_hide = match self.time {
+            TimeOfDay::Night => cover || self.law_active(Law::Manipulation),
+            TimeOfDay::Day => {
+                self.law_active(Law::Thicket)
+                    && matches!(terrain, Some(Terrain::Forest | Terrain::Grove))
+            }
+        };
+        if may_hide && !self.rival_near(player, at) {
             self.hide(player, events);
         }
         let spotted: Vec<PlayerId> = self
@@ -111,14 +135,17 @@ impl Game {
 
     /// Dawn drives out whoever is hidden out of cover.
     pub(super) fn stealth_at_dawn(&mut self, events: &mut Vec<Event>) {
+        // Under Ahamar's Exposure the dawn finds everyone.
+        let exposure = self.law_active(Law::Exposure);
         let exposed: Vec<PlayerId> = self
             .players()
             .filter(|&p| {
                 self.is_hidden(p)
-                    && !self
-                        .board
-                        .tile(self.hex_of(p))
-                        .is_some_and(|t| t.terrain.gives_cover())
+                    && (exposure
+                        || !self
+                            .board
+                            .tile(self.hex_of(p))
+                            .is_some_and(|t| t.terrain.gives_cover()))
             })
             .collect();
         for p in exposed {
@@ -163,7 +190,7 @@ impl Game {
             .into_iter()
             .filter(|&p| {
                 !self.is_hidden(p)
-                    && self.hex_of(p).unsigned_distance_to(at) <= super::REACTION_RANGE
+                    && self.hex_of(p).unsigned_distance_to(at) <= self.reaction_range()
             })
             .collect()
     }

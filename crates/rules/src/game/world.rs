@@ -120,6 +120,7 @@ impl Game {
             self.pantheon.pressure[i] = 0;
             events.push(Event::StageChanged { god, stage: next });
         }
+        self.dusk_laws(events);
     }
 }
 

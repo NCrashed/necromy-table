@@ -30,9 +30,10 @@ pub enum Condition {
     Overthrow { wins: u8 },
     /// Most Style at the dawn of this round.
     FirstAtTable { round: u32 },
-    /// Wear the Crown this many dawns in a row, then refuse the wish at the
-    /// last of them (§6, §7): winning the bet and turning down the crown.
-    Wager { dawns: u8 },
+    /// As the Dominant, refuse the wish this many dawns in a row (§6, §7):
+    /// keep winning the table and turn down what it pays. Each refusal
+    /// costs `REFUSAL_THREAT`, and falling in between starts it over.
+    Wager { refusals: u8 },
 }
 
 /// What a check measures; the client names and draws it.
@@ -62,8 +63,8 @@ pub enum CheckKind {
     Round,
     /// 1 if you lead in Style right now.
     StyleLead,
-    /// Refused the wish at a dawn with this many crowns in a row.
-    RefusedAt,
+    /// Wishes refused in a row as the Dominant.
+    Refusals,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,11 +89,20 @@ const OPEN_POOL: [Condition; 6] = [
     Condition::FirstAtTable { round: 19 },
 ];
 
+/// Secret conditions are a fallback, not a shortcut (§10): nobody else
+/// can see them coming, so they ask for more than any open one and count
+/// only from `SECRET_FROM_ROUND`, once the open race has had its chance.
 const SECRET_POOL: [Condition; 3] = [
-    Condition::Wager { dawns: 5 },
-    Condition::Overthrow { wins: 2 },
-    Condition::Registry { regions: 3 },
+    Condition::Wager { refusals: 3 },
+    Condition::Overthrow { wins: 4 },
+    Condition::Registry { regions: 5 },
 ];
+
+/// The round from which a secret condition can win.
+pub const SECRET_FROM_ROUND: u32 = 8;
+
+/// Threat a refused wish costs: turning the table down is loud.
+pub const REFUSAL_THREAT: i8 = 2;
 
 pub const OPEN_COUNT: usize = 3;
 
@@ -107,8 +117,9 @@ pub struct Progress {
     pub crown_streak: u8,
     pub middle_streak: u8,
     pub overthrows: u8,
-    /// Crown streak at the last refused wish (the Wager, §10).
-    pub refused_at: u8,
+    /// Wishes refused in a row as the Dominant (the Wager, §10); a wish
+    /// made, a dawn without the Crown, or a fall starts it over.
+    pub refusals: u8,
 }
 
 /// Draws this match's conditions: open ones, then one secret per player of
@@ -222,23 +233,37 @@ impl Game {
                     check(CheckKind::StyleLead, leads, 1),
                 ]
             }
-            Condition::Wager { dawns } => vec![
-                check(
-                    CheckKind::Streak,
-                    u16::from(progress.crown_streak),
-                    u16::from(dawns),
-                ),
-                check(
-                    CheckKind::RefusedAt,
-                    u16::from(progress.refused_at),
-                    u16::from(dawns),
-                ),
-            ],
+            Condition::Wager { refusals } => vec![check(
+                CheckKind::Refusals,
+                u16::from(progress.refusals),
+                u16::from(refusals),
+            )],
         }
     }
 
     pub fn meets(&self, player: PlayerId, condition: Condition) -> bool {
         self.checks(player, condition).iter().all(Check::met)
+    }
+
+    /// Where `player` stands on their secret `condition`: its own checks,
+    /// then the round from which a secret may win.
+    pub fn secret_checks(&self, player: PlayerId, condition: Condition) -> Vec<Check> {
+        let mut checks = self.checks(player, condition);
+        checks.push(Check {
+            kind: CheckKind::Round,
+            have: self.round.min(SECRET_FROM_ROUND) as u16,
+            need: SECRET_FROM_ROUND as u16,
+        });
+        checks
+    }
+
+    /// `player`'s checks on `condition`, secret or open.
+    pub fn checks_as(&self, player: PlayerId, condition: Condition, secret: bool) -> Vec<Check> {
+        if secret {
+            self.secret_checks(player, condition)
+        } else {
+            self.checks(player, condition)
+        }
     }
 
     /// Dawn streaks: the Crown and the middle path.
@@ -258,6 +283,9 @@ impl Game {
             } else {
                 0
             };
+            if !crowned {
+                progress.refusals = 0;
+            }
             progress.middle_streak = if centred {
                 progress.middle_streak + 1
             } else {
@@ -284,8 +312,10 @@ impl Game {
                 .open
                 .iter()
                 .copied()
-                .chain(self.secret(p))
-                .find(|&c| self.meets(p, c));
+                .map(|c| (c, false))
+                .chain(self.secret(p).map(|c| (c, true)))
+                .find(|&(c, secret)| self.checks_as(p, c, secret).iter().all(Check::met))
+                .map(|(c, _)| c);
             if let Some(condition) = mine {
                 self.winner = Some((p, condition));
                 events.push(Event::Victory {

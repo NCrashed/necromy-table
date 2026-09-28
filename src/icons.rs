@@ -244,10 +244,12 @@ pub enum StatIcon {
     Taste,
     /// A god's curse from a wish without style (§7.4).
     Curse,
+    /// A story line a god gave (§8): a sealed scroll.
+    Quest,
 }
 
 impl StatIcon {
-    pub const ALL: [StatIcon; 14] = [
+    pub const ALL: [StatIcon; 15] = [
         StatIcon::Health,
         StatIcon::Spirit,
         StatIcon::Might,
@@ -262,6 +264,7 @@ impl StatIcon {
         StatIcon::Night,
         StatIcon::Taste,
         StatIcon::Curse,
+        StatIcon::Quest,
     ];
 }
 
@@ -323,6 +326,17 @@ pub fn stat_icon(icon: StatIcon) -> Image {
             c.rect(5, 10, 13, 13, BROWN);
             c.rect(5, 12, 13, 13, DARK_BROWN);
             c.rect(6, 3, 6, 9, [150, 100, 60]);
+        }
+        StatIcon::Quest => {
+            // Rolled ends, the sheet between, lines of writing, a red seal.
+            c.rect(3, 3, 12, 12, BONE);
+            c.rect(2, 2, 13, 3, BROWN);
+            c.rect(2, 12, 13, 13, BROWN);
+            for y in [5, 7, 9] {
+                c.rect(5, y, 10, y, DARK_BROWN);
+            }
+            c.disc(11, 11, 2, HEART);
+            c.set(11, 11, HEART_LIGHT);
         }
         StatIcon::Style => {
             c.polygon(&star(8.0, 8.5, 7.5, 3.2), GOLD);

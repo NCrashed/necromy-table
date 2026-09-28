@@ -39,11 +39,13 @@
 
           buildInputs = runtimeLibs;
 
-          # Asset pipeline tools: scripts/gpt-image.sh
-          packages = with pkgs; [ curl jq imagemagick ];
+          # Asset pipeline tools: scripts/gpt-image.sh, scripts/stable-audio.sh
+          packages = with pkgs; [ curl jq imagemagick uv ffmpeg ];
 
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibs;
           RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
+          # Native libraries for the pip wheels of scripts/stable-audio.sh (torch, soundfile).
+          NECROMY_PYLIBS = pkgs.lib.makeLibraryPath (with pkgs; [ stdenv.cc.cc.lib zlib libsndfile ]);
 
           shellHook = ''
             if [ -f .env ]; then

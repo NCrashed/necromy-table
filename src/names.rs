@@ -210,9 +210,9 @@ pub fn condition(c: necromy_rules::Condition) -> (String, String) {
             "Первый на столе".into(),
             format!("Начиная с раунда {round}, будь единственным лидером по Стилю."),
         ),
-        Condition::Wager { dawns } => (
+        Condition::Wager { refusals } => (
             "Пари Ахамара".into(),
-            format!("Носи Венец {dawns} рассветов подряд и на последнем откажись от желания: выиграй ставку и не бери корону."),
+            format!("Будучи Доминирующим, откажись от желания {refusals} рассвета подряд: выигрывай стол и не бери его плату. Каждый отказ — +2 Угрозы; загаданное желание, рассвет без Венца или смерть обнуляют счёт."),
         ),
     }
 }
@@ -234,7 +234,7 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::Overthrows => "побед над Доминирующим",
         CheckKind::Round => "раунд",
         CheckKind::StyleLead => "единственный лидер по Стилю",
-        CheckKind::RefusedAt => "отказ от желания на рассвете №",
+        CheckKind::Refusals => "отказов от желания подряд",
     }
 }
 
@@ -423,5 +423,55 @@ pub fn yin_yang(element: Element) -> &'static str {
         (true, true) => "инь и ян",
         (true, false) => "ян",
         _ => "инь",
+    }
+}
+
+/// What a law of the world does, in one line (§5.3). Its name is the name
+/// of its god's stage (`stage`).
+pub fn law_text(law: necromy_rules::Law) -> &'static str {
+    use necromy_rules::Law::*;
+    match law {
+        Sprout => "тела прорастают рощей на раунд раньше",
+        Thicket => "в лесу и роще можно скрыться и днём",
+        Wildgrowth => "на закате равнина в краю Бхавы дичает в лес",
+        Generosity => "поселение лечит на 1 того, кто начал в нём ход",
+        Thirst => "кто в бою нанёс больше, получает +1 Дух",
+        Devouring => "на закате тела в краю Тришны сгорают, в поселениях голод: −1 здоровья",
+        Stillness => "на закате у всех −1 Угрозы",
+        Burden => "каждая карта сверх двух за ход: +1 Угрозы",
+        Sentence => "гвардия выходит уже при Угрозе 3 и бьёт на кубик больше",
+        Mask => "у кого есть владения, тому +1 Стиль на рассвете",
+        Crack => "владение платит на рассвете, только если хозяин не дальше 3 клеток",
+        Exposure => "днём не скрыться нигде",
+        Rest => "павший просыпается с полным Духом",
+        Manipulation => "ночью скрыться можно на любой клетке",
+        Wrath => "реагировать можно только в 1 клетке; павший теряет карту",
+    }
+}
+
+/// The law's name: its god's stage.
+pub fn law_name(law: necromy_rules::Law) -> &'static str {
+    stage(law.god(), law.stage())
+}
+
+/// What the god's Chosen are spared or given (§5.4).
+pub fn chosen_gift(god: God) -> &'static str {
+    match god {
+        God::Bhava => "лес и роща стоят 1 очко хода",
+        God::Trishna => "голод Пожирания не трогает",
+        God::Zaga => "Бремя не шумит, Приговор бьёт без лишнего кубика",
+        God::Ahamar => "можно скрыться днём и при Разоблачении; все владения платят",
+        God::Maya => "в Гневе павший не теряет карту",
+    }
+}
+
+/// A rung of a god's patronage (§5.4).
+pub fn patronage(p: necromy_rules::Patronage) -> &'static str {
+    use necromy_rules::Patronage::*;
+    match p {
+        None => "нет",
+        Sign => "Знак",
+        Voice => "Голос",
+        Chosen => "Избранник",
     }
 }

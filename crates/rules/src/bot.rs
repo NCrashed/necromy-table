@@ -265,11 +265,9 @@ fn is_body(effect: Effect) -> bool {
 
 /// The Dominant's wish: the best-graded plain wish, from its own patron when
 /// tied; at the leader in Style when it needs a rival. A bot holding the
-/// Wager refuses once the streak is long enough.
+/// Wager refuses every wish: that is the bet.
 fn wish(game: &Game, player: PlayerId) -> Intent {
-    if let Some(Condition::Wager { dawns }) = game.secret(player)
-        && game.checks(player, Condition::Wager { dawns })[0].met()
-    {
+    if let Some(Condition::Wager { .. }) = game.secret(player) {
         return Intent::RefuseWish;
     }
     let patron = game.champion(player).map(|c| c.god);

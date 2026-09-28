@@ -1,0 +1,28 @@
+# The music set for scripts/music-set.sh: NAME <tab> SECONDS <tab> prompt.
+# art/music-style.txt is prepended to every prompt. Gods have three stages
+# (docs/design.md §5): light, mid, dark; offerings darken them.
+day-fields	90	Bright pastoral morning over farmland, lute and wooden flute melody, light strings, gentle hand drum, hopeful, 90 BPM
+day-market	90	Busy medieval market town at midday, fiddle and hurdy-gurdy dance tune, tambourine, cheerful and bustling, 110 BPM
+day-road	90	Heroes on the road, marching snare, horns and strings carrying a steady adventurous theme, bold but not epic, 100 BPM
+day-temple	90	Sunlit old temple courtyard, solemn warm strings, harp arpeggios, soft wordless choir, reverent and calm, 70 BPM
+day-dusk	90	Late afternoon turning golden, nylon guitar and oboe, wistful slow melody, light strings, 80 BPM
+night-bells	90	Slow night ambience, low drones, distant bells, soft harp, 60 BPM
+night-forest	90	Night forest, celesta and pizzicato strings, low clarinet, fireflies and quiet mystery, 65 BPM
+night-graves	90	Cold night over a field of graves, low cello drone, sparse piano notes, faint choir pad, eerie but calm, 55 BPM
+night-vigil	90	Candlelit vigil in a chapel, slow organ pad, solo viola, patient and sad, 60 BPM
+night-moon	90	Moonlit lake at night, glass harmonica, harp and warm pad, dreamlike and still, 60 BPM
+bhava-light	60	Sprouting spring grove, marimba and kalimba ostinato, wooden flute, gentle pulse of new growth, 90 BPM
+bhava-mid	60	Dense thicket, layered woodwinds and marimba weaving together, pulsing hand percussion, lush and crowding, 95 BPM
+bhava-dark	60	Overgrown choking wilderness, low bassoons and contrabass clarinet tangled, creaking wooden percussion, relentless growth, 90 BPM
+trishna-light	60	Generous harvest feast, frame drums and darbuka, saffron-warm oud and flute dance, joyful giving, 110 BPM
+trishna-mid	60	Restless thirst, driving frame drums, duduk melody reaching and never resolving, rising tension, 115 BPM
+trishna-dark	60	Devouring fire, pounding war drums, roaring low brass, fevered strings, ravenous and hot, 120 BPM
+zaga-light	60	Stillness of a mountain monastery, low cello drone, soft monastic hum, a single bell, peaceful restraint, 50 BPM
+zaga-mid	60	A pilgrim's heavy burden, trudging slow march, cellos and double basses, clinking chains, weary and unbroken, 60 BPM
+zaga-dark	60	Grave judgement, tolling low bells, taiko pulse, stern male choir, a great sword falling, 60 BPM
+ahamar-light	60	Gilded royal court, harpsichord and brass fanfare, strict symmetrical phrases, proud and ordered, 100 BPM
+ahamar-mid	60	Cracked golden mask, harpsichord slightly out of step, ticking clockwork, uneasy brass, 95 BPM
+ahamar-dark	60	Gilt peeling to ash, hollow detuned brass, broken music box, grey empty hall, 80 BPM
+maya-light	60	Tranquil still water, harp, hang drum and glass harmonica, soft waves, serene release, 70 BPM
+maya-mid	60	Shimmering deceit on the water, rippling celesta, whispery airy pads, seductive and slippery, 80 BPM
+maya-dark	60	Stormy black sea, surging strings, deep timpani rolls, teal lightning, tidal wrath, 90 BPM
