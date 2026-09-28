@@ -25,6 +25,24 @@
         ];
       in
       {
+        # The dedicated server as one static (musl) binary: it runs on any
+        # Linux host whatever its nixpkgs, e.g. the NixOS box in ../aerospace
+        # (scripts/deploy-server.sh vendors it there). Only the Rust sources
+        # go in; assets and art stay out.
+        packages.necromy-server-static = pkgs.pkgsStatic.rustPlatform.buildRustPackage {
+          pname = "necromy-server";
+          version = "0.1.0";
+          src = pkgs.lib.fileset.toSource {
+            root = ./.;
+            fileset = pkgs.lib.fileset.unions [ ./Cargo.toml ./Cargo.lock ./crates ./src ];
+          };
+          cargoLock.lockFile = ./Cargo.lock;
+          cargoBuildFlags = [ "-p" "necromy-server" ];
+          # The workspace's tests need sockets and a GPU-free Bevy build:
+          # run them with `cargo test` in the dev shell instead.
+          doCheck = false;
+        };
+
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = with pkgs; [
             rustc
