@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use necromy_rules::{Face, GUARD_DICE, Intent, PlayerId, WindowKind};
 
 use crate::dice::{DiceShow, Revealed, TRAY_TEXTURE, TrayTextures};
+use crate::fight::{self, STAGE_W, Wounds};
 use crate::hud::{INK, UiFont};
 use crate::ui_skin::Frame;
 use crate::icons::StatIcon;
@@ -15,7 +16,7 @@ use crate::play::{Match, Selection};
 use crate::stats::{self, HEALTH, StatArt};
 
 /// Width of the trays on screen.
-const TRAY_W: f32 = 400.0;
+const TRAY_W: f32 = 340.0;
 const BURN_FRAME: Color = Color::srgb(0.95, 0.55, 0.2);
 
 pub struct BattleUiPlugin;
@@ -28,7 +29,8 @@ impl Plugin for BattleUiPlugin {
                 rebuild.run_if(
                     resource_changed::<Match>
                         .or_else(resource_changed::<Selection>)
-                        .or_else(resource_changed::<Revealed>),
+                        .or_else(resource_changed::<Revealed>)
+                        .or_else(resource_changed::<Wounds>),
                 ),
             )
             .add_systems(crate::InGame, buttons)
@@ -83,6 +85,8 @@ fn rebuild(
     art: Res<StatArt>,
     trays: Res<TrayTextures>,
     font: Res<UiFont>,
+    wounds: Res<Wounds>,
+    fight_art: Res<fight::FightArt>,
     panel: Single<(Entity, &mut Visibility), With<BattlePanel>>,
 ) {
     let (panel, mut visibility) = panel.into_inner();
@@ -134,14 +138,17 @@ fn rebuild(
             &battle.burned[i],
             &revealed.0[i],
             result,
-            // Health shown matches the dice: before the blows until they land.
-            battle.hp[i].map(|(before, after)| if landed { after } else { before }),
-            landed && battle.fell[i],
+            // Health shown follows the blows on the stage.
+            battle.hp[i].map(|(before, after)| {
+                before.saturating_sub(wounds.taken[i]).max(after)
+            }),
+            wounds.dead[i],
         );
         columns.push(column);
     }
     let centre = centre_column(
         &mut commands,
+        &fight_art,
         &game,
         &selection,
         &art,
@@ -317,8 +324,10 @@ fn side_column(
 }
 
 /// The middle: what is happening now, and the burn controls for the human.
+#[allow(clippy::too_many_arguments)]
 fn centre_column(
     commands: &mut Commands,
+    fight_art: &fight::FightArt,
     m: &Match,
     selection: &Selection,
     art: &StatArt,
@@ -332,13 +341,14 @@ fn centre_column(
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             row_gap: px(8.0),
-            width: px(170.0),
-            margin: UiRect::top(px(24.0)),
+            width: px(STAGE_W),
+            margin: UiRect::top(px(0.0)),
             ..default()
         })
         .id();
-    let vs = stats::label(commands, font, "против", 18.0, true);
-    commands.entity(column).add_child(vs);
+    let stage = fight::stage(commands, fight_art);
+    let vs = stats::label(commands, font, "против", 16.0, true);
+    commands.entity(column).add_children(&[stage, vs]);
 
     let burning = matches!(g.window().map(|w| w.kind), Some(WindowKind::Battle { .. }));
     let my_choice = burning && m.human_awaited();

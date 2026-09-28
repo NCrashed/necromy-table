@@ -317,7 +317,9 @@ fn play_throws(
     if !show.ever_settled {
         show.ever_settled = true;
     }
-    if now - settled < HOLD_SECS {
+    // The fight on the panel's stage plays out before it closes.
+    let fight = game.battle.as_ref().map_or(0.0, crate::fight::show_secs);
+    if now - settled < HOLD_SECS.max(fight) {
         return;
     }
     for p in show.playing.iter_mut().filter_map(Option::take) {

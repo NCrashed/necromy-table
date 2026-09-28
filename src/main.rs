@@ -5,6 +5,7 @@ mod camera;
 mod card_art;
 mod deck;
 mod dice;
+mod fight;
 mod hud;
 mod icons;
 mod lighting;
@@ -62,6 +63,7 @@ fn main() {
         .add_plugins((
             stats::StatsPlugin,
             battle_ui::BattleUiPlugin,
+            fight::FightPlugin,
             turn_ui::TurnUiPlugin,
             victory_ui::VictoryUiPlugin,
             wish_ui::WishUiPlugin,
@@ -141,6 +143,7 @@ fn auto_screenshot(
     game: Option<Res<play::Match>>,
     front: Res<lobby::Front>,
     day_night: Res<lighting::DayNight>,
+    wounds: Res<fight::Wounds>,
     mut shot: ResMut<AutoScreenshot>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -155,6 +158,9 @@ fn auto_screenshot(
         (None, None) => now >= shot.after,
         (Some(_), None) => false,
         (Some("dice"), Some(_)) => dice.ever_settled,
+        // The first blow that got through on the battle stage, and a death.
+        (Some("blow"), Some(_)) => wounds.taken.iter().any(|&t| t > 0),
+        (Some("death"), Some(_)) => wounds.dead.iter().any(|&d| d),
         (Some("guard"), Some(game)) => game.game.guard().is_some() && !dice.busy(),
         (Some("hit"), Some(game)) => game.incoming_result.is_some(),
         (Some("myturn"), Some(game)) => game.is_human_turn(),
