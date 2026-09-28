@@ -137,7 +137,7 @@ const COTTAGE_THATCH: PropKind = with_light(
     1.8,
 );
 const WELL: PropKind = kind("well", 0.7, 57.0, 4.0);
-const PEAK: PropKind = kind("peak", 1.3, 53.0, 2.0);
+const PEAK: PropKind = kind("peak", 1.0, 53.0, 2.0);
 const BOULDER: PropKind = kind("boulder", 0.4, 29.0, 9.0);
 const MENHIR: PropKind = kind("menhir", 0.8, 59.0, 2.0);
 const COLUMN: PropKind = kind("column", 0.7, 52.0, 3.0);
@@ -289,9 +289,35 @@ fn layout(terrain: Terrain, region: Option<God>) -> &'static [&'static [PropKind
 }
 
 /// Spots around a hex centre: a ring between the champion and the edge.
-const SPOT_RADIUS: f32 = 0.58;
+const SPOT_RADIUS: f32 = 0.55;
 /// Temples and the Table: nearer the centre than the ring.
 const LANDMARK_RADIUS: f32 = 0.42;
+/// How far from the centre a prop's picture may reach: past the middle
+/// of a side (0.87), short of a corner (1.0).
+const EDGE_REACH: f32 = 0.95;
+/// However wide a prop, it keeps this far from the centre.
+const MIN_RADIUS: f32 = 0.22;
+/// Spread of the ring, so hexes do not look stamped.
+const JITTER: f32 = 0.06;
+
+/// Half the drawn width of a prop picture, in pixels from its middle column
+/// (the pivot) to the farthest opaque one.
+fn half_width_px(image: &Image) -> f32 {
+    let (w, h) = (image.width() as usize, image.height() as usize);
+    let Some(data) = image.data.as_ref() else {
+        return w as f32 / 2.0;
+    };
+    let mid = w as f32 / 2.0;
+    let mut reach: f32 = 0.0;
+    for y in 0..h {
+        for x in 0..w {
+            if data.get((y * w + x) * 4 + 3).is_some_and(|&a| a > 0) {
+                reach = reach.max((x as f32 + 0.5 - mid).abs());
+            }
+        }
+    }
+    reach
+}
 
 #[derive(Resource)]
 struct PropImages(HashMap<&'static str, Handle<Image>>);
@@ -349,8 +375,10 @@ fn sync_props(
     board: Res<Board>,
     images: Res<PropImages>,
     assets: Res<AssetServer>,
+    pictures: Res<Assets<Image>>,
     mut built: ResMut<Built>,
     props: Query<(Entity, &Prop)>,
+    mut reach: Local<HashMap<&'static str, f32>>,
 ) {
     if !images
         .0
@@ -380,12 +408,28 @@ fn sync_props(
         // Spots are taken in a turned order, so hexes differ.
         let turn = hex_seed(hex, 1) as usize % 6;
         let region = game.game.board().tile(hex).and_then(|t| t.region);
-        for (i, choices) in layout(terrain, region).iter().enumerate() {
+        let entries = layout(terrain, region);
+        // Props share the ring evenly: two face each other, three stand a
+        // third of a turn apart, and so on.
+        let count = entries.len().clamp(1, 6);
+        for (i, choices) in entries.iter().enumerate() {
             let pick = choices[hex_seed(hex, 2 + i as i32) as usize % choices.len()];
-            let spot = (turn + i * 5) % 6;
+            let spot = (turn + ((i % 6) * 6 + count / 2) / count) % 6;
             let angle = std::f32::consts::FRAC_PI_3 * spot as f32 + std::f32::consts::FRAC_PI_6;
-            let jitter = (hex_seed(hex, 20 + i as i32) % 100) as f32 / 100.0 * 0.12;
-            let at = centre + Vec3::new(angle.cos(), 0.0, angle.sin()) * (pick.radius + jitter);
+            // Far enough out to leave the centre to the champion, near enough
+            // that the picture stays on its own hex: a wide one comes in.
+            let half = *reach.entry(pick.file).or_insert_with(|| {
+                let px = images
+                    .0
+                    .get(pick.file)
+                    .and_then(|h| pictures.get(h))
+                    .map_or(32.0, half_width_px);
+                px * pick.height / pick.px_high
+            });
+            let room = (EDGE_REACH - half).max(MIN_RADIUS);
+            let jitter = (hex_seed(hex, 20 + i as i32) % 100) as f32 / 100.0 * JITTER;
+            let radius = (pick.radius + jitter).min(room);
+            let at = centre + Vec3::new(angle.cos(), 0.0, angle.sin()) * radius;
             spawn_prop(&mut commands, &images, pick, hex, at);
         }
     }
