@@ -6,6 +6,7 @@ mod camera;
 mod card_art;
 mod deck;
 mod dice;
+mod feed;
 mod fight;
 mod god_pick;
 mod gods_ui;
@@ -74,6 +75,7 @@ fn main() {
             wish_ui::WishUiPlugin,
             story_ui::StoryUiPlugin,
             gods_ui::GodsUiPlugin,
+            feed::FeedPlugin,
             ring_ui::RingUiPlugin,
             audio::SoundPlugin,
         ))

@@ -1,4 +1,5 @@
-//! Screen overlay: status line, champions, event feed and the human's hand.
+//! Screen overlay: champions, the incoming card, tooltips and the human's hand
+//! (the event feed is `feed.rs`).
 //! Rebuilt from `Match` and `Selection` whenever either changes.
 
 use bevy::prelude::*;
@@ -30,7 +31,7 @@ impl Plugin for HudPlugin {
             .add_systems(Startup, spawn_hud)
             .add_systems(
                 crate::InGame,
-                (update_text, rebuild_hand)
+                rebuild_hand
                     .run_if(resource_changed::<Match>.or_else(resource_changed::<Selection>)),
             )
             .add_systems(
@@ -84,11 +85,6 @@ fn load_font(mut commands: Commands, assets: Res<AssetServer>) {
     });
 }
 
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
-enum Panel {
-    Feed,
-}
-
 #[derive(Component)]
 struct Hand;
 
@@ -109,26 +105,6 @@ struct HandCards;
 pub const INK: Color = Color::srgb(0.95, 0.92, 0.85);
 
 fn spawn_hud(mut commands: Commands, font: Res<UiFont>) {
-    let panel = |top: Option<f32>, left: Option<f32>, right: Option<f32>| Node {
-        position_type: PositionType::Absolute,
-        top: top.map_or(Val::Auto, px),
-        left: left.map_or(Val::Auto, px),
-        right: right.map_or(Val::Auto, px),
-        padding: UiRect::all(px(10.0)),
-        max_width: px(620.0),
-        ..default()
-    };
-    commands.spawn((
-        Panel::Feed,
-        Text::new(""),
-        font.text(12.0),
-        TextColor(Color::srgb(0.82, 0.80, 0.74)),
-        Node {
-            max_width: px(360.0),
-            ..panel(Some(140.0), Some(10.0), None)
-        },
-        Frame::Panel,
-    ));
     commands.spawn((
         Incoming,
         Node {
@@ -176,14 +152,6 @@ fn spawn_hud(mut commands: Commands, font: Res<UiFont>) {
             hand.spawn((DeckSlot, Node::default()));
             hand.spawn((HandCards, Node::default()));
         });
-}
-
-fn update_text(game: Res<Match>, mut panels: Query<(&Panel, &mut Text)>) {
-    for (panel, mut text) in &mut panels {
-        text.0 = match panel {
-            Panel::Feed => game.feed.join("\n"),
-        };
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
