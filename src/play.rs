@@ -56,6 +56,7 @@ impl Plugin for PlayPlugin {
                     keys,
                     auto_pass,
                     drop_stale_selection,
+                    remote_autoplay,
                 ),
             );
     }
@@ -407,6 +408,36 @@ impl Match {
         done.is_ok()
     }
 
+    /// Dev aid (`NECROMY_AUTOPLAY` at a server): the bot plays the human's
+    /// seat from its own view, one intent at a time. A local table seats
+    /// the bot itself (`Seat::Autoplay`), so this is for servers only.
+    pub fn play_for_human(&mut self) {
+        let human = self.human;
+        if !self.autoplay
+            || !matches!(self.link, Link::Remote(_))
+            || self.paused_for_wish_panel()
+            || self.answer_due
+            || !self.walk.is_empty()
+            || self.game.winner().is_some()
+            || !self.game.awaiting().contains(&human)
+        {
+            return;
+        }
+        let intent = necromy_rules::bot::choose(&self.game, human);
+        if self.act(human, intent).is_err() {
+            let fallback = if self.game.wish_due() == Some(human) {
+                Intent::RefuseWish
+            } else if self.game.battle_dice(human).is_some() {
+                Intent::Burn { cards: Vec::new() }
+            } else if self.game.to_answer(human).is_some() {
+                Intent::Pass
+            } else {
+                Intent::EndTurn
+            };
+            let _ = self.act(human, fallback);
+        }
+    }
+
     /// A match on a server: `first` holds the table's first update for `seat`.
     pub fn remote(
         conn: ClientConn,
@@ -422,7 +453,10 @@ impl Match {
             gone: false,
             notices: Vec::new(),
         };
-        Match::begin(Link::Remote(Box::new(remote)), seat, false, first)
+        // Dev aid: at a server the seat stays a person's; `NECROMY_AUTOPLAY`
+        // plays it from here instead (`remote_autoplay`).
+        let autoplay = std::env::var_os("NECROMY_AUTOPLAY").is_some();
+        Match::begin(Link::Remote(Box::new(remote)), seat, autoplay, first)
     }
 
     fn begin(link: Link, human: PlayerId, autoplay: bool, first: Vec<FromTable>) -> Self {
@@ -1483,4 +1517,15 @@ impl Match {
             _ => return None,
         })
     }
+}
+
+/// Dev aid: the bot plays the human's seat at a server (`NECROMY_AUTOPLAY`),
+/// at the pace the table's own bots keep.
+fn remote_autoplay(time: Res<Time>, mut next: Local<f32>, mut game: ResMut<Match>) {
+    if !game.autoplay || time.elapsed_secs() < *next {
+        return;
+    }
+    *next = time.elapsed_secs() + 0.35;
+    // The answer redraws when it comes (`drive_table`), not the asking.
+    game.bypass_change_detection().play_for_human();
 }
