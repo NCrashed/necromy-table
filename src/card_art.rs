@@ -17,6 +17,7 @@ use necromy_rules::{CardDef, Element, Game, God};
 use crate::hud::{INK, UiFont};
 use crate::names;
 use crate::stats::StatArt;
+use crate::ui_skin::{Accent, Frame};
 
 pub const CARD_W: f32 = 144.0;
 pub const CARD_H: f32 = 216.0;
@@ -292,7 +293,6 @@ fn back() -> Image {
     image
 }
 
-
 /// A tiny card back: bronze edge, violet field, a gold seal.
 fn mini_back() -> Image {
     let (w, h) = (7u32, 10u32);
@@ -361,6 +361,9 @@ pub struct CardLook {
     pub outline: Option<Color>,
     /// Lines under the text, e.g. what a card aimed at you did.
     pub extra: Vec<(String, Color)>,
+    /// A chip at the foot of the illustration, in sight while the card is
+    /// tucked in hand: what the ring does to it now (chain, answer).
+    pub badge: Option<(String, Color)>,
 }
 
 fn at(left: f32, top: f32, width: f32, height: f32) -> Node {
@@ -443,6 +446,36 @@ pub fn card_node(
         commands.entity(window).add_child(picture);
     }
     children.push(window);
+
+    if let Some((text, color)) = &look.badge {
+        let label = commands
+            .spawn((
+                Text::new(text.clone()),
+                font.bold(12.0),
+                TextColor(color.lighter(0.25)),
+                TextLayout::no_wrap(),
+            ))
+            .id();
+        let chip = commands
+            .spawn((
+                Frame::Tip,
+                Accent(*color),
+                Node {
+                    padding: UiRect::axes(px(8.0), px(3.0)),
+                    ..default()
+                },
+            ))
+            .add_child(label)
+            .id();
+        let row = commands
+            .spawn(Node {
+                justify_content: JustifyContent::Center,
+                ..at(0.0, (ART.1 + ART.3) as f32 - 26.0, CARD_W, 24.0)
+            })
+            .add_child(chip)
+            .id();
+        children.push(row);
+    }
 
     // Spirit cost in a gem, top left.
     if def.cost > 0 {

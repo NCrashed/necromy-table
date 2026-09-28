@@ -766,6 +766,12 @@ impl Game {
     }
 
     /// Chain bonus (§4) of the card waiting in an open Target window.
+    /// The element of the last card played this turn: a card of the element
+    /// it generates chains (§4).
+    pub fn last_element(&self) -> Option<Element> {
+        self.last_element
+    }
+
     pub fn pending_bonus(&self) -> Option<u8> {
         self.pending.map(|p| p.bonus)
     }

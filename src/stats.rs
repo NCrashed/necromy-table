@@ -9,13 +9,13 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use necromy_rules::{GUARD_THRESHOLD, God, PlayerId};
 
-use crate::ui_skin::{Accent, Frame};
 use crate::board::Hovered;
 use crate::hud::{INK, UiFont};
 use crate::icons::{self, StatIcon};
 use crate::names;
 use crate::play::Match;
 use crate::token;
+use crate::ui_skin::{Accent, Frame};
 
 const ICON: f32 = 32.0;
 const CELL_W: f32 = 10.0;
@@ -268,9 +268,17 @@ fn rebuild_seats(
                 },
             ))
             .id();
-        let count = label(&mut commands, &font, &g.hand(p).len().to_string(), 12.0, true);
+        let count = label(
+            &mut commands,
+            &font,
+            &g.hand(p).len().to_string(),
+            12.0,
+            true,
+        );
         commands.entity(hand).add_children(&[back, count]);
-        commands.entity(seat).add_children(&[crown, portrait, hp, hand]);
+        commands
+            .entity(seat)
+            .add_children(&[crown, portrait, hp, hand]);
         commands.entity(*seats).add_child(seat);
     }
 }
@@ -430,7 +438,11 @@ fn stat_sheet(
             let t = label(
                 commands,
                 font,
-                &format!("оберег: {}", names::element(ward)),
+                &format!(
+                    "оберег: {} · ломает только {}",
+                    names::element(ward),
+                    names::element(ward.quenched_by())
+                ),
                 12.0,
                 false,
             );
@@ -611,7 +623,29 @@ fn rebuild_gods(
             Frame::Panel,
         ))
         .id();
-    let title = label(&mut commands, &font, "Боги", 14.0, true);
+    let title = row(&mut commands);
+    let name = label(&mut commands, &font, "Боги", 14.0, true);
+    let spacer = commands
+        .spawn(Node {
+            flex_grow: 1.0,
+            ..default()
+        })
+        .id();
+    // Hovered, it opens the ring of five with its legend (`ring_ui.rs`).
+    let ring_label = label(&mut commands, &font, "кольцо пяти", 12.0, false);
+    let ring = commands
+        .spawn((
+            crate::ring_ui::RingChip,
+            Button,
+            Node {
+                padding: UiRect::axes(px(8.0), px(4.0)),
+                ..default()
+            },
+            Frame::Button,
+        ))
+        .add_child(ring_label)
+        .id();
+    commands.entity(title).add_children(&[name, spacer, ring]);
     let legend = commands
         .spawn((
             Text::new("стадия · давление: ◀ светлеет | темнеет ▶ · твоя благосклонность"),

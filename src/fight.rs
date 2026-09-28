@@ -65,10 +65,7 @@ impl Plugin for FightPlugin {
         app.init_resource::<Fight>()
             .init_resource::<Wounds>()
             .add_systems(Startup, load_art)
-            .add_systems(
-                crate::InGame,
-                (direct, pose, shake, popups).chain(),
-            );
+            .add_systems(crate::InGame, (direct, pose, shake, popups).chain());
     }
 }
 
@@ -252,11 +249,7 @@ pub fn stage(commands: &mut Commands, art: &FightArt) -> Entity {
         ))
         .id();
     for side in 0..2 {
-        let left = if side == 0 {
-            0.0
-        } else {
-            STAGE_W - FIGHTER
-        };
+        let left = if side == 0 { 0.0 } else { STAGE_W - FIGHTER };
         // Feet are about 80 px down a 96 px frame.
         let feet = STAGE_H - FIGHTER * 0.86 + FIGHTER * 80.0 / 96.0;
         let shadow = commands
@@ -392,7 +385,9 @@ fn pose(
         } else {
             Some(battle.defender)
         };
-        let god = who.and_then(|p: PlayerId| game.game.champion(p)).map(|c| c.god);
+        let god = who
+            .and_then(|p: PlayerId| game.game.champion(p))
+            .map(|c| c.god);
         let act = act(side, t, &blows, battle.fell[side]);
         let facing = if side == 0 { 1.0 } else { -1.0 };
 

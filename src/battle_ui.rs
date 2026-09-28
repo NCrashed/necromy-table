@@ -9,11 +9,11 @@ use necromy_rules::{Face, GUARD_DICE, Intent, PlayerId, WindowKind};
 use crate::dice::{DiceShow, Revealed, TRAY_TEXTURE, TrayTextures};
 use crate::fight::{self, STAGE_W, Wounds};
 use crate::hud::{INK, UiFont};
-use crate::ui_skin::Frame;
 use crate::icons::StatIcon;
 use crate::names;
 use crate::play::{Match, Selection};
 use crate::stats::{self, HEALTH, StatArt};
+use crate::ui_skin::Frame;
 
 /// Width of the trays on screen.
 const TRAY_W: f32 = 340.0;
@@ -139,9 +139,7 @@ fn rebuild(
             &revealed.0[i],
             result,
             // Health shown follows the blows on the stage.
-            battle.hp[i].map(|(before, after)| {
-                before.saturating_sub(wounds.taken[i]).max(after)
-            }),
+            battle.hp[i].map(|(before, after)| before.saturating_sub(wounds.taken[i]).max(after)),
             wounds.dead[i],
         );
         columns.push(column);

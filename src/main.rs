@@ -13,6 +13,7 @@ mod lobby;
 mod names;
 mod play;
 mod props;
+mod ring_ui;
 mod stats;
 mod story_ui;
 mod token;
@@ -68,6 +69,7 @@ fn main() {
             victory_ui::VictoryUiPlugin,
             wish_ui::WishUiPlugin,
             story_ui::StoryUiPlugin,
+            ring_ui::RingUiPlugin,
         ))
         .add_plugins(AutoScreenshotPlugin)
         .add_systems(Startup, setup_scene)

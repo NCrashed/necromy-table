@@ -10,12 +10,12 @@
 use bevy::prelude::*;
 use necromy_rules::{Intent, TimeOfDay, WindowKind};
 
-use crate::ui_skin::{Accent, Frame};
 use crate::hud::{INK, UiFont};
 use crate::icons::StatIcon;
 use crate::names;
 use crate::play::{self, Match, Selection};
 use crate::stats::{self, StatArt};
+use crate::ui_skin::{Accent, Frame};
 
 const GOLD: Color = Color::srgb(1.0, 0.82, 0.3);
 const HINT: Color = Color::srgb(0.72, 0.70, 0.64);
@@ -193,14 +193,12 @@ fn rebuild_status(
         }
         let current = p == g.current_player();
         let seat = commands
-            .spawn((
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    padding: UiRect::all(px(5.0)),
-                    ..default()
-                },
-            ))
+            .spawn((Node {
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                padding: UiRect::all(px(5.0)),
+                ..default()
+            },))
             .id();
         // The one we wait on framed in gold, the one whose turn it is in bronze.
         if awaited.contains(&p) {

@@ -6,13 +6,13 @@ use bevy::text::{FontSize, FontSource};
 use bevy::window::PrimaryWindow;
 use necromy_rules::{CardId, Game, WindowKind};
 
-use crate::ui_skin::Frame;
 use crate::board::{Board, Hovered};
 use crate::card_art::{CARD_H, CARD_W, CardArt, CardLook, card_node};
 use crate::deck::DeckSlot;
 use crate::names;
 use crate::play::{self, IncomingCountdown, Match, Selection};
 use crate::stats::StatArt;
+use crate::ui_skin::Frame;
 
 /// How much of a card in hand hides below the screen until it is hovered:
 /// the illustration, name and kind stay in sight.
@@ -159,22 +159,23 @@ fn spawn_hud(mut commands: Commands, font: Res<UiFont>) {
         // Above cards and panels.
         GlobalZIndex(10),
     ));
-    commands.spawn((
-        Hand,
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: px(10.0 - CARD_TUCK),
-            left: px(0.0),
-            right: px(0.0),
-            justify_content: JustifyContent::Center,
-            column_gap: px(DECK_GAP),
-            ..default()
-        },
-    ))
-    .with_children(|hand| {
-        hand.spawn((DeckSlot, Node::default()));
-        hand.spawn((HandCards, Node::default()));
-    });
+    commands
+        .spawn((
+            Hand,
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: px(10.0 - CARD_TUCK),
+                left: px(0.0),
+                right: px(0.0),
+                justify_content: JustifyContent::Center,
+                column_gap: px(DECK_GAP),
+                ..default()
+            },
+        ))
+        .with_children(|hand| {
+            hand.spawn((DeckSlot, Node::default()));
+            hand.spawn((HandCards, Node::default()));
+        });
 }
 
 fn update_text(game: Res<Match>, mut panels: Query<(&Panel, &mut Text)>) {
@@ -217,6 +218,7 @@ fn rebuild_hand(
             usable: usable || selected,
             outline: selected.then_some(Color::srgb(1.0, 0.82, 0.3)),
             extra: Vec::new(),
+            badge: crate::ring_ui::badge(&game.game, game.human, card),
         };
         let entity = card_node(
             &mut commands,
@@ -271,6 +273,7 @@ fn rebuild_incoming(
             usable: true,
             outline: at_me.then_some(red),
             extra,
+            badge: None,
         };
         let awaited = game.human_awaited();
         let footer = if !awaited {
@@ -295,6 +298,7 @@ fn rebuild_incoming(
             usable: true,
             outline: Some(red),
             extra: lines,
+            badge: None,
         };
         (
             format!("{} играет в тебя:", game.name(hit.caster)),

@@ -20,7 +20,8 @@ pub struct UiSkinPlugin;
 
 impl Plugin for UiSkinPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Skin>().add_systems(PostUpdate, dress.before(bevy::ui::UiSystems::Prepare));
+        app.init_resource::<Skin>()
+            .add_systems(PostUpdate, dress.before(bevy::ui::UiSystems::Prepare));
     }
 }
 
@@ -139,11 +140,7 @@ fn draw(frame: Frame, look: Look, accent: Option<Rgb>) -> Image {
             if ex == 0 && ey == 0 {
                 continue;
             }
-            let lit = if ex == edge {
-                x < n / 2
-            } else {
-                y < n / 2
-            };
+            let lit = if ex == edge { x < n / 2 } else { y < n / 2 };
             let corner = |d: u32| ex <= d && ey <= d;
             let (c, a): (Rgb, u8) = match frame {
                 Frame::Panel => match edge {
@@ -205,7 +202,11 @@ fn draw(frame: Frame, look: Look, accent: Option<Rgb>) -> Image {
                         _ if y < n / 2 && look != Look::Pressed => (mix(face, light, 0.12), 255),
                         _ => (face, 255),
                     };
-                    if off { (grey(mix(c, INK, 0.35)), a) } else { (c, a) }
+                    if off {
+                        (grey(mix(c, INK, 0.35)), a)
+                    } else {
+                        (c, a)
+                    }
                 }
                 Frame::Cell | Frame::Slot => unreachable!("cells are drawn by `cell`"),
             };

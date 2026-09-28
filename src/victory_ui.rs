@@ -9,10 +9,10 @@ use bevy::prelude::*;
 use necromy_rules::Condition;
 
 use crate::hud::{INK, UiFont};
-use crate::ui_skin::{Accent, Frame};
 use crate::names;
 use crate::play::Match;
 use crate::stats::{self, StatArt};
+use crate::ui_skin::{Accent, Frame};
 
 const GOLD: Color = Color::srgb(1.0, 0.82, 0.3);
 const MET: Color = Color::srgb(0.45, 0.85, 0.40);

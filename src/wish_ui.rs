@@ -16,10 +16,10 @@ use bevy::prelude::*;
 use necromy_rules::{God, Intent, PlayerId, WishKind};
 
 use crate::hud::{INK, UiFont};
-use crate::ui_skin::{Accent, BRONZE_RIM, Frame};
 use crate::names;
 use crate::play::Match;
 use crate::stats::{self, StatArt};
+use crate::ui_skin::{Accent, BRONZE_RIM, Frame};
 
 const GOLD: Color = Color::srgb(1.0, 0.82, 0.3);
 const DIM: Color = Color::srgb(0.72, 0.70, 0.64);

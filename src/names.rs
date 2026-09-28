@@ -24,6 +24,37 @@ pub fn element(element: Element) -> &'static str {
     }
 }
 
+/// "гасит воду", "гасит землю".
+pub fn element_accusative(element: Element) -> &'static str {
+    match element {
+        Element::Earth => "землю",
+        Element::Water => "воду",
+        e => self::element(e),
+    }
+}
+
+/// "обереги воды", "после дерева".
+pub fn element_genitive(element: Element) -> &'static str {
+    match element {
+        Element::Wood => "дерева",
+        Element::Fire => "огня",
+        Element::Earth => "земли",
+        Element::Metal => "железа",
+        Element::Water => "воды",
+    }
+}
+
+/// "гасится водой".
+pub fn element_instrumental(element: Element) -> &'static str {
+    match element {
+        Element::Wood => "деревом",
+        Element::Fire => "огнём",
+        Element::Earth => "землёй",
+        Element::Metal => "железом",
+        Element::Water => "водой",
+    }
+}
+
 pub fn kind(kind: CardKind) -> &'static str {
     match kind {
         CardKind::Rite => "обряд",

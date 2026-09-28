@@ -241,7 +241,13 @@ fn ease(t: f32) -> f32 {
 fn fly(
     mut commands: Commands,
     time: Res<Time>,
-    mut flights: Query<(Entity, &Flight, &mut Node, &mut Visibility, &mut UiTransform)>,
+    mut flights: Query<(
+        Entity,
+        &Flight,
+        &mut Node,
+        &mut Visibility,
+        &mut UiTransform,
+    )>,
     deck: Single<(&ComputedNode, &UiGlobalTransform), With<DeckSlot>>,
     cards: Query<(&HandCard, &ComputedNode, &UiGlobalTransform)>,
     seats: Query<(&Seat, &ComputedNode, &UiGlobalTransform)>,
