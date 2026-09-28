@@ -75,6 +75,13 @@ impl Rig {
     pub fn focus(&self) -> Vec3 {
         self.focus
     }
+
+    /// The camera's turn snapped to a hex side: what lies flat on the
+    /// table (ground tiles, bodies, traps) turns by this, so its pictures
+    /// stay upright from any side while flat-top hexes stay flat-top.
+    pub fn table_turn(&self) -> f32 {
+        (self.shown.2 / FRAC_PI_3).round() * FRAC_PI_3
+    }
 }
 
 impl Default for Rig {

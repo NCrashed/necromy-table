@@ -42,6 +42,13 @@ impl Plugin for BoardPlugin {
                         .or_else(resource_changed::<crate::lighting::DayNight>)
                         .or_else(painted_markers_loading),
                 ),
+        )
+        .add_systems(
+            crate::InGame,
+            turn_flats
+                .after(sync_markers)
+                .after(sync_ground)
+                .after(crate::camera::apply),
         );
     }
 }
@@ -94,6 +101,40 @@ const TILE_ART: [(Terrain, &str, usize); 10] = [
 /// middle (measured on the 128 px set): the quad is shifted so the hexagon,
 /// not the image, sits on the hex centre.
 const ART_HEX_CENTRE_PX: f32 = 61.0;
+
+/// Lies flat on the table and turns with it (`Rig::table_turn`), so its
+/// picture reads upright from the side the camera sits on: at
+/// `centre + turn * offset`, rotated `turn * base`.
+#[derive(Component, Clone, Copy)]
+struct Flat {
+    centre: Vec3,
+    offset: Vec3,
+    base: Quat,
+}
+
+impl Flat {
+    fn transform(&self, turn: Quat) -> Transform {
+        Transform::from_translation(self.centre + turn * self.offset)
+            .with_rotation(turn * self.base)
+    }
+}
+
+/// Every flat thing follows the table's turn; a new one takes it at once.
+fn turn_flats(
+    rig: Res<crate::camera::Rig>,
+    mut flats: Query<(Ref<Flat>, &mut Transform)>,
+    mut shown: Local<Option<f32>>,
+) {
+    let turn = rig.table_turn();
+    let turned = *shown != Some(turn);
+    *shown = Some(turn);
+    let q = Quat::from_rotation_y(turn);
+    for (flat, mut transform) in &mut flats {
+        if turned || flat.is_changed() {
+            *transform = flat.transform(q);
+        }
+    }
+}
 
 /// The meshes a hex's ground switches between when its terrain changes.
 #[derive(Resource)]
@@ -230,10 +271,15 @@ fn spawn_board(
             reflectance: 0.0,
             ..default()
         });
-        let (ground_mesh, ground_at) = if texture.is_some() {
-            (art_quad.clone(), at + art_shift)
+        let (ground_mesh, ground_shift) = if texture.is_some() {
+            (art_quad.clone(), art_shift)
         } else {
-            (mesh.clone(), at)
+            (mesh.clone(), Vec3::ZERO)
+        };
+        let flat = Flat {
+            centre: at,
+            offset: ground_shift,
+            base: Quat::IDENTITY,
         };
         commands.spawn((
             TileArt {
@@ -242,7 +288,8 @@ fn spawn_board(
             },
             Mesh3d(ground_mesh),
             MeshMaterial3d(ground),
-            Transform::from_translation(ground_at),
+            flat.transform(Quat::IDENTITY),
+            flat,
         ));
         // The highlight, clear until the hex is lit.
         let highlight = materials.add(StandardMaterial {
@@ -262,11 +309,17 @@ fn spawn_board(
         // Every tile gets an icon entity; painted and plain ground hide it.
         let icon = icons.get(&tile.terrain).or(icons.values().next()).cloned();
         if let Some(icon) = icon {
+            let flat = Flat {
+                centre: at,
+                offset: Vec3::Y * 0.01,
+                base: Quat::IDENTITY,
+            };
             commands.spawn((
                 TileIcon(hex),
                 Mesh3d(icon_quad.clone()),
                 MeshMaterial3d(icon),
-                Transform::from_translation(at + Vec3::Y * 0.01),
+                flat.transform(Quat::IDENTITY),
+                flat,
                 if icons.contains_key(&tile.terrain) {
                     Visibility::Inherited
                 } else {
@@ -420,7 +473,9 @@ fn sync_markers(
     sprites: Res<MarkerSprites>,
     images: Res<Assets<Image>>,
     markers: Query<(Entity, &Marker)>,
+    rig: Res<crate::camera::Rig>,
 ) {
+    let turn = rig.table_turn();
     // A corpse rots as it lies, and sprouts before it becomes a grove where
     // a grove can grow; each hex keeps its own body.
     let corpses = game.game.board().corpses().map(|(hex, corpse)| {
@@ -556,11 +611,13 @@ fn sync_markers(
         ));
         if flat {
             // Just above the region's veil, the top of the picture away from
-            // the table's near edge.
-            entity.insert(
-                Transform::from_translation(pos + Vec3::Y * 0.03)
-                    .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-            );
+            // the table's near edge, whichever side the camera sits on.
+            let flat = Flat {
+                centre: pos,
+                offset: Vec3::Y * 0.03,
+                base: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+            };
+            entity.insert((flat.transform(Quat::from_rotation_y(turn)), flat));
         } else {
             entity.insert((Billboard, Transform::from_translation(pos)));
         }
@@ -848,16 +905,15 @@ fn sync_ground(
     game: Res<Match>,
     tile_images: Res<TileImages>,
     meshes: Res<GroundMeshes>,
-    board: Res<Board>,
     mut grounds: Query<(
         &mut TileArt,
         &MeshMaterial3d<StandardMaterial>,
         &mut Mesh3d,
-        &mut Transform,
+        &mut Flat,
     )>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    for (mut art, material, mut mesh, mut transform) in &mut grounds {
+    for (mut art, material, mut mesh, mut flat) in &mut grounds {
         let Some(tile) = game.game.board().tile(art.hex) else {
             continue;
         };
@@ -882,13 +938,13 @@ fn sync_ground(
             continue;
         }
         art.terrain = tile.terrain;
-        let at = board.hex_to_world(art.hex);
-        let (new_mesh, new_at) = match texture.is_some() {
-            true => (meshes.painted.clone(), at + meshes.shift),
-            false => (meshes.plain.clone(), at),
+        let (new_mesh, shift) = match texture.is_some() {
+            true => (meshes.painted.clone(), meshes.shift),
+            false => (meshes.plain.clone(), Vec3::ZERO),
         };
         m.base_color_texture = texture;
         mesh.0 = new_mesh;
-        transform.translation = new_at;
+        // `turn_flats` places it anew.
+        flat.offset = shift;
     }
 }
