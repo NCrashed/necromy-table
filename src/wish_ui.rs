@@ -29,6 +29,8 @@ const VOICE: Color = Color::srgb(0.85, 0.80, 0.95);
 const REPLY_SECS: f32 = 7.0;
 /// Longest wish the field accepts, in characters.
 const MAX_WISH: usize = 200;
+/// How fast `NECROMY_WISH` types the dev wish.
+const DEV_LETTERS_PER_SEC: f32 = 12.0;
 
 pub struct WishUiPlugin;
 
@@ -47,6 +49,14 @@ impl Plugin for WishUiPlugin {
             .add_systems(
                 crate::InGame,
                 rebuild_reply.run_if(resource_changed::<Match>),
+            )
+            .add_systems(
+                crate::InGame,
+                (
+                    share_draft.after(type_wish).after(buttons),
+                    watch_draft,
+                    rebuild_watch.run_if(resource_changed::<Match>),
+                ),
             )
             .add_systems(crate::InGame, (expire_reply, listening_dots));
     }
@@ -70,6 +80,10 @@ struct WishPanel;
 #[derive(Component)]
 struct ReplyPanel;
 
+/// Another seat's wish as they write it.
+#[derive(Component)]
+struct WatchPanel;
+
 /// "Тришна слушает…", animated while the model thinks.
 #[derive(Component)]
 struct Listening(God);
@@ -86,7 +100,7 @@ enum WishButton {
 }
 
 fn spawn(mut commands: Commands) {
-    for (wish, z) in [(true, 15), (false, 12)] {
+    for (panel, z) in [(0, 15), (1, 12), (2, 12)] {
         let node = Node {
             position_type: PositionType::Absolute,
             top: px(90.0),
@@ -97,11 +111,11 @@ fn spawn(mut commands: Commands) {
             ..default()
         };
         let mut e = commands.spawn((node, GlobalZIndex(z), Visibility::Hidden));
-        if wish {
-            e.insert(WishPanel);
-        } else {
-            e.insert(ReplyPanel);
-        }
+        match panel {
+            0 => e.insert(WishPanel),
+            1 => e.insert(ReplyPanel),
+            _ => e.insert(WatchPanel),
+        };
     }
 }
 
@@ -448,28 +462,40 @@ fn rebuild_panel(
 
 /// Dev aid: `NECROMY_WISH=<god index>:<words>` writes the human's first wish
 /// once the gods' voice is up, e.g. `NECROMY_WISH="1:накорми меня перед боем"`
-/// with `NECROMY_AUTOPLAY=1 NECROMY_SCREENSHOT_WHEN=reply`.
-fn dev_wish(mut done: Local<bool>, mut draft: ResMut<WishDraft>, mut game: ResMut<Match>) {
-    if *done || !writing(&game, &draft) {
+/// with `NECROMY_AUTOPLAY=1 NECROMY_SCREENSHOT_WHEN=reply`. It is typed out
+/// letter by letter, as a person would (the others watch it being written),
+/// then sent.
+fn dev_wish(
+    time: Res<Time>,
+    mut typing: Local<Option<(f32, bool)>>,
+    mut draft: ResMut<WishDraft>,
+    mut game: ResMut<Match>,
+) {
+    if typing.is_some_and(|(_, sent)| sent) || !writing(&game, &draft) {
         return;
     }
-    *done = true;
     let Some((god, text)) = std::env::var("NECROMY_WISH").ok().and_then(|w| {
-        w.split_once(':')
-            .map(|(g, t)| (g.to_string(), t.to_string()))
+        let (g, t) = w.split_once(':')?;
+        let god = God::ALL.get(g.parse::<usize>().ok()?).copied()?;
+        Some((god, t.to_string()))
     }) else {
         return;
     };
-    let Some(god) = god
-        .parse::<usize>()
-        .ok()
-        .and_then(|i| God::ALL.get(i).copied())
-    else {
-        return;
-    };
-    draft.god = Some(god);
-    draft.text = text.clone();
-    game.wish_in_words(god, &text);
+    let now = time.elapsed_secs();
+    let (start, _) = *typing.get_or_insert((now, false));
+    let letters = ((now - start) * DEV_LETTERS_PER_SEC) as usize;
+    let shown: String = text.chars().take(letters).collect();
+    if draft.god != Some(god) {
+        draft.god = Some(god);
+    }
+    if draft.text != shown {
+        draft.text = shown;
+    }
+    let done_at = text.chars().count() as f32 / DEV_LETTERS_PER_SEC + 0.5;
+    if now - start >= done_at {
+        *typing = Some((start, true));
+        game.wish_in_words(god, &text);
+    }
 }
 
 /// Keys go into the wish while the human writes one; Enter sends it.
@@ -719,4 +745,108 @@ fn expire_reply(time: Res<Time>, mut shown: Local<(u32, f32)>, mut game: ResMut<
     if now - shown.1 > REPLY_SECS {
         game.wish_reply = None;
     }
+}
+
+/// Sends the human's wish to the table as it changes, for the others to
+/// watch.
+fn share_draft(
+    draft: Res<WishDraft>,
+    mut game: ResMut<Match>,
+    mut sent: Local<Option<(Option<God>, String)>>,
+) {
+    if !writing(&game, &draft) {
+        *sent = None;
+        return;
+    }
+    let now = (draft.god, draft.text.clone());
+    if sent.as_ref() != Some(&now) {
+        // Sending changes nothing on screen: no redraw for it.
+        game.bypass_change_detection().draft_wish(now.0, &now.1);
+        *sent = Some(now);
+    }
+}
+
+/// Another seat's wish as it is written: a key for every new letter, a
+/// softer one for every deletion.
+fn watch_draft(game: Res<Match>, mut heard: Local<String>, mut tones: MessageWriter<Tone>) {
+    let text = game.drafting.as_ref().map_or("", |(_, _, t)| t.as_str());
+    if text == heard.as_str() {
+        return;
+    }
+    let (now, before) = (text.chars().count(), heard.chars().count());
+    let common = text
+        .chars()
+        .zip(heard.chars())
+        .take_while(|(a, b)| a == b)
+        .count();
+    // A burst (a paste, a late message) is heard as a few keys, not all.
+    for _ in 0..(before - common).min(3) {
+        tones.write(Tone::key(true));
+    }
+    for _ in 0..(now - common).min(3) {
+        tones.write(Tone::key(false));
+    }
+    *heard = text.to_string();
+}
+
+fn rebuild_watch(
+    mut commands: Commands,
+    game: Res<Match>,
+    art: Res<StatArt>,
+    font: Res<UiFont>,
+    panel: Single<(Entity, &mut Visibility), With<WatchPanel>>,
+) {
+    let (panel, mut visibility) = panel.into_inner();
+    commands.entity(panel).despawn_related::<Children>();
+    let Some((writer, god, text)) = game
+        .drafting
+        .as_ref()
+        .filter(|(p, ..)| *p != game.human && game.wish_reply.is_none())
+    else {
+        visibility.set_if_neq(Visibility::Hidden);
+        return;
+    };
+    visibility.set_if_neq(Visibility::Inherited);
+    let frame = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: px(6.0),
+                padding: UiRect::all(px(18.0)),
+                width: px(540.0),
+                ..default()
+            },
+            Frame::Plate,
+        ))
+        .id();
+    let head = stats::row(&mut commands);
+    let crown = stats::icon_node(
+        &mut commands,
+        art.icon(crate::icons::StatIcon::Crown),
+        24.0,
+        true,
+    );
+    let who = match god {
+        Some(god) => format!(
+            "{} загадывает желание {}",
+            game.name(*writer),
+            names::god_dative(*god)
+        ),
+        None => format!("{} загадывает желание", game.name(*writer)),
+    };
+    let who = stats::label(&mut commands, &font, &who, 15.0, true);
+    commands.entity(head).add_children(&[crown, who]);
+    let words = commands
+        .spawn((
+            Text::new(format!("«{text}▌»")),
+            font.text(14.0),
+            TextColor(INK),
+            Node {
+                width: px(510.0),
+                ..default()
+            },
+        ))
+        .id();
+    commands.entity(frame).add_children(&[head, words]);
+    commands.entity(panel).add_child(frame);
 }

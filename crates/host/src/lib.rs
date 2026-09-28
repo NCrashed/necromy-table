@@ -32,6 +32,8 @@ pub const SHOW_TIMEOUT_SECS: f32 = 12.0;
 const PROBE_SECS: u64 = 5;
 /// Cosmetic voice jobs are skipped while this many already wait.
 const MAX_QUEUED_VOICES: usize = 2;
+/// Letters of a wish draft passed on to the others (the panel takes 200).
+const MAX_DRAFT: usize = 240;
 
 /// Who plays a seat.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +81,12 @@ pub enum ToTable {
         god: God,
         text: String,
     },
+    /// The Dominant's wish as it is being written, for the others to watch:
+    /// the god chosen so far and the words.
+    Draft {
+        god: Option<God>,
+        text: String,
+    },
     /// The seat has shown everything up to this update.
     Shown(u32),
 }
@@ -102,6 +110,12 @@ pub enum FromTable {
     /// The clock this seat should watch now, sent after every update; `None`
     /// when nothing runs for it.
     Clock(Option<Clock>),
+    /// Another seat's wish as it is being written (`ToTable::Draft`).
+    Drafting {
+        player: PlayerId,
+        god: Option<God>,
+        text: String,
+    },
     /// A clock ran out and the table decided for the seat.
     TimedOut(Decision),
 }
@@ -303,6 +317,7 @@ impl Table {
                 self.send(seat, answer);
             }
             ToTable::Wish { god, text } => self.ask_wish(seat, god, text),
+            ToTable::Draft { god, text } => self.share_draft(seat, god, text),
             ToTable::Shown(serial) => {
                 let s = &mut self.shown[seat.0 as usize];
                 *s = (*s).max(serial.min(self.serial));
@@ -521,6 +536,22 @@ impl Table {
         self.voice
             .as_ref()
             .is_some_and(|v| v.online.load(Ordering::Relaxed))
+    }
+
+    /// The Dominant writes their wish: everyone else sees it as it is typed.
+    /// Only the seat whose wish is due may, and only so many letters.
+    fn share_draft(&mut self, seat: PlayerId, god: Option<God>, text: String) {
+        if self.game.wish_due() != Some(seat) {
+            return;
+        }
+        let text: String = text.chars().take(MAX_DRAFT).collect();
+        for i in 0..self.seats.len() {
+            let other = PlayerId(i as u8);
+            if other != seat && self.seats[i].watched() {
+                let text = text.clone();
+                self.send(other, FromTable::Drafting { player: seat, god, text });
+            }
+        }
     }
 
     fn ask_wish(&mut self, seat: PlayerId, god: God, text: String) {

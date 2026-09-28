@@ -126,3 +126,49 @@ fn a_wish_in_words_without_a_model_is_not_heard() {
         [FromTable::Oracle(OracleNews::NotHeard(_))]
     ));
 }
+
+#[test]
+fn a_wish_being_written_is_seen_by_the_others() {
+    let seats = vec![Seat::Autoplay { wish_by_hand: true }; 5];
+    let mut t = table(seats);
+    let everyone: Vec<PlayerId> = (0..5).map(PlayerId).collect();
+    // Play until someone's wish waits on their words.
+    let writer = loop {
+        for &p in &everyone {
+            if let Some(&(serial, _)) = updates(&t.drain(p)).last() {
+                t.submit(p, ToTable::Shown(serial));
+            }
+        }
+        if let Some(p) = t.game().wish_due() {
+            break p;
+        }
+        assert!(t.game().winner().is_none(), "the match ended without a wish");
+        t.tick(BOT_STEP_SECS);
+    };
+    let other = everyone.iter().copied().find(|&p| p != writer).unwrap();
+    // Someone else cannot write it.
+    t.submit(
+        other,
+        ToTable::Draft {
+            god: None,
+            text: "не моё".into(),
+        },
+    );
+    for &p in &everyone {
+        assert!(!t.drain(p).iter().any(|m| matches!(m, FromTable::Drafting { .. })));
+    }
+    t.submit(
+        writer,
+        ToTable::Draft {
+            god: Some(God::Maya),
+            text: "пусть реки".into(),
+        },
+    );
+    for &p in &everyone {
+        let seen = t.drain(p).into_iter().any(|m| {
+            matches!(m, FromTable::Drafting { player, god: Some(God::Maya), ref text }
+                if player == writer && text == "пусть реки")
+        });
+        assert_eq!(seen, p != writer, "seat {p:?}");
+    }
+}

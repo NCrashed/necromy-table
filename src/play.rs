@@ -107,6 +107,8 @@ pub struct Match {
     pub stage_shifts: u32,
     /// Events not yet sounded; `audio::hear_events` takes them.
     pub heard: Vec<Event>,
+    /// Another seat's wish as they write it: who, the god, the words.
+    pub drafting: Option<(PlayerId, Option<God>, String)>,
     /// The last wish and the god's answer, shown for a moment (§7).
     pub wish_reply: Option<WishReply>,
     /// Bumped for every new `wish_reply`.
@@ -451,6 +453,7 @@ impl Match {
             offerings: Vec::new(),
             dusk_news: Vec::new(),
             heard: Vec::new(),
+            drafting: None,
             stages_seen: God::ALL.map(|g| view.stage(g)),
             stage_shifts: 0,
             wish_reply: None,
@@ -568,6 +571,13 @@ impl Match {
         self.pump();
     }
 
+    /// The human's wish as they write it, for the others to watch.
+    pub fn draft_wish(&mut self, god: Option<God>, text: &str) {
+        let human = self.human;
+        let text = text.to_string();
+        self.link.submit(human, ToTable::Draft { god, text });
+    }
+
     fn pump(&mut self) {
         let messages = self.link.drain(self.human);
         self.receive(messages);
@@ -598,6 +608,11 @@ impl Match {
                     self.game = *view;
                     self.serial = serial;
                     self.record(&events);
+                    if let Some((writer, ..)) = self.drafting
+                        && self.game.wish_due() != Some(writer)
+                    {
+                        self.drafting = None;
+                    }
                     // The match is over: there is no seat to come back to.
                     if self.game.winner().is_some() && matches!(self.link, Link::Remote(_)) {
                         crate::lobby::Ticket::forget();
@@ -613,6 +628,9 @@ impl Match {
                 FromTable::Clock(clock) => {
                     self.clock = clock;
                     self.clock_since = 0.0;
+                }
+                FromTable::Drafting { player, god, text } => {
+                    self.drafting = Some((player, god, text));
                 }
                 FromTable::TimedOut(what) => self.feed.push(
                     match what {
