@@ -482,9 +482,12 @@ fn sync_markers(
                 TEXELS,
             ))
         });
-    let front = Vec3::new(0.0, 0.0, 0.35);
-    let corpses = corpses.map(|(h, i, ppm)| (h, i, front, ppm));
-    let traps = traps.map(|(h, i, ppm)| (h, i, front, ppm));
+    // Bodies and traps are drawn from above: they lie flat on the ground,
+    // under whoever stands there, instead of rising in front of them.
+    let corpses = corpses.map(|(h, i, ppm)| (h, i, Vec3::ZERO, ppm, true));
+    let traps = traps.map(|(h, i, ppm)| (h, i, Vec3::ZERO, ppm, true));
+    let flags = flags.map(|(h, i, o, ppm)| (h, i, o, ppm, false));
+    let trails = trails.map(|(h, i, o, ppm)| (h, i, o, ppm, false));
     let wanted: Vec<_> = corpses.chain(traps).chain(flags).chain(trails).collect();
     // Despawning and respawning everything would blink every marker for a
     // frame (this runs on each hover): keep what is still wanted.
@@ -499,7 +502,7 @@ fn sync_markers(
             commands.entity(entity).despawn();
         }
     }
-    for (hex, image, offset, pixels_per_metre) in wanted {
+    for (hex, image, offset, pixels_per_metre, flat) in wanted {
         let marker = Marker {
             hex,
             image: image.id(),
@@ -508,21 +511,33 @@ fn sync_markers(
             continue;
         }
         let pos = board.hex_to_world(hex) + offset;
-        commands.spawn((
+        let mut entity = commands.spawn((
             marker,
-            Billboard,
             NotShadowCaster,
             NotShadowReceiver,
             Sprite::from_image(image),
             Sprite3d {
                 pixels_per_metre,
-                pivot: Some(Vec2::new(0.5, 0.0)),
+                pivot: Some(if flat {
+                    Vec2::splat(0.5)
+                } else {
+                    Vec2::new(0.5, 0.0)
+                }),
                 alpha_mode: AlphaMode::Mask(0.5),
                 unlit: true,
                 ..default()
             },
-            Transform::from_translation(pos),
         ));
+        if flat {
+            // Just above the region's veil, the top of the picture away from
+            // the table's near edge.
+            entity.insert(
+                Transform::from_translation(pos + Vec3::Y * 0.03)
+                    .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+            );
+        } else {
+            entity.insert((Billboard, Transform::from_translation(pos)));
+        }
     }
 }
 
