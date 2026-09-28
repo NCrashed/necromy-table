@@ -6,6 +6,7 @@ mod card_art;
 mod deck;
 mod dice;
 mod fight;
+mod god_pick;
 mod hud;
 mod icons;
 mod lighting;
@@ -47,6 +48,7 @@ fn main() {
         .add_systems(Update, run_game)
         .add_plugins((
             lobby::LobbyPlugin,
+            god_pick::GodPickPlugin,
             camera::CameraPlugin,
             play::PlayPlugin,
             board::BoardPlugin,
@@ -177,6 +179,8 @@ fn auto_screenshot(
         // Full night: the lights of the world are on.
         (Some("night"), Some(_)) => day_night.night >= 1.0,
         // Someone slipped out of sight (§11.6).
+        // The human has a trap on the board.
+        (Some("trap"), Some(game)) => game.game.traps().iter().any(|t| t.owner == game.human),
         (Some("hidden"), Some(game)) => game.game.players().any(|p| game.game.is_hidden(p)),
         (Some("incoming"), Some(game)) => matches!(
             game.game.window().map(|w| w.kind),

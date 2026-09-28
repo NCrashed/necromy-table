@@ -40,7 +40,7 @@ impl Plugin for BoardPlugin {
                         .or_else(resource_changed::<Selection>)
                         .or_else(resource_changed::<Hovered>)
                         .or_else(resource_changed::<crate::lighting::DayNight>)
-                        .or_else(corpse_art_loading),
+                        .or_else(painted_markers_loading),
                 ),
         );
     }
@@ -141,6 +141,9 @@ struct MarkerSprites {
     /// (`assets/props/corpse-<stage>-<n>.png`). The drawn `corpse` stands in
     /// until they load.
     corpse_art: [Vec<Handle<Image>>; 3],
+    /// Painted traps by the element of their card, the last for neutral
+    /// ones (`assets/props/trap-<element>-<n>.png`); `trap` stands in.
+    trap_art: [Vec<Handle<Image>>; 6],
     trap: Handle<Image>,
     /// Ownership flags, one per god (`God::index`).
     flags: [Handle<Image>; 5],
@@ -285,6 +288,13 @@ fn spawn_board(
                 .map(|path| assets.load(path))
                 .collect()
         }),
+        trap_art: ["wood", "fire", "earth", "metal", "water", "neutral"].map(|element| {
+            (1..)
+                .map(|n| format!("props/trap-{element}-{n}.png"))
+                .take_while(|path| std::path::Path::new("assets").join(path).exists())
+                .map(|path| assets.load(path))
+                .collect()
+        }),
         trap: images.add(pixel_sprite(&TRAP_ROWS, [0; 3])),
         flags: God::ALL.map(|g| images.add(pixel_sprite(&FLAG_ROWS, g.accent()))),
         trails: God::ALL.map(|g| images.add(pixel_sprite(&TRAIL_ROWS, g.accent()))),
@@ -377,9 +387,9 @@ fn sync_tiles(
     }
 }
 
-/// True while painted corpses are loading, and once more when they are all
-/// in, so the markers swap the stand-in for them.
-fn corpse_art_loading(
+/// True while painted corpses and traps are loading, and once more when
+/// they are all in, so the markers swap the stand-ins for them.
+fn painted_markers_loading(
     sprites: Option<Res<MarkerSprites>>,
     images: Res<Assets<Image>>,
     mut done: Local<bool>,
@@ -434,7 +444,18 @@ fn sync_markers(
         .traps()
         .iter()
         .filter(|t| t.owner == game.human)
-        .map(|t| (t.hex, sprites.trap.clone()));
+        .map(|t| {
+            // Drawn after the element of the card that set it.
+            let element = game.game.def(t.card).element.map_or(5, |e| e.index());
+            let art = &sprites.trap_art[element];
+            let painted = (!art.is_empty())
+                .then(|| &art[crate::props::hex_seed(t.hex, 11) as usize % art.len()])
+                .filter(|h| images.contains(*h));
+            match painted {
+                Some(image) => (t.hex, image.clone(), CORPSE_PPM),
+                None => (t.hex, sprites.trap.clone(), 16.0),
+            }
+        });
     // Owner flags stand at the back left of the hex, out of the champion's way.
     let flags = game.game.claims().filter_map(|(hex, p)| {
         let god = game.game.champion(p)?.god;
@@ -463,7 +484,7 @@ fn sync_markers(
     let front = Vec3::new(0.0, 0.0, 0.35);
     // Pixels per metre: markers are small, the trail is drawn twice as big.
     let corpses = corpses.map(|(h, i, ppm)| (h, i, front, ppm));
-    let traps = traps.map(|(h, i)| (h, i, front, 16.0));
+    let traps = traps.map(|(h, i, ppm)| (h, i, front, ppm));
     let wanted: Vec<_> = corpses.chain(traps).chain(flags).chain(trails).collect();
     // Despawning and respawning everything would blink every marker for a
     // frame (this runs on each hover): keep what is still wanted.

@@ -202,12 +202,23 @@ pub fn with_port(addr: &str) -> String {
 }
 
 /// Invite codes are short, upper case and free of look-alikes (0/O, 1/I).
+/// A table code as typed or said ("482 915", "482-915") down to its digits.
 pub fn normalize_code(code: &str) -> String {
-    code.trim().to_uppercase()
+    code.chars().filter(char::is_ascii_digit).collect()
 }
 
-pub const CODE_LETTERS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-pub const CODE_LEN: usize = 5;
+/// A code to say aloud: two groups of three.
+pub fn spoken_code(code: &str) -> String {
+    if code.len() == CODE_LEN {
+        format!("{} {}", &code[..3], &code[3..])
+    } else {
+        code.to_string()
+    }
+}
+
+/// Table codes are digits: easy to dictate over voice chat.
+pub const CODE_LETTERS: &[u8] = b"0123456789";
+pub const CODE_LEN: usize = 6;
 
 fn read_frame<T: DeserializeOwned>(stream: &mut TcpStream) -> io::Result<T> {
     let mut len = [0u8; 4];

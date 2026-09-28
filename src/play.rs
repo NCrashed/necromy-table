@@ -22,8 +22,19 @@ use crate::dice::DiceShow;
 use crate::names;
 use crate::token::Token;
 
-/// Seat the human plays until there is a champion select screen.
-const HUMAN_GOD: God = God::Trishna;
+/// The god a single player match starts on unless another is chosen:
+/// `NECROMY_GOD=<name>` (bhava, trishna, zaga, ahamar, maya) for dev runs,
+/// else Trishna, whom the dev seeds were written for.
+pub fn default_god() -> God {
+    std::env::var("NECROMY_GOD")
+        .ok()
+        .and_then(|name| {
+            God::ALL
+                .into_iter()
+                .find(|g| g.name().eq_ignore_ascii_case(&name))
+        })
+        .unwrap_or(God::Trishna)
+}
 const FEED_LINES: usize = 9;
 
 pub struct PlayPlugin;
@@ -33,7 +44,7 @@ impl Plugin for PlayPlugin {
         // Dev runs go straight to a single player match; otherwise the menu
         // (`lobby.rs`) inserts the `Match` when one begins.
         if crate::lobby::skip_menu() {
-            app.insert_resource(Match::local());
+            app.insert_resource(Match::local(default_god()));
         }
         app.init_resource::<Selection>()
             .init_resource::<IncomingCountdown>()
@@ -288,7 +299,7 @@ pub struct Selection {
 impl Match {
     /// A single player match on a table in this process (§17.3), seeded by
     /// `NECROMY_SEED` or the clock.
-    pub fn local() -> Self {
+    pub fn local(god: God) -> Self {
         let seed = std::env::var("NECROMY_SEED")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -302,7 +313,7 @@ impl Match {
         let human = PlayerId(
             champions
                 .iter()
-                .position(|&g| g == HUMAN_GOD)
+                .position(|&g| g == god)
                 .expect("human god is seated") as u8,
         );
         let autoplay = std::env::var_os("NECROMY_AUTOPLAY").is_some();

@@ -394,3 +394,34 @@ pub fn reveal(why: necromy_rules::RevealReason) -> &'static str {
         Stumbled => "на него наткнулись",
     }
 }
+
+/// The god's land of the kingdom (docs/design.md §3).
+pub fn land(god: God) -> &'static str {
+    match god {
+        God::Bhava => "Дикая Чаща",
+        God::Trishna => "Пиршественные Земли",
+        God::Zaga => "Серые Скиты",
+        God::Ahamar => "Коронные Реестры",
+        God::Maya => "Тихий Луг",
+    }
+}
+
+/// Who the god's champion is (art/champions.md).
+pub fn champion_title(god: God) -> &'static str {
+    match god {
+        God::Bhava => "Страж Нетронутого",
+        God::Trishna => "Кухарка Пира",
+        God::Zaga => "Кающийся Железного Скита",
+        God::Ahamar => "Рыцарь-Регистратор",
+        God::Maya => "Плакальщица Тихого Луга",
+    }
+}
+
+/// Yang, yin, or both (earth), for the ring's rhythm (§4).
+pub fn yin_yang(element: Element) -> &'static str {
+    match (element.is_yang(), element.is_yin()) {
+        (true, true) => "инь и ян",
+        (true, false) => "ян",
+        _ => "инь",
+    }
+}

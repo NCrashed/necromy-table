@@ -65,15 +65,20 @@ pub struct Champion {
 }
 
 impl Champion {
-    fn new(god: God, hex: Hex) -> Self {
-        // Placeholder stats: each patron leans one way (§13).
-        let [might, body, wits, spirit] = match god {
+    /// Might, body, wits and spirit a champion of `god` starts with.
+    /// Placeholder stats: each patron leans one way (§13).
+    pub const fn stats_of(god: God) -> [u8; 4] {
+        match god {
             God::Bhava => [3, 5, 2, 3],
             God::Trishna => [4, 3, 3, 3],
             God::Zaga => [3, 4, 2, 4],
             God::Ahamar => [4, 4, 3, 2],
             God::Maya => [2, 3, 4, 4],
-        };
+        }
+    }
+
+    fn new(god: God, hex: Hex) -> Self {
+        let [might, body, wits, spirit] = Champion::stats_of(god);
         Champion {
             god,
             hex,

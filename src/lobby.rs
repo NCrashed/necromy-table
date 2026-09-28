@@ -15,9 +15,10 @@ use bevy::input::ButtonState;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 use necromy_host::FromTable;
-use necromy_net::{ClientConn, ClientMsg, LobbyInfo, ServerMsg, normalize_code};
+use necromy_net::{ClientConn, ClientMsg, LobbyInfo, ServerMsg, normalize_code, spoken_code};
 use necromy_rules::{God, PlayerId};
 
+use crate::god_pick::{self, GodPickArt, Holder};
 use crate::hud::{INK, UiFont};
 use crate::names;
 use crate::play::Match;
@@ -96,6 +97,9 @@ pub struct Front {
     ticket_no: u64,
     /// We dialled to sit back down by ticket.
     returning: bool,
+    /// Setting up a single player match, and the god taken for it.
+    alone: bool,
+    alone_god: God,
 }
 
 impl Front {
@@ -118,6 +122,8 @@ impl Front {
             ticket: Ticket::load(),
             ticket_no: 0,
             returning: false,
+            alone: std::env::var_os("NECROMY_PLAY").is_some_and(|v| v == "alone"),
+            alone_god: crate::play::default_god(),
         }
     }
 
@@ -185,6 +191,12 @@ struct FrontRoot;
 #[derive(Component, Clone, Copy)]
 enum FrontButton {
     Alone,
+    /// Single player: take this god.
+    Solo(God),
+    /// Single player: begin with the god taken.
+    Begin,
+    /// Back from the single player setup to the menu.
+    Back,
     Open,
     Sit,
     Focus(Field),
@@ -230,7 +242,7 @@ fn dev_play(mut done: Local<bool>, mut front: ResMut<Front>, mut commands: Comma
             front.code = code.clone();
             front.dial(ClientMsg::Join { code });
         }
-        Ok("local") => commands.insert_resource(Match::local()),
+        Ok("local") => commands.insert_resource(Match::local(crate::play::default_god())),
         Ok("return") => {
             front.go_back();
         }
@@ -372,7 +384,10 @@ fn buttons(
             continue;
         }
         match *button {
-            FrontButton::Alone => commands.insert_resource(Match::local()),
+            FrontButton::Alone => front.alone = true,
+            FrontButton::Solo(god) => front.alone_god = god,
+            FrontButton::Begin => commands.insert_resource(Match::local(front.alone_god)),
+            FrontButton::Back => front.alone = false,
             FrontButton::Open => front.dial(ClientMsg::Create),
             FrontButton::Sit => {
                 let code = normalize_code(&front.code);
@@ -506,6 +521,7 @@ fn rebuild(
     mut commands: Commands,
     front: Res<Front>,
     font: Res<UiFont>,
+    art: Res<GodPickArt>,
     root: Single<Entity, With<FrontRoot>>,
 ) {
     let root = *root;
@@ -514,9 +530,22 @@ fn rebuild(
         .spawn((
             Node {
                 flex_direction: FlexDirection::Column,
-                row_gap: px(12.0),
-                padding: UiRect::all(px(30.0)),
-                width: px(560.0),
+                row_gap: px(if front.alone || front.lobby.is_some() {
+                    7.0
+                } else {
+                    12.0
+                }),
+                padding: UiRect::all(px(if front.alone || front.lobby.is_some() {
+                    22.0
+                } else {
+                    30.0
+                })),
+                // The god cards need the room; the menu keeps a column.
+                width: if front.alone || front.lobby.is_some() {
+                    Val::Auto
+                } else {
+                    px(560.0)
+                },
                 ..default()
             },
             Frame::Plate,
@@ -529,8 +558,9 @@ fn rebuild(
     rows.push(title);
 
     match &front.lobby {
+        None if front.alone => alone_rows(&mut commands, &font, &art, &front, &mut rows),
         None => menu(&mut commands, &font, &front, &mut rows),
-        Some(lobby) => lobby_rows(&mut commands, &font, lobby, &mut rows),
+        Some(lobby) => lobby_rows(&mut commands, &font, &art, lobby, &mut rows),
     }
     if let Some(e) = &front.error {
         rows.push(text(&mut commands, &font, e, 13.0, BAD));
@@ -547,7 +577,7 @@ fn menu(commands: &mut Commands, font: &UiFont, front: &Front, rows: &mut Vec<En
             commands,
             font,
             FrontButton::Return,
-            &format!("Вернуться за стол {}", t.code),
+            &format!("Вернуться за стол {}", spoken_code(&t.code)),
             true,
         );
         rows.push(back);
@@ -590,7 +620,7 @@ fn menu(commands: &mut Commands, font: &UiFont, front: &Front, rows: &mut Vec<En
     rows.push(text(
         commands,
         font,
-        "Сервер даст код стола: назови его друзьям.",
+        "Сервер даст код стола из шести цифр: продиктуй его друзьям.",
         12.0,
         DIM,
     ));
@@ -612,16 +642,73 @@ fn menu(commands: &mut Commands, font: &UiFont, front: &Front, rows: &mut Vec<En
     ));
 }
 
-fn lobby_rows(commands: &mut Commands, font: &UiFont, lobby: &LobbyInfo, rows: &mut Vec<Entity>) {
+/// Single player: pick a god, the bots take the other four.
+fn alone_rows(
+    commands: &mut Commands,
+    font: &UiFont,
+    art: &GodPickArt,
+    front: &Front,
+    rows: &mut Vec<Entity>,
+) {
+    rows.push(text(
+        commands,
+        font,
+        "Одиночная игра: выбери бога. Остальных четверых сыграют боты.",
+        14.0,
+        DIM,
+    ));
+    let cards = god_pick::row(commands);
+    for god in God::ALL {
+        let holder = if god == front.alone_god {
+            Holder::Mine
+        } else {
+            Holder::Free
+        };
+        let card = god_pick::god_card(
+            commands,
+            font,
+            art,
+            god,
+            holder,
+            Some(FrontButton::Solo(god)),
+        );
+        commands.entity(cards).add_child(card);
+    }
+    rows.push(cards);
+    let actions = commands
+        .spawn(Node {
+            column_gap: px(10.0),
+            ..default()
+        })
+        .id();
+    let begin = button(commands, font, FrontButton::Begin, "Начать", true);
+    let back = button(commands, font, FrontButton::Back, "Назад", false);
+    commands.entity(actions).add_children(&[begin, back]);
+    rows.push(actions);
+}
+
+fn lobby_rows(
+    commands: &mut Commands,
+    font: &UiFont,
+    art: &GodPickArt,
+    lobby: &LobbyInfo,
+    rows: &mut Vec<Entity>,
+) {
     let code = commands
         .spawn((
-            Text::new(format!("Стол {}", lobby.code)),
+            Text::new(format!("Стол {}", spoken_code(&lobby.code))),
             font.bold(24.0),
             TextColor(INK),
         ))
         .id();
     rows.push(code);
-    rows.push(text(commands, font, "Назови друзьям этот код.", 13.0, DIM));
+    rows.push(text(
+        commands,
+        font,
+        "Продиктуй друзьям этот код.",
+        13.0,
+        DIM,
+    ));
 
     for (i, person) in lobby.people.iter().enumerate() {
         let mut who = person.name.clone();
@@ -651,15 +738,14 @@ fn lobby_rows(commands: &mut Commands, font: &UiFont, lobby: &LobbyInfo, rows: &
         rows.push(row);
     }
 
-    rows.push(text(commands, font, "Выбери бога:", 13.0, DIM));
-    let gods = commands
-        .spawn(Node {
-            flex_wrap: FlexWrap::Wrap,
-            column_gap: px(6.0),
-            row_gap: px(6.0),
-            ..default()
-        })
-        .id();
+    rows.push(text(
+        commands,
+        font,
+        "Выбери бога. Щелчок по своему снимает выбор.",
+        13.0,
+        DIM,
+    ));
+    let gods = god_pick::row(commands);
     let mine = lobby.people.get(lobby.you).and_then(|p| p.god);
     for god in God::ALL {
         let taken_by = lobby
@@ -667,29 +753,13 @@ fn lobby_rows(commands: &mut Commands, font: &UiFont, lobby: &LobbyInfo, rows: &
             .iter()
             .enumerate()
             .find(|(i, p)| p.god == Some(god) && *i != lobby.you);
-        let label = match taken_by {
-            Some((_, p)) => format!("{} · {}", names::god(god), p.name),
-            None => names::god(god).to_string(),
+        let (holder, action) = match taken_by {
+            Some((_, p)) => (Holder::Taken(p.name.clone()), None),
+            None if mine == Some(god) => (Holder::Mine, Some(FrontButton::Pick(None))),
+            None => (Holder::Free, Some(FrontButton::Pick(Some(god)))),
         };
-        let action = if mine == Some(god) {
-            FrontButton::Pick(None)
-        } else {
-            FrontButton::Pick(Some(god))
-        };
-        let b = button(commands, font, action, &label, mine == Some(god));
-        let swatch = commands
-            .spawn((
-                Node {
-                    width: px(10.0),
-                    height: px(10.0),
-                    margin: UiRect::right(px(6.0)),
-                    ..default()
-                },
-                BackgroundColor(god_color(god)),
-            ))
-            .id();
-        commands.entity(b).insert_children(0, &[swatch]);
-        commands.entity(gods).add_child(b);
+        let card = god_pick::god_card(commands, font, art, god, holder, action);
+        commands.entity(gods).add_child(card);
     }
     rows.push(gods);
 
