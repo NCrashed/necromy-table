@@ -14,7 +14,7 @@ card-burn	1.5	2	A paper card catches fire and burns away in a quick magical flar
 chain	1.0	3	A rising magical chime, a link added to a chain of spells, glassy and bright
 fizzle	1.0	2	A spell fizzles out, sputtering sparks and a deflating hiss
 # Battle
-battle-start	1.5	2	Short war horn blast and a clash of steel, a fight begins
+battle-start	1.2	3	Two warriors clash: steel blades ring against each other once and a deep war drum hits; no horn, no brass, no car horn, no beep, no siren
 swing	0.5	4	A heavy weapon swung fast through the air, whoosh
 hit	0.5	4	A heavy weapon strikes a body in armour, meaty thud with a metal clank
 block	0.5	3	A blow stopped by a raised shield, solid wooden and iron thunk
