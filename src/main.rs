@@ -230,7 +230,9 @@ fn auto_screenshot(
         // The human carries poison and nothing covers their token: bubbles
         // rise over it.
         (Some("bubbles"), Some(game)) => {
-            game.game.champion(game.human).is_some_and(|c| c.poison.is_some())
+            game.game
+                .champion(game.human)
+                .is_some_and(|c| c.poison.is_some())
                 && game.battle.is_none()
                 && game.incoming_result.is_none()
                 && game.told.is_none()

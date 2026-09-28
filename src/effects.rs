@@ -36,7 +36,9 @@ impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, make_sprites).add_systems(
             crate::InGame,
-            (burst, aura, fly).chain().after(crate::token::move_tokens),
+            (demo, burst, aura, fly)
+                .chain()
+                .after(crate::token::move_tokens),
         );
     }
 }
@@ -103,12 +105,22 @@ fn mix([r, g, b]: [u8; 3], [r2, g2, b2]: [u8; 3], t: f32) -> [u8; 3] {
 const VENOM: [u8; 3] = [150, 230, 90];
 const INK: [u8; 4] = [30, 24, 30, 255];
 
+// Rows of pixels read best one under another.
+#[rustfmt::skip]
 fn make_sprites(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
-    let colour = |e: Element| mix(God::from_index(e.index()).accent(), VENOM, 0.2);
+    let colour = |e: Element| mix(God::from_index(e.index()).accent(), VENOM, 0.4);
     let drop = Element::ALL.map(|e| {
         let c = colour(e);
         images.add(pixels(
-            &["..k..", ".kck.", "kcclk", "kcvck", ".kkk."],
+            &[
+                "...k...",
+                "..kck..",
+                ".kcclk.",
+                "kccclck",
+                "kcccvck",
+                ".kcvvk.",
+                "..kkk..",
+            ],
             &[
                 (b'k', INK),
                 (b'c', shade(c, 1.0)),
@@ -120,7 +132,15 @@ fn make_sprites(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let bubble = Element::ALL.map(|e| {
         let c = colour(e);
         images.add(pixels(
-            &[".kkk.", "kcwck", "kc.ck", "kcvck", ".kkk."],
+            &[
+                "..kkk..",
+                ".kccck.",
+                "kcww.ck",
+                "kcw..ck",
+                "kc...ck",
+                ".kcvck.",
+                "..kkk..",
+            ],
             &[
                 (b'k', INK),
                 (b'c', shade(c, 1.2)),
@@ -132,12 +152,20 @@ fn make_sprites(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let pop = Element::ALL.map(|e| {
         let c = colour(e);
         images.add(pixels(
-            &["c...c", ".....", "..v..", ".....", "c...c"],
+            &[
+                "c..c..c",
+                ".......",
+                "..v.v..",
+                "c.....c",
+                "..v.v..",
+                ".......",
+                "c..c..c",
+            ],
             &[(b'c', shade(c, 1.4)), (b'v', shade(VENOM, 1.2))],
         ))
     });
     let spark = images.add(pixels(
-        &[".y.", "ywy", ".y."],
+        &["..y..", "..y..", "yywyy", "..y..", "..y.."],
         &[(b'y', [250, 220, 120, 255]), (b'w', [255, 255, 240, 255])],
     ));
     let steam = images.add(pixels(
@@ -199,6 +227,7 @@ fn anchor(
 }
 
 /// Bursts for what just happened (`Match::effects`).
+#[allow(clippy::too_many_arguments)]
 fn burst(
     mut commands: Commands,
     mut game: ResMut<Match>,
@@ -206,6 +235,9 @@ fn burst(
     tokens: Query<(&Token, &GlobalTransform)>,
     camera: Single<&Transform, With<crate::TableCamera>>,
     mut scatter: Local<Scatter>,
+    // The element of each seat's last poison: a bite that takes the last
+    // stack leaves none in the view to colour it by.
+    mut known: Local<Vec<Option<Element>>>,
 ) {
     if game.effects.is_empty() {
         return;
@@ -217,16 +249,37 @@ fn burst(
         commands.spawn((p, sprite(image.clone()), Transform::from_translation(at)));
     };
     for event in &events {
+        let player = match *event {
+            Event::Poisoned { player, .. }
+            | Event::PoisonBit { player, .. }
+            | Event::PoisonFed { player, .. }
+            | Event::PoisonCured { player, .. } => player,
+            _ => continue,
+        };
+        let seat = player.0 as usize;
+        if known.len() <= seat {
+            known.resize(seat + 1, None);
+        }
+        if let Event::Poisoned { element, .. } = *event {
+            known[seat] = Some(element);
+        }
+        let Some(feet) = anchor(&game, player, &tokens, towards) else {
+            continue;
+        };
+        let element = known[seat]
+            .or_else(|| {
+                game.game
+                    .champion(player)
+                    .and_then(|c| c.poison)
+                    .map(|p| p.element)
+            })
+            .or_else(|| game.game.champion(player).map(|c| c.god.element()))
+            .unwrap_or(Element::Wood);
+        let i = element.index();
         match *event {
             // A splash from above: drops fall onto the champion and the
             // ground around, a few bubbles rise.
-            Event::Poisoned {
-                player, element, ..
-            } => {
-                let Some(feet) = anchor(&game, player, &tokens, towards) else {
-                    continue;
-                };
-                let i = element.index();
+            Event::Poisoned { .. } => {
                 for _ in 0..10 {
                     let vel = Vec3::new(r.next() * 1.3, 1.2 + r.next().abs() * 1.4, r.next() * 1.3);
                     spawn(
@@ -239,66 +292,27 @@ fn burst(
                     bubbles(&mut spawn, &sprites, i, feet, r, 0.2 + k as f32 * 0.15);
                 }
             }
-            // A sting from within: bubbles rise and pop.
-            Event::PoisonBit { player, stacks, .. } => {
-                let Some(feet) = anchor(&game, player, &tokens, towards) else {
-                    continue;
-                };
-                let Some(element) = game
-                    .game
-                    .champion(player)
-                    .map(|c| c.poison.map_or(c.god.element(), |p| p.element))
-                else {
-                    continue;
-                };
-                // The last stack leaves with the bite: fewer bubbles.
+            // A sting from within: bubbles rise and pop. The last stack
+            // leaves with the bite: fewer bubbles.
+            Event::PoisonBit { stacks, .. } => {
                 let n = if stacks == 0 { 3 } else { 5 };
                 for k in 0..n {
-                    bubbles(
-                        &mut spawn,
-                        &sprites,
-                        element.index(),
-                        feet,
-                        r,
-                        k as f32 * 0.08,
-                    );
+                    bubbles(&mut spawn, &sprites, i, feet, r, k as f32 * 0.08);
                 }
             }
-            // Fed: a boil of bubbles, bigger and faster.
-            Event::PoisonFed { player, .. } => {
-                let Some(feet) = anchor(&game, player, &tokens, towards) else {
-                    continue;
-                };
-                let Some(element) = game
-                    .game
-                    .champion(player)
-                    .and_then(|c| c.poison.map(|p| p.element))
-                else {
-                    continue;
-                };
+            // Fed: a boil of bubbles, more and quicker.
+            Event::PoisonFed { .. } => {
                 for k in 0..9 {
-                    bubbles(
-                        &mut spawn,
-                        &sprites,
-                        element.index(),
-                        feet,
-                        r,
-                        k as f32 * 0.04,
-                    );
+                    bubbles(&mut spawn, &sprites, i, feet, r, k as f32 * 0.04);
                 }
             }
             // Purged: steam hisses off and bright sparks rise.
-            Event::PoisonCured { player, .. } => {
-                let Some(feet) = anchor(&game, player, &tokens, towards) else {
-                    continue;
-                };
+            Event::PoisonCured { .. } => {
+                known[seat] = None;
                 for _ in 0..6 {
                     let vel = Vec3::new(r.next() * 0.3, 0.6 + r.next().abs() * 0.4, r.next() * 0.3);
-                    spawn(
-                        &sprites.steam,
-                        feet + Vec3::new(r.next() * 0.25, CHEST, r.next() * 0.25),
-                        Particle::new(vel, -0.3, 0.9),
-                    );
+                    let at = feet + Vec3::new(r.next() * 0.25, CHEST, r.next() * 0.25);
+                    spawn(&sprites.steam, at, Particle::new(vel, -0.3, 0.9));
                 }
                 for _ in 0..10 {
                     let vel = Vec3::new(r.next() * 0.9, 1.2 + r.next().abs() * 0.8, r.next() * 0.9);
@@ -314,6 +328,45 @@ fn burst(
     }
 }
 
+/// Dev aid: `NECROMY_FX=poison` plays the poison effects over the human's
+/// token in a loop, for screenshots. Looks only: the rules never hear of it.
+fn demo(time: Res<Time>, mut game: ResMut<Match>, mut next: Local<(f32, usize)>) {
+    if std::env::var("NECROMY_FX").as_deref() != Ok("poison") {
+        return;
+    }
+    let (wait, step) = &mut *next;
+    *wait -= time.delta_secs();
+    if *wait > 0.0 {
+        return;
+    }
+    *wait = 1.6;
+    let player = game.human;
+    let element = game
+        .game
+        .champion(player)
+        .map_or(Element::Earth, |c| c.god.element().quenches());
+    let event = match *step % 4 {
+        0 => Event::Poisoned {
+            player,
+            element,
+            stacks: 2,
+        },
+        1 => Event::PoisonBit {
+            player,
+            amount: 1,
+            hp: 1,
+            stacks: 1,
+        },
+        2 => Event::PoisonFed { player, stacks: 2 },
+        _ => Event::PoisonCured {
+            player,
+            by: necromy_rules::Cure::Temple,
+        },
+    };
+    *step += 1;
+    game.bypass_change_detection().effects.push(event);
+}
+
 /// One bubble from the chest that rises and pops after a while.
 fn bubbles(
     spawn: &mut impl FnMut(&Handle<Image>, Vec3, Particle),
@@ -323,7 +376,7 @@ fn bubbles(
     r: &mut Scatter,
     delay: f32,
 ) {
-    let at = feet + Vec3::new(r.next() * 0.25, CHEST + r.next() * 0.2, r.next() * 0.25);
+    let at = feet + Vec3::new(r.next() * 0.35, CHEST + r.next() * 0.25, r.next() * 0.35);
     let vel = Vec3::new(
         r.next() * 0.15,
         0.55 + r.next().abs() * 0.35,
@@ -364,6 +417,7 @@ impl Particle {
 }
 
 /// A bubble now and then over everyone who carries poison.
+#[allow(clippy::too_many_arguments)]
 fn aura(
     mut commands: Commands,
     time: Res<Time>,
