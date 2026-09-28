@@ -12,6 +12,7 @@ mod god_pick;
 mod gods_ui;
 mod gpu;
 mod hud;
+mod icon;
 mod icons;
 mod lighting;
 mod lobby;
@@ -49,7 +50,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins(Sprite3dPlugin)
+        .add_plugins((Sprite3dPlugin, icon::IconPlugin))
         .init_schedule(InGame)
         .init_schedule(MatchBegins)
         .add_systems(Update, run_game)
