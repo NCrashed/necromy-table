@@ -34,7 +34,7 @@ use crate::lighting::DayNight;
 use crate::play::Match;
 
 /// Loudness of music against everything else, linear.
-const MUSIC_GAIN: f32 = 0.5;
+const MUSIC_GAIN: f32 = 0.7;
 /// Seconds for one piece to fade out and the next in.
 const FADE_SECS: f32 = 4.0;
 /// Seconds the camera must stay in a god's land before its piece starts, so
