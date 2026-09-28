@@ -31,8 +31,11 @@ impl Plugin for HudPlugin {
             .add_systems(Startup, spawn_hud)
             .add_systems(
                 crate::InGame,
-                rebuild_hand
-                    .run_if(resource_changed::<Match>.or_else(resource_changed::<Selection>)),
+                rebuild_hand.run_if(
+                    resource_changed::<Match>
+                        .or_else(resource_changed::<Selection>)
+                        .or_else(resource_changed::<crate::tutorial::Focus>),
+                ),
             )
             .add_systems(
                 crate::InGame,
@@ -159,6 +162,7 @@ fn rebuild_hand(
     mut commands: Commands,
     game: Res<Match>,
     selection: Res<Selection>,
+    focus: Res<crate::tutorial::Focus>,
     font: Res<UiFont>,
     card_art: Res<CardArt>,
     stat_art: Res<StatArt>,
@@ -184,7 +188,11 @@ fn rebuild_hand(
         let selected = selection.card == Some(card) || selection.burn.contains(&card);
         let look = CardLook {
             usable: usable || selected,
-            outline: selected.then_some(Color::srgb(1.0, 0.82, 0.3)),
+            // Gold when chosen; the tutorial's violet on the card it asks for.
+            outline: selected.then_some(Color::srgb(1.0, 0.82, 0.3)).or_else(|| {
+                (focus.card == Some(game.game.def(card).name))
+                    .then_some(Color::srgb(0.75, 0.55, 1.0))
+            }),
             extra: Vec::new(),
             badge: crate::ring_ui::badge(&game.game, game.human, card),
             cost: Some(game.game.cost_of(game.human, card)),

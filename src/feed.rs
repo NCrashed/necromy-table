@@ -23,11 +23,10 @@ pub struct FeedPlugin;
 
 impl Plugin for FeedPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn)
-            .add_systems(
-                crate::InGame,
-                (rebuild.run_if(resource_changed::<Match>), card_tip).chain(),
-            );
+        app.add_systems(Startup, spawn).add_systems(
+            crate::InGame,
+            (rebuild.run_if(resource_changed::<Match>), card_tip).chain(),
+        );
     }
 }
 
@@ -78,12 +77,11 @@ fn card_named(name: &str) -> Option<&'static CardDef> {
 fn pieces(line: &str) -> Vec<(String, Option<&'static CardDef>)> {
     let mut out: Vec<(String, Option<&'static CardDef>)> = Vec::new();
     let mut rest = line;
-    let push_plain = |out: &mut Vec<(String, Option<&'static CardDef>)>, s: &str| {
-        match out.last_mut() {
+    let push_plain =
+        |out: &mut Vec<(String, Option<&'static CardDef>)>, s: &str| match out.last_mut() {
             Some((text, None)) => text.push_str(s),
             _ => out.push((s.to_string(), None)),
-        }
-    };
+        };
     while let Some(open) = rest.find('«') {
         let after = &rest[open + '«'.len_utf8()..];
         let Some(close) = after.find('»') else {
@@ -96,7 +94,10 @@ fn pieces(line: &str) -> Vec<(String, Option<&'static CardDef>)> {
                 out.push((name.to_string(), Some(def)));
                 push_plain(&mut out, "»");
             }
-            None => push_plain(&mut out, &rest[..open + '«'.len_utf8() + close + '»'.len_utf8()]),
+            None => push_plain(
+                &mut out,
+                &rest[..open + '«'.len_utf8() + close + '»'.len_utf8()],
+            ),
         }
         rest = &after[close + '»'.len_utf8()..];
     }
@@ -125,7 +126,11 @@ fn rebuild(
                 ))
                 .id(),
             None => commands
-                .spawn((TextSpan::new(text), font.text(FONT_SIZE), TextColor(FEED_COLOR)))
+                .spawn((
+                    TextSpan::new(text),
+                    font.text(FONT_SIZE),
+                    TextColor(FEED_COLOR),
+                ))
                 .id(),
         })
         .collect();

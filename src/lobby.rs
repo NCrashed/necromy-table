@@ -1,4 +1,4 @@
-//! The front of the game: the //! Dev aids: `NECROMY_PLAY=local|menu|create|join:CODE|return` skips the clicks, and the lobby (docs/design.md §17).
+//! The front of the game: the menu and the lobby (docs/design.md §17).
 //!
 //! Before a match there is no `Match`: this screen owns the window. From
 //! the menu one plays alone (a table in this process) or with friends: open
@@ -100,6 +100,8 @@ pub struct Front {
     /// Setting up a single player match, and the god taken for it.
     alone: bool,
     alone_god: God,
+    /// The tutorial's chapters are listed.
+    tutorial: bool,
 }
 
 impl Front {
@@ -124,6 +126,7 @@ impl Front {
             returning: false,
             alone: std::env::var_os("NECROMY_PLAY").is_some_and(|v| v == "alone"),
             alone_god: crate::play::default_god(),
+            tutorial: std::env::var_os("NECROMY_PLAY").is_some_and(|v| v == "tutorial"),
         }
     }
 
@@ -205,6 +208,10 @@ enum FrontButton {
     Leave,
     /// Sit back down at the match the saved ticket names.
     Return,
+    /// The tutorial's list of chapters.
+    Tutorial,
+    /// Play tutorial chapter `n` (0-based).
+    Chapter(usize),
 }
 
 fn spawn(mut commands: Commands) {
@@ -245,6 +252,13 @@ fn dev_play(mut done: Local<bool>, mut front: ResMut<Front>, mut commands: Comma
         Ok("local") => commands.insert_resource(Match::local(crate::play::default_god())),
         Ok("return") => {
             front.go_back();
+        }
+        Ok(play) if play.starts_with("tutorial:") => {
+            let n: usize = play["tutorial:".len()..].parse().unwrap_or(1);
+            let n = n.clamp(1, crate::tutorial::chapters().len()) - 1;
+            let (game, lesson) = crate::tutorial::start(n);
+            commands.insert_resource(game);
+            commands.insert_resource(lesson);
         }
         _ => {}
     }
@@ -387,7 +401,16 @@ fn buttons(
             FrontButton::Alone => front.alone = true,
             FrontButton::Solo(god) => front.alone_god = god,
             FrontButton::Begin => commands.insert_resource(Match::local(front.alone_god)),
-            FrontButton::Back => front.alone = false,
+            FrontButton::Back => {
+                front.alone = false;
+                front.tutorial = false;
+            }
+            FrontButton::Tutorial => front.tutorial = true,
+            FrontButton::Chapter(n) => {
+                let (game, lesson) = crate::tutorial::start(n);
+                commands.insert_resource(game);
+                commands.insert_resource(lesson);
+            }
             FrontButton::Open => front.dial(ClientMsg::Create),
             FrontButton::Sit => {
                 let code = normalize_code(&front.code);
@@ -559,6 +582,7 @@ fn rebuild(
 
     match &front.lobby {
         None if front.alone => alone_rows(&mut commands, &font, &art, &front, &mut rows),
+        None if front.tutorial => tutorial_rows(&mut commands, &font, &mut rows),
         None => menu(&mut commands, &font, &front, &mut rows),
         Some(lobby) => lobby_rows(&mut commands, &font, &art, lobby, &mut rows),
     }
@@ -592,6 +616,15 @@ fn menu(commands: &mut Commands, font: &UiFont, front: &Front, rows: &mut Vec<En
             DIM,
         ));
     }
+    let learn = button(commands, font, FrontButton::Tutorial, "Обучение", true);
+    rows.push(learn);
+    rows.push(text(
+        commands,
+        font,
+        "Четыре коротких главы: как ходить, играть карты, отвечать и драться.",
+        12.0,
+        DIM,
+    ));
     let alone = button(commands, font, FrontButton::Alone, "Одиночная игра", true);
     rows.push(alone);
     rows.push(text(
@@ -640,6 +673,33 @@ fn menu(commands: &mut Commands, font: &UiFont, front: &Front, rows: &mut Vec<En
         11.0,
         DIM,
     ));
+}
+
+/// The tutorial's chapters, the finished ones marked.
+fn tutorial_rows(commands: &mut Commands, font: &UiFont, rows: &mut Vec<Entity>) {
+    rows.push(text(
+        commands,
+        font,
+        "Обучение: каждая глава — маленькая сцена с подсказками шаг за шагом.",
+        14.0,
+        DIM,
+    ));
+    let done = crate::tutorial::done_chapters();
+    let first_new = (0..crate::tutorial::chapters().len()).find(|n| !done.contains(n));
+    for (n, chapter) in crate::tutorial::chapters().iter().enumerate() {
+        let mark = if done.contains(&n) { "  ✓" } else { "" };
+        let b = button(
+            commands,
+            font,
+            FrontButton::Chapter(n),
+            &format!("{}. {}{mark}", n + 1, chapter.title),
+            first_new == Some(n),
+        );
+        rows.push(b);
+        rows.push(text(commands, font, chapter.blurb, 12.0, DIM));
+    }
+    let back = button(commands, font, FrontButton::Back, "Назад", false);
+    rows.push(back);
 }
 
 /// Single player: pick a god, the bots take the other four.

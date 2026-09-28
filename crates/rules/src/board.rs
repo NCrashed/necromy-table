@@ -66,6 +66,7 @@ pub struct Tile {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Board {
     tiles: HexagonalMap<Tile>,
+    radius: u32,
     starts: [Hex; 5],
     temples: [Hex; 5],
 }
@@ -132,17 +133,44 @@ impl Board {
 
         Board {
             tiles,
+            radius: BOARD_RADIUS,
             starts,
             temples,
         }
     }
 
+    /// A small plain board for a scripted scene (a tutorial chapter): all
+    /// plains around the Table, regions as usual, starts on the rim and
+    /// temple spots halfway (plain until the scene sets them).
+    pub fn plain(radius: u32) -> Self {
+        let radius = radius.max(2);
+        let tiles = HexagonalMap::new(Hex::ZERO, radius, |hex| Tile {
+            terrain: if hex == Hex::ZERO {
+                Terrain::Table
+            } else {
+                Terrain::Plains
+            },
+            region: region_of(hex),
+            corpse: None,
+        });
+        Board {
+            tiles,
+            radius,
+            starts: God::ALL.map(|god| closest_to_bisector(god, radius)),
+            temples: God::ALL.map(|god| closest_to_bisector(god, radius.div_ceil(2))),
+        }
+    }
+
     pub fn radius(&self) -> u32 {
-        BOARD_RADIUS
+        self.radius
     }
 
     pub fn contains(&self, hex: Hex) -> bool {
-        hex.ulength() <= BOARD_RADIUS
+        hex.ulength() <= self.radius
+    }
+
+    pub(crate) fn set_start(&mut self, god: God, hex: Hex) {
+        self.starts[god.index()] = hex;
     }
 
     pub fn tile(&self, hex: Hex) -> Option<&Tile> {

@@ -40,6 +40,7 @@ impl Plugin for BoardPlugin {
                         .or_else(resource_changed::<Selection>)
                         .or_else(resource_changed::<Hovered>)
                         .or_else(resource_changed::<crate::lighting::DayNight>)
+                        .or_else(resource_changed::<crate::tutorial::Focus>)
                         .or_else(painted_markers_loading),
                 ),
         )
@@ -361,6 +362,7 @@ fn spawn_board(
 #[allow(clippy::too_many_arguments)]
 fn sync_tiles(
     game: Res<Match>,
+    focus: Res<crate::tutorial::Focus>,
     day_night: Res<crate::lighting::DayNight>,
     selection: Res<Selection>,
     hovered: Res<Hovered>,
@@ -422,6 +424,7 @@ fn sync_tiles(
             necromy_rules::Goal::ReachHex(h) => Some(h),
             _ => None,
         })
+        .chain(focus.hexes.iter().copied())
         .collect();
     for (tile, material) in &tiles {
         let lit = if targets.contains(&tile.0) {
@@ -466,9 +469,11 @@ fn painted_markers_loading(
 }
 
 /// Corpses for everyone; traps only for their owner, the human.
+#[allow(clippy::too_many_arguments)]
 fn sync_markers(
     mut commands: Commands,
     game: Res<Match>,
+    focus: Res<crate::tutorial::Focus>,
     board: Res<Board>,
     sprites: Res<MarkerSprites>,
     images: Res<Assets<Image>>,
@@ -553,6 +558,7 @@ fn sync_markers(
             necromy_rules::Goal::ReachHex(h) => Some(h),
             _ => None,
         })
+        .chain(focus.hexes.iter().copied())
         .map(|h| {
             (
                 h,

@@ -22,8 +22,8 @@ pub use game::{
     BodyVerb, CHOSEN, Champion, Character, Check, CheckKind, Condition, Deed, Event, Fighter,
     GUARD_DICE, GUARD_RELIEF, GUARD_STEPS, GUARD_THRESHOLD, Game, Goal, Guard, Intent, Law, Line,
     LineKind, Patronage, Phase, PlayerId, RevealReason, RuleError, SECRET_FROM_ROUND, SIGN,
-    STAGE_THRESHOLD, STAGES, Said, Score, Setup, StyleReason, TRISHNA_DRIFT, Target, Taste,
-    TasteKind, TimeOfDay, Trap, VOICE, Window, WindowKind, WishKind, WorldStir,
+    STAGE_THRESHOLD, STAGES, Said, Scenario, SceneSeat, Score, Setup, StyleReason, TRISHNA_DRIFT,
+    Target, Taste, TasteKind, TimeOfDay, Trap, VOICE, Window, WindowKind, WishKind, WorldStir,
 };
 pub use gods::{Element, God};
 pub use hexx::Hex;

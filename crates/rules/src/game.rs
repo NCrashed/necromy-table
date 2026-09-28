@@ -676,6 +676,9 @@ pub struct Game {
     last_fight: u32,
     /// Deeds since the last story check.
     pending_story: Vec<(PlayerId, style::Deed)>,
+    /// A scripted scene (a tutorial chapter, `scenario.rs`): the world holds
+    /// still. No new bodies, guard, stories, Crown or wishes, no draws.
+    scripted: bool,
     log: Vec<Event>,
 }
 
@@ -759,6 +762,7 @@ impl Game {
             next_line: 0,
             last_fight: 0,
             pending_story: Vec::new(),
+            scripted: false,
             log: Vec::new(),
         };
 
@@ -1384,7 +1388,9 @@ impl Game {
             events.push(Event::Dusk { round: self.round });
             self.dusk(events);
             self.judge_the_day(events);
-            self.storyteller(events);
+            if !self.scripted {
+                self.storyteller(events);
+            }
         }
         self.start_round(events);
     }
@@ -2133,6 +2139,9 @@ impl Game {
     }
 
     fn refill_hand(&mut self, player: PlayerId, events: &mut Vec<Event>) {
+        if self.scripted {
+            return;
+        }
         let limit = self.champions[player.0 as usize].hand_limit();
         let have = self.hands[player.0 as usize].len();
         self.draw(player, limit.saturating_sub(have), events);
@@ -2157,7 +2166,9 @@ impl Game {
         });
         if self.time == TimeOfDay::Day {
             events.push(Event::Dawn { round: self.round });
-            self.dawn(events);
+            if !self.scripted {
+                self.dawn(events);
+            }
         }
         // Everyone takes their turn at once (§11.2).
         for player in self.order.clone() {
@@ -2231,6 +2242,9 @@ impl Game {
                 events.push(Event::CorpseDecayed { hex });
             }
         }
+        if self.scripted {
+            return;
+        }
         if self.time == TimeOfDay::Night {
             self.spawn_corpse(events);
         }
@@ -2259,6 +2273,7 @@ impl Game {
 mod battle;
 mod guard;
 mod laws;
+mod scenario;
 mod stealth;
 mod story;
 mod style;
@@ -2269,6 +2284,7 @@ mod world;
 pub use battle::Score;
 pub use guard::{GUARD_DICE, GUARD_RELIEF, GUARD_STEPS, Guard};
 pub use laws::{BURDEN_FREE, CHOSEN, CRACK_REACH, Law, Patronage, SENTENCE_THRESHOLD, SIGN, VOICE};
+pub use scenario::{Scenario, SceneSeat};
 pub use stealth::RevealReason;
 pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};

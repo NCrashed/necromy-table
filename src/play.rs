@@ -117,7 +117,17 @@ pub struct Match {
     /// Feed lines that would spoil dice still rolling on screen.
     held: Vec<String>,
     holding: bool,
+    /// A tutorial chapter runs (`tutorial.rs`): what the table told, for its
+    /// steps to watch. `None` outside the tutorial.
+    pub lesson_events: Option<Vec<Event>>,
+    /// What the human may do now; anything else is turned away (a tutorial
+    /// step leads by the hand). `refused` counts the turned-away intents.
+    pub gate: Option<Gate>,
+    pub refused: u32,
 }
+
+/// Whether the human may make this intent now.
+pub type Gate = std::sync::Arc<dyn Fn(&Game, PlayerId, &Intent) -> bool + Send + Sync>;
 
 /// What the table told about the gods' voice.
 #[derive(Default)]
@@ -357,6 +367,44 @@ impl Match {
         Match::begin(Link::Local(Box::new(table)), human, autoplay, first)
     }
 
+    /// A tutorial chapter: `scene` on a table in this process, the human in
+    /// the first seat, dummies in the rest (`Seat::Dummy`).
+    pub fn tutorial(scene: &necromy_rules::Scenario) -> Self {
+        let (game, events) = Game::scenario(scene);
+        let seats = (0..scene.seats.len())
+            .map(|i| if i == 0 { Seat::Human } else { Seat::Dummy })
+            .collect();
+        let mut table = Table::from_game(game, events, seats, 0, None, None);
+        let human = PlayerId(0);
+        let first = table.drain(human);
+        let mut m = Match::begin(Link::Local(Box::new(table)), human, false, first);
+        m.lesson_events = Some(Vec::new());
+        m
+    }
+
+    /// A tutorial's rival plays `card` (by name) at `target`, as scripted.
+    /// Only on a table in this process; false if it could not.
+    pub fn script_play(&mut self, player: PlayerId, card: &str, target: Target) -> bool {
+        let Link::Local(table) = &mut self.link else {
+            return false;
+        };
+        let game = table.game();
+        let Some(&id) = game
+            .hand(player)
+            .iter()
+            .find(|&&c| game.def(c).name == card)
+        else {
+            warn!("script: {card} is not in the hand of seat {}", player.0);
+            return false;
+        };
+        let done = table.act_as(player, Intent::Play { card: id, target });
+        if let Err(err) = &done {
+            warn!("script: {card} refused: {err}");
+        }
+        self.pump();
+        done.is_ok()
+    }
+
     /// A match on a server: `first` holds the table's first update for `seat`.
     pub fn remote(
         conn: ClientConn,
@@ -411,6 +459,9 @@ impl Match {
             told_serial: 0,
             held: Vec::new(),
             holding: false,
+            lesson_events: None,
+            gate: None,
+            refused: 0,
         };
         m.receive(first.into_iter().map(Incoming::Table).collect());
         m
@@ -446,6 +497,13 @@ impl Match {
     /// a moment later, and the view is stale until then.
     pub fn act(&mut self, player: PlayerId, intent: Intent) -> Result<(), RuleError> {
         debug_assert_eq!(player, self.human, "the client acts only for its seat");
+        if let Some(gate) = self.gate.clone()
+            && !gate(&self.game, player, &intent)
+        {
+            self.refused += 1;
+            self.walk.clear();
+            return Ok(());
+        }
         self.game.clone().apply(player, intent.clone())?;
         if self.answer_due {
             self.queued.push_back(intent);
@@ -581,6 +639,9 @@ impl Match {
 
     fn record(&mut self, events: &[Event]) {
         self.heard.extend_from_slice(events);
+        if let Some(seen) = self.lesson_events.as_mut() {
+            seen.extend_from_slice(events);
+        }
         // A wish in this batch, and the lines of what it did.
         let mut wished: Option<WishReply> = None;
         // Outcome of a card aimed at the human, gathered from this batch.

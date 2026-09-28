@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use necromy_oracle::{Job, Oracle, prompt};
-use necromy_rules::{Event, Game, God, Intent, PlayerId, RuleError, Setup, bot};
+use necromy_rules::{Event, Game, God, Intent, Phase, PlayerId, RuleError, Setup, bot};
 use serde::{Deserialize, Serialize};
 
 mod clock;
@@ -44,12 +44,16 @@ pub enum Seat {
     Autoplay {
         wish_by_hand: bool,
     },
+    /// A tutorial's rival: stands still and passes. It keeps its turn open
+    /// (so a script can play for it, `act_as`) until something waits on it
+    /// or everyone else is done.
+    Dummy,
 }
 
 impl Seat {
     /// A client watches this seat and gets its view.
     pub fn watched(self) -> bool {
-        self != Seat::Bot
+        !matches!(self, Seat::Bot | Seat::Dummy)
     }
 }
 
@@ -169,6 +173,34 @@ impl Table {
             seed: config.seed,
             champions: config.champions,
         });
+        Table::from_game(
+            game,
+            events,
+            config.seats,
+            config.salt,
+            config.oracle,
+            config.timers,
+        )
+    }
+
+    /// A table around a match already set up (a scripted scene).
+    pub fn from_game(
+        game: Game,
+        events: Vec<Event>,
+        seats: Vec<Seat>,
+        salt: u64,
+        oracle: Option<String>,
+        timers: Option<Timers>,
+    ) -> Table {
+        assert_eq!(seats.len(), game.champions().len(), "a seat per champion");
+        let config = Config {
+            seed: game.seed(),
+            champions: Vec::new(),
+            seats,
+            salt,
+            oracle,
+            timers,
+        };
         let voice = config.oracle.map(|addr| {
             let online = Arc::new(AtomicBool::new(false));
             {
@@ -285,6 +317,40 @@ impl Table {
         self.hear();
         self.run_clocks(dt);
         self.run_bots();
+    }
+
+    /// What a dummy does now, if anything: it answers every window with
+    /// nothing and refuses a wish; its own turn it ends only once someone
+    /// waits on it or everyone else is done, so a script may still play
+    /// for it meanwhile.
+    fn dummy_intent(&self, player: PlayerId) -> Option<Intent> {
+        let g = &self.game;
+        if g.wish_due() == Some(player) {
+            return Some(Intent::RefuseWish);
+        }
+        if g.to_answer(player).is_some() {
+            return Some(if g.battle_dice(player).is_some() {
+                Intent::Burn { cards: Vec::new() }
+            } else {
+                Intent::Pass
+            });
+        }
+        if !g.free_to_act(player) {
+            return None;
+        }
+        let waited_on = g.players().any(
+            |p| matches!(g.phase(p), Phase::Held { on, .. } if on.is_none_or(|o| o == player)),
+        );
+        let others_done = g
+            .players()
+            .filter(|&p| p != player && !matches!(self.seats[p.0 as usize], Seat::Dummy))
+            .all(|p| *g.phase(p) == Phase::Done);
+        (waited_on || others_done).then_some(Intent::EndTurn)
+    }
+
+    /// A scripted move for a seat (a tutorial's rival), as if it played it.
+    pub fn act_as(&mut self, player: PlayerId, intent: Intent) -> Result<(), RuleError> {
+        self.act(player, intent)
     }
 
     fn act(&mut self, player: PlayerId, intent: Intent) -> Result<(), RuleError> {
@@ -408,6 +474,7 @@ impl Table {
                 Seat::Bot => true,
                 Seat::Autoplay { wish_by_hand } => !(wish_by_hand && wish_due == Some(p)),
                 Seat::Human => false,
+                Seat::Dummy => self.dummy_intent(p).is_some(),
             })
             .collect();
         if bots.is_empty() {
@@ -419,7 +486,13 @@ impl Table {
             if self.game.winner().is_some() || !self.game.awaiting().contains(&player) {
                 continue;
             }
-            let intent = bot::choose(&self.game, player);
+            let intent = match self.seats[player.0 as usize] {
+                Seat::Dummy => match self.dummy_intent(player) {
+                    Some(intent) => intent,
+                    None => continue,
+                },
+                _ => bot::choose(&self.game, player),
+            };
             if self.act(player, intent).is_err() {
                 // A bot that cannot act must not stall the table.
                 let fallback = if self.game.to_answer(player).is_some() {

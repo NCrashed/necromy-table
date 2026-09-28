@@ -22,6 +22,7 @@ mod stats;
 mod story_ui;
 mod token;
 mod turn_ui;
+mod tutorial;
 mod ui_skin;
 mod victory_ui;
 mod wish_ui;
@@ -76,6 +77,7 @@ fn main() {
             story_ui::StoryUiPlugin,
             gods_ui::GodsUiPlugin,
             feed::FeedPlugin,
+            tutorial::TutorialPlugin,
             ring_ui::RingUiPlugin,
             audio::SoundPlugin,
         ))
