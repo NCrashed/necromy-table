@@ -63,10 +63,14 @@ pub enum WishKind {
     Truce,
     /// "Let us trade places".
     Swap,
+    /// "Let them pay me their due": every rival gives a card or takes Threat.
+    Tribute,
+    /// "I bet they will...": a wager on a rival's day, settled at dusk.
+    Wager,
 }
 
 impl WishKind {
-    pub const ALL: [WishKind; 14] = [
+    pub const ALL: [WishKind; 16] = [
         WishKind::Strength,
         WishKind::Weaken,
         WishKind::Land,
@@ -81,6 +85,8 @@ impl WishKind {
         WishKind::Forge,
         WishKind::Truce,
         WishKind::Swap,
+        WishKind::Tribute,
+        WishKind::Wager,
     ];
 
     /// Asks for the outcome itself instead of going through the world: always
@@ -98,6 +104,7 @@ impl WishKind {
                 | WishKind::Blight
                 | WishKind::Truce
                 | WishKind::Swap
+                | WishKind::Wager
         )
     }
 }
@@ -142,6 +149,13 @@ pub enum Act {
     Swap {
         target: PlayerId,
     },
+    /// Every rival gives the asker a card or takes Threat.
+    Tribute,
+    /// The asker bets that the rival will do `bet` before dusk.
+    Wager {
+        target: PlayerId,
+        bet: Bet,
+    },
 }
 
 impl Act {
@@ -161,6 +175,8 @@ impl Act {
             Act::Forge => WishKind::Forge,
             Act::Truce { .. } => WishKind::Truce,
             Act::Swap { .. } => WishKind::Swap,
+            Act::Tribute => WishKind::Tribute,
+            Act::Wager { .. } => WishKind::Wager,
         }
     }
 
@@ -171,7 +187,8 @@ impl Act {
             | Act::Hand { target }
             | Act::Blight { target }
             | Act::Truce { target }
-            | Act::Swap { target } => Some(target),
+            | Act::Swap { target }
+            | Act::Wager { target, .. } => Some(target),
             _ => None,
         }
     }
@@ -180,7 +197,7 @@ impl Act {
     /// table are worth more.
     pub const fn cost(self) -> u8 {
         match self {
-            Act::Forge | Act::Swap { .. } => 2,
+            Act::Forge | Act::Swap { .. } | Act::Tribute => 2,
             _ => 1,
         }
     }
@@ -202,9 +219,50 @@ impl Act {
             WishKind::Forge => Act::Forge,
             WishKind::Truce => Act::Truce { target: target? },
             WishKind::Swap => Act::Swap { target: target? },
+            WishKind::Tribute => Act::Tribute,
+            // A prepared wager bets on a fight, the likeliest thing to happen.
+            WishKind::Wager => Act::Wager {
+                target: target?,
+                bet: Bet::Fight,
+            },
         })
     }
 }
+
+/// What a wager bets a rival will do before dusk (§7.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Bet {
+    /// Fight a battle, attacking or attacked.
+    Fight,
+    /// Take a settlement, temple or the Table.
+    Claim,
+    /// Fall.
+    Fall,
+    /// Slip out of sight.
+    Hide,
+}
+
+impl Bet {
+    pub const ALL: [Bet; 4] = [Bet::Fight, Bet::Claim, Bet::Fall, Bet::Hide];
+}
+
+/// A wager a wish made: `player` bets `target` does `bet` before the dusk
+/// of `until`, with `god` holding the stakes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Wager {
+    pub player: PlayerId,
+    pub target: PlayerId,
+    pub bet: Bet,
+    pub god: God,
+    pub until: u32,
+    /// It happened: the bet is won, whatever comes after.
+    pub happened: bool,
+}
+
+/// Style a won wager pays, Threat a lost one costs (with the god's curse).
+pub const WAGER_STAKE: i8 = 2;
+/// Threat a rival takes for refusing tribute.
+pub const TRIBUTE_THREAT: i8 = 2;
 
 /// A truce a wish made (§7.3): neither fights the other until the dusk of
 /// `until`; who breaks it carries the curse of the god who granted it.
@@ -295,23 +353,23 @@ pub const fn taste_for(god: God, kind: WishKind) -> i8 {
     match (god, kind) {
         // Hunger loves strength, feasts of the dead and a gift that feeds;
         // quiet and truce bore it.
-        (God::Trishna, Strength | Dead | Forge) => 1,
+        (God::Trishna, Strength | Dead | Forge | Tribute) => 1,
         (God::Trishna, Peace | Truce) => -1,
         // Order loves land, judgement, a contract and the registry of
         // secrets; the dead are paperwork, a swap is disorder.
-        (God::Ahamar, Land | Weaken | Truce | Secret) => 1,
+        (God::Ahamar, Land | Weaken | Truce | Secret | Wager) => 1,
         (God::Ahamar, Dead | Swap) => -1,
         // Dissolution loves letting go, loosening a grip, seeing through,
         // one thing becoming another; not strength, not a new thing to hold.
         (God::Maya, Peace | Weaken | Swap | Hand) => 1,
-        (God::Maya, Strength | Forge) => -1,
+        (God::Maya, Strength | Forge | Tribute) => -1,
         // Renunciation loves quiet, the dead at rest and the price a desire
         // exacts; not strength, not blessing what is held.
-        (God::Zaga, Peace | Dead | Blight) => 1,
+        (God::Zaga, Peace | Dead | Blight | Tribute) => 1,
         (God::Zaga, Strength | Bless) => -1,
         // Growth loves the land, strength, what grows in the hand; not harm.
         (God::Bhava, Land | Strength | Bless | Forge) => 1,
-        (God::Bhava, Weaken | Blight) => -1,
+        (God::Bhava, Weaken | Blight | Wager) => -1,
         _ => 0,
     }
 }
@@ -656,6 +714,39 @@ impl Game {
                     god,
                 });
             }
+            Act::Tribute => {
+                // Every rival not already answering elsewhere owes it.
+                let owed: Vec<PlayerId> = self
+                    .players()
+                    .filter(|&p| {
+                        p != player && !self.windows.iter().any(|w| w.eligible.contains(&p))
+                    })
+                    .collect();
+                self.open_window(
+                    player,
+                    super::WindowKind::Tribute { asker: player },
+                    owed,
+                    None,
+                    None,
+                    events,
+                );
+            }
+            Act::Wager { target, bet } => {
+                self.wagers.push(Wager {
+                    player,
+                    target,
+                    bet,
+                    god,
+                    until: self.round,
+                    happened: false,
+                });
+                events.push(Event::WagerMade {
+                    player,
+                    target,
+                    bet,
+                    god,
+                });
+            }
             Act::Swap { target } => {
                 let (here, there) = (self.hex_of(player), self.hex_of(target));
                 for (who, to) in [(player, there), (target, here)] {
@@ -837,5 +928,87 @@ impl Game {
         {
             self.break_truce(player, other, events);
         }
+    }
+}
+
+impl Game {
+    /// Tribute answered (§7.3): each card given goes to the asker, each
+    /// refusal is Threat.
+    pub(super) fn settle_tribute(
+        &mut self,
+        asker: PlayerId,
+        window: &super::Window,
+        events: &mut Vec<Event>,
+    ) {
+        for &p in &window.eligible {
+            match window.choices.get(&p) {
+                Some(super::Choice::Play(card, _)) => {
+                    self.hands[asker.0 as usize].push(*card);
+                    events.push(Event::TributeGiven {
+                        player: p,
+                        to: asker,
+                        card: *card,
+                    });
+                }
+                _ => {
+                    events.push(Event::TributeRefused {
+                        player: p,
+                        to: asker,
+                    });
+                    self.add_threat(p, TRIBUTE_THREAT, events);
+                }
+            }
+        }
+    }
+
+    /// `player` did `bet` today: wagers on it are won.
+    pub(super) fn note_bet(&mut self, player: PlayerId, bet: Bet) {
+        for w in &mut self.wagers {
+            if w.target == player && w.bet == bet {
+                w.happened = true;
+            }
+        }
+    }
+
+    /// Wagers are settled at the dusk of their day: Style for a won one,
+    /// Threat and the god's curse (a debt) for a lost one.
+    pub(super) fn settle_wagers(&mut self, events: &mut Vec<Event>) {
+        let round = self.round;
+        let due: Vec<Wager> = self
+            .wagers
+            .iter()
+            .copied()
+            .filter(|w| w.until <= round)
+            .collect();
+        self.wagers.retain(|w| w.until > round);
+        for w in due {
+            if w.happened {
+                events.push(Event::WagerWon {
+                    player: w.player,
+                    target: w.target,
+                    bet: w.bet,
+                    god: w.god,
+                });
+                self.add_style(w.player, i16::from(WAGER_STAKE), StyleReason::Wish, events);
+            } else {
+                events.push(Event::WagerLost {
+                    player: w.player,
+                    target: w.target,
+                    bet: w.bet,
+                    god: w.god,
+                });
+                self.add_threat(w.player, WAGER_STAKE, events);
+                self.curses[w.player.0 as usize].push(w.god);
+                events.push(Event::CurseLaid {
+                    player: w.player,
+                    god: w.god,
+                });
+            }
+        }
+    }
+
+    /// Wagers open today.
+    pub fn wagers(&self) -> &[Wager] {
+        &self.wagers
     }
 }

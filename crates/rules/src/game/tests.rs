@@ -2694,3 +2694,76 @@ fn a_blessing_takes_the_card_named_or_none_not_in_hand() {
     );
     let _ = foe;
 }
+
+#[test]
+fn tribute_is_a_card_given_or_threat_taken() {
+    let (mut g, me, foe) = duel(3);
+    let gift = g.give(foe, "Искра");
+    let events = wish_now(&mut g, me, God::Trishna, Act::Tribute);
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::WindowOpened { kind: WindowKind::Tribute { asker }, .. } if *asker == me
+    )));
+    let owed = g.awaiting();
+    assert!(!owed.contains(&me) && owed.contains(&foe));
+    let threats: Vec<u8> = g.players().map(|p| g.threat(p)).collect();
+    let mine = g.hand(me).len();
+    // The foe gives a card; everyone else refuses.
+    for p in owed {
+        let intent = if p == foe {
+            Intent::Play {
+                card: gift,
+                target: Target::None,
+            }
+        } else {
+            Intent::Pass
+        };
+        g.apply(p, intent).unwrap();
+    }
+    assert!(g.windows().is_empty());
+    assert_eq!(g.hand(me).len(), mine + 1);
+    assert!(g.hand(me).contains(&gift));
+    assert!(!g.hand(foe).contains(&gift));
+    assert_eq!(g.threat(foe), threats[foe.0 as usize], "gave, no Threat");
+    let refuser = g.players().find(|&p| p != me && p != foe).unwrap();
+    assert_eq!(
+        g.threat(refuser),
+        threats[refuser.0 as usize] + crate::game::TRIBUTE_THREAT as u8
+    );
+}
+
+#[test]
+fn a_wager_pays_if_it_happens_and_is_a_debt_if_not() {
+    // Won: the foe fights today.
+    let (mut g, me, foe) = duel(1);
+    wish_now(
+        &mut g,
+        me,
+        God::Ahamar,
+        Act::Wager {
+            target: foe,
+            bet: crate::game::Bet::Fight,
+        },
+    );
+    let foe_hex = g.champion(foe).unwrap().hex;
+    g.apply(me, Intent::Move { to: foe_hex }).unwrap();
+    g.pass_all();
+    to_next_dusk(&mut g);
+    assert!(g.log().iter().any(|e| matches!(e, Event::WagerWon { .. })));
+    assert!(g.wagers().is_empty());
+
+    // Lost: the foe takes no land today; the debt is the god's curse.
+    let (mut g, me, foe) = duel(3);
+    wish_now(
+        &mut g,
+        me,
+        God::Ahamar,
+        Act::Wager {
+            target: foe,
+            bet: crate::game::Bet::Claim,
+        },
+    );
+    to_next_dusk(&mut g);
+    assert!(g.log().iter().any(|e| matches!(e, Event::WagerLost { .. })));
+    assert!(g.curses(me).contains(&God::Ahamar));
+}

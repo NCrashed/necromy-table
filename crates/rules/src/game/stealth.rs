@@ -86,6 +86,7 @@ impl Game {
         c.seen_at = c.hex;
         let hex = c.hex;
         events.push(Event::Hid { player, hex });
+        self.note_bet(player, super::wish::Bet::Hide);
     }
 
     pub(super) fn reveal(&mut self, player: PlayerId, why: RevealReason, events: &mut Vec<Event>) {

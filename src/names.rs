@@ -256,6 +256,8 @@ pub fn wish(kind: necromy_rules::WishKind) -> &'static str {
         WishKind::Forge => "Дай мне новое оружие",
         WishKind::Truce => "Пусть между нами будет мир",
         WishKind::Swap => "Поменяй нас местами",
+        WishKind::Tribute => "Пусть мне заплатят дань",
+        WishKind::Wager => "Ставлю, что соперник вступит в бой",
     }
 }
 
@@ -547,4 +549,15 @@ pub fn card_mod(m: &necromy_rules::CardMod) -> (String, bevy::color::Color) {
         bevy::color::Color::srgb(1.0, 0.5, 0.45)
     };
     (format!("{head}: {}", parts.join(", ")), color)
+}
+
+/// What a wager bets a rival will do before dusk, after the rival's name.
+pub fn bet(bet: necromy_rules::Bet) -> &'static str {
+    use necromy_rules::Bet;
+    match bet {
+        Bet::Fight => "вступит в бой",
+        Bet::Claim => "займёт поселение или храм",
+        Bet::Fall => "падёт",
+        Bet::Hide => "скроется",
+    }
 }

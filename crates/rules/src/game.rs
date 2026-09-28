@@ -165,6 +165,9 @@ pub enum WindowKind {
         attacker: PlayerId,
         defender: PlayerId,
     },
+    /// A wish demands tribute for `asker` (§7.3): each rival gives a card
+    /// (a play of it) or takes Threat (a pass).
+    Tribute { asker: PlayerId },
 }
 
 /// Where a player stands in the round (§11.2).
@@ -413,6 +416,36 @@ pub enum Event {
     TruceBroken {
         player: PlayerId,
         other: PlayerId,
+        god: God,
+    },
+    /// `player` gave `card` to `to` as tribute.
+    TributeGiven {
+        player: PlayerId,
+        to: PlayerId,
+        card: CardId,
+    },
+    /// `player` refused tribute to `to`, and takes Threat for it.
+    TributeRefused {
+        player: PlayerId,
+        to: PlayerId,
+    },
+    /// `player` bets `target` will do `bet` before dusk; `god` holds it.
+    WagerMade {
+        player: PlayerId,
+        target: PlayerId,
+        bet: wish::Bet,
+        god: God,
+    },
+    WagerWon {
+        player: PlayerId,
+        target: PlayerId,
+        bet: wish::Bet,
+        god: God,
+    },
+    WagerLost {
+        player: PlayerId,
+        target: PlayerId,
+        bet: wish::Bet,
         god: God,
     },
     /// The two changed places: `player` now stands at `to`, `other` at
@@ -757,6 +790,8 @@ pub struct Game {
     known: Vec<(PlayerId, PlayerId)>,
     /// Truces a wish made, until the next dusk.
     truces: Vec<wish::Truce>,
+    /// Wagers a wish made, settled at the next dusk.
+    wagers: Vec<wish::Wager>,
     /// A scripted scene (a tutorial chapter, `scenario.rs`): the world holds
     /// still. No new bodies, stories or draws; dawn and the guard only if
     /// the scene lets them.
@@ -847,6 +882,7 @@ impl Game {
             mods: BTreeMap::new(),
             known: Vec::new(),
             truces: Vec::new(),
+            wagers: Vec::new(),
             scripted: None,
             log: Vec::new(),
         };
@@ -1152,6 +1188,8 @@ impl Game {
                     // Cards go into a battle only as burned faces.
                     WindowKind::Battle { .. } => false,
                     WindowKind::Enter { .. } => def.timing == Timing::Instant,
+                    // Tribute: any card of the hand may be given, free.
+                    WindowKind::Tribute { .. } => return Ok(()),
                 };
                 if !fits {
                     return Err(RuleError::WrongTiming);
@@ -1649,8 +1687,17 @@ impl Game {
         events: &mut Vec<Event>,
     ) -> Result<(), RuleError> {
         let battle = matches!(self.windows[i].kind, WindowKind::Battle { .. });
+        let tribute = matches!(self.windows[i].kind, WindowKind::Tribute { .. });
         let choice = match intent {
             Intent::Pass => Choice::Pass,
+            // Tribute: any card of one's hand, given, not played.
+            Intent::Play { card, .. } if tribute => {
+                if !self.hand(player).contains(&card) {
+                    return Err(RuleError::NotInHand);
+                }
+                self.hands[player.0 as usize].retain(|&c| c != card);
+                Choice::Play(card, Target::None)
+            }
             Intent::Play { card, target } => {
                 self.check_play(player, card, target)?;
                 self.take_from_hand(player, card, events);
@@ -1711,6 +1758,15 @@ impl Game {
     /// a cancel finds its card and a battle its ambush.
     fn close_window(&mut self, i: usize, events: &mut Vec<Event>) {
         let window = self.windows[i].clone();
+        if let WindowKind::Tribute { asker } = window.kind {
+            events.push(Event::WindowClosed {
+                kind: window.kind,
+                played: Vec::new(),
+            });
+            self.settle_tribute(asker, &window, events);
+            self.windows.remove(i);
+            return;
+        }
         let plays: Vec<(PlayerId, CardId, Target)> = window
             .eligible
             .iter()
@@ -2164,6 +2220,7 @@ impl Game {
 
     /// Zero health: the champion leaves a body and wakes at home, whole.
     fn fall(&mut self, player: PlayerId, events: &mut Vec<Event>) {
+        self.note_bet(player, wish::Bet::Fall);
         // The Wager wants the Dominant standing through all its refusals.
         self.progress[player.0 as usize].refusals = 0;
         let at = self.hex_of(player);
@@ -2402,8 +2459,8 @@ pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
 pub use victory::{Check, CheckKind, Condition, OPEN_COUNT, REFUSAL_THREAT, SECRET_FROM_ROUND};
 pub use wish::{
-    Act, MAX_ACTS, Price, Said, Truce, Wish, WishKind, forge_template, god_terrain, likes_a_stake,
-    taste_for,
+    Act, Bet, MAX_ACTS, Price, Said, TRIBUTE_THREAT, Truce, WAGER_STAKE, Wager, Wish, WishKind,
+    forge_template, god_terrain, likes_a_stake, taste_for,
 };
 pub use world::{Pantheon, STAGE_THRESHOLD, STAGES, TRISHNA_DRIFT};
 

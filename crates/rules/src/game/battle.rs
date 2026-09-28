@@ -102,6 +102,8 @@ impl Game {
         events.push(Event::BattleStarted { attacker, defender });
         // A fight inside a truce breaks it (§7.3).
         self.break_truce(attacker, defender, events);
+        self.note_bet(attacker, super::wish::Bet::Fight);
+        self.note_bet(defender, super::wish::Bet::Fight);
         self.last_fight = self.round;
         // Attacking is loud (§6.5).
         self.add_threat(attacker, 1, events);

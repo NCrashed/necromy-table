@@ -105,6 +105,7 @@ impl Game {
     /// threshold moves one stage and starts over.
     pub(super) fn dusk(&mut self, events: &mut Vec<Event>) {
         self.end_truces();
+        self.settle_wagers(events);
         let t = God::Trishna.index();
         self.pantheon.pressure[t] = self.pantheon.pressure[t].saturating_add(TRISHNA_DRIFT);
         for god in God::ALL {

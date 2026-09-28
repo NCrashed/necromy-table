@@ -1216,6 +1216,48 @@ impl Match {
                 self.name(*other),
                 names::god_genitive(*god)
             ),
+            Event::TributeGiven { player, to, card } => {
+                if *to == me {
+                    format!(
+                        "{} платит тебе дань: «{}».",
+                        self.name(*player),
+                        self.game.card_name(*card)
+                    )
+                } else if *player == me {
+                    format!(
+                        "Ты отдаёшь {} дань: «{}».",
+                        self.name(*to),
+                        self.game.card_name(*card)
+                    )
+                } else {
+                    format!("{} платит дань {}.", self.name(*player), self.name(*to))
+                }
+            }
+            Event::TributeRefused { player, to } => format!(
+                "{} отказывает {} в дани: +2 Угрозы.",
+                self.name(*player),
+                self.name(*to)
+            ),
+            Event::WagerMade {
+                player,
+                target,
+                bet,
+                god,
+            } => format!(
+                "{} ставит у {}: {} до заката {}.",
+                self.name(*player),
+                names::god_genitive(*god),
+                self.name(*target),
+                names::bet(*bet)
+            ),
+            Event::WagerWon { player, .. } => {
+                format!("{} выигрывает пари: +2 Стиля.", self.name(*player))
+            }
+            Event::WagerLost { player, god, .. } => format!(
+                "{} проигрывает пари: +2 Угрозы и долг {} (проклятие).",
+                self.name(*player),
+                names::god_genitive(*god)
+            ),
             Event::Swapped { player, other, .. } => format!(
                 "{} и {} меняются местами.",
                 self.name(*player),
@@ -1381,12 +1423,29 @@ pub fn window_name(m: &Match, kind: WindowKind) -> String {
         WindowKind::Battle { attacker, defender } => {
             format!("бой: {} против {}", m.name(attacker), m.name(defender))
         }
+        WindowKind::Tribute { asker } => format!("дань для {}", m.name(asker)),
     }
 }
 
 /// Plays `card` for the human with the only sensible target, or starts
 /// aiming it. Called by the hand UI.
 pub fn pick_card(m: &mut Match, selection: &mut Selection, card: CardId) {
+    // Tribute: the card clicked is the card given, no aiming.
+    if matches!(
+        m.game.to_answer(m.human).map(|w| w.kind),
+        Some(WindowKind::Tribute { .. })
+    ) {
+        let human = m.human;
+        let _ = m.act(
+            human,
+            Intent::Play {
+                card,
+                target: Target::None,
+            },
+        );
+        selection.card = None;
+        return;
+    }
     if let Some(max) = m.game.battle_dice(m.human)
         && m.human_awaited()
     {
@@ -1595,6 +1654,10 @@ fn auto_pass(
 /// counts, a heal before the blow included. They may still play a heal in
 /// a window that waits on them for something else.
 pub fn worth_answering(g: &necromy_rules::Game, human: PlayerId, kind: WindowKind) -> bool {
+    // Tribute: giving a card or taking Threat is always a choice.
+    if matches!(kind, WindowKind::Tribute { .. }) {
+        return !g.hand(human).is_empty();
+    }
     let aimed_at_me = matches!(kind, WindowKind::Target { target, .. } if target == human);
     g.playable(human)
         .into_iter()

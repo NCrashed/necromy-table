@@ -282,6 +282,27 @@ fn rebuild_action(
             Some(WindowKind::Target { target, .. }) if target == human => {
                 (String::new(), "", None, false)
             }
+            // Tribute (§7.3): a card given, or Threat taken.
+            Some(WindowKind::Tribute { asker })
+                if asker != human && g.to_answer(human).is_some() =>
+            {
+                (
+                    format!("Дань для {}", game.name(asker)),
+                    "кликни карту — отдай её; пробел — откажи и возьми +2 Угрозы",
+                    Some((ActionButton::Pass, "Отказать\n(пробел)")),
+                    false,
+                )
+            }
+            Some(WindowKind::Tribute { asker }) => (
+                if asker == human {
+                    "Ждём дань".to_string()
+                } else {
+                    "Дань отдана · ждём остальных".to_string()
+                },
+                "каждый соперник отдаёт карту или берёт +2 Угрозы",
+                None,
+                false,
+            ),
             Some(k) if !g.playable(human).is_empty() => {
                 let what = if matches!(k, WindowKind::Target { .. }) {
                     "сыграй карту «ответ» из руки или пропусти"

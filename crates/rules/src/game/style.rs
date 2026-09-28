@@ -247,6 +247,7 @@ impl Game {
         let from = self.claims.insert((hex.x(), hex.y()), player);
         self.record_deed(player, Deed::Claimed);
         events.push(Event::Claimed { player, hex, from });
+        self.note_bet(player, super::wish::Bet::Claim);
     }
 
     /// Dawn: land pays Style, then the Crown goes to the leader (§6.1).

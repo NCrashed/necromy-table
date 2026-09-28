@@ -46,6 +46,17 @@ fn respond(game: &Game, player: PlayerId, kind: WindowKind) -> Intent {
             }
         }
         WindowKind::Battle { .. } => return burn(game, player),
+        // Tribute: give the cheapest card while the hand is full enough or
+        // the guard is near; else take the Threat.
+        WindowKind::Tribute { .. } => {
+            let hand = game.hand(player);
+            let loud = game.threat(player) + 2 >= game.guard_threshold();
+            if (hand.len() > 2 || loud)
+                && let Some(&card) = hand.iter().min_by_key(|&&c| (game.def(c).cost, c))
+            {
+                return play(card, Target::None);
+            }
+        }
         _ => {}
     }
     Intent::Pass
