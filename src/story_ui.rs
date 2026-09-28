@@ -16,6 +16,7 @@
 use bevy::prelude::*;
 use necromy_rules::{Game, Line};
 
+use crate::audio::Speech;
 use crate::hud::{INK, UiFont};
 use crate::icons::StatIcon;
 use crate::names;
@@ -313,13 +314,16 @@ fn rebuild_voice(
         true,
     );
     commands.entity(head).add_children(&[icon, who]);
-    let voice = text(
-        &mut commands,
-        font.text(13.0),
-        format!("«{}»", voice_of(&game, &line)),
-        VOICE,
-        450.0,
-    );
+    // Typed out in the god's voice; when the model's words replace the
+    // template, the typing starts again with them.
+    let words = format!("«{}»", voice_of(&game, &line));
+    let voice = text(&mut commands, font.text(13.0), String::new(), VOICE, 450.0);
+    commands.entity(voice).insert(Speech {
+        key: speech_key(game.told_serial, &words),
+        god: line.god,
+        from: 1,
+        text: words,
+    });
     let goal = text(
         &mut commands,
         font.text(12.0),
@@ -500,4 +504,12 @@ fn expire_voice(time: Res<Time>, mut shown: Local<(u32, f32)>, mut game: ResMut<
     if now - shown.1 > VOICE_SECS {
         game.told = None;
     }
+}
+
+/// Tells one told line's words from another's, and from wish replies.
+fn speech_key(serial: u32, words: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    ("told", serial, words).hash(&mut h);
+    h.finish()
 }
