@@ -2,14 +2,17 @@
 //!
 //! Music: one piece at a time, crossfaded.
 //!
-//! A bed of day or night pieces (`DayNight`) turns every few minutes. When
-//! the camera rests in a god's land, that god's piece for its present stage
-//! takes over (light, mid, dark: the more it is fed, the darker). When a god
-//! changes stage, its new piece is heard for a while wherever the camera is,
-//! so the table hears the god sate or sour. The menu plays the day bed.
+//! A bed of day or night pieces (`DayNight`) plays, the next one every few
+//! minutes. When the camera rests in a god's land, that god's pieces for its
+//! present stage take over (light, mid, dark: the more it is fed, the
+//! darker). When a god changes stage, its new piece is heard for a while
+//! wherever the camera is, so the table hears the god sate or sour. The
+//! menu plays the day bed.
 //!
-//! Pieces are seamless loops in `assets/music/<name>.ogg` (made with
-//! `scripts/music-set.sh`); a missing one is skipped. `NECROMY_MUSIC=off`
+//! Pieces are seamless loops in `assets/music/` (made with
+//! `scripts/music-set.sh`), sorted by name: `day-*`, `night-*`,
+//! `<god>-<light|mid|dark>` with an optional number; each mood goes round
+//! its pieces. A mood with none falls back to the bed. `NECROMY_MUSIC=off`
 //! mutes it.
 //!
 //! Effects: any system sends a `Sound` (a name from `assets/sfx/`, made with
@@ -37,25 +40,11 @@ const FADE_SECS: f32 = 4.0;
 /// Seconds the camera must stay in a god's land before its piece starts, so
 /// passing over a border does not flip the music.
 const SETTLE_SECS: f32 = 3.0;
-/// Seconds a bed piece plays before the next one of the bed takes over.
-const BED_SECS: f32 = 180.0;
+/// Seconds a piece plays before another of the same mood takes over.
+const PIECE_SECS: f32 = 180.0;
 /// Seconds a god's new stage is heard after it changes.
 const HERALD_SECS: f32 = 40.0;
 
-const DAY: [&str; 5] = [
-    "day-fields",
-    "day-market",
-    "day-road",
-    "day-temple",
-    "day-dusk",
-];
-const NIGHT: [&str; 5] = [
-    "night-bells",
-    "night-forest",
-    "night-graves",
-    "night-vigil",
-    "night-moon",
-];
 const STAGES: [&str; 3] = ["light", "mid", "dark"];
 
 pub struct SoundPlugin;
@@ -77,45 +66,47 @@ impl Plugin for SoundPlugin {
     }
 }
 
-/// A piece of the set.
+/// What the moment asks the music for.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Piece {
-    Day(usize),
-    Night(usize),
+enum Mood {
+    Day,
+    Night,
+    /// A god at a stage: 0 light, 1 mid, 2 dark.
     God(God, u8),
 }
 
-impl Piece {
-    fn name(self) -> String {
-        match self {
-            Piece::Day(i) => DAY[i].to_string(),
-            Piece::Night(i) => NIGHT[i].to_string(),
-            Piece::God(god, stage) => format!(
-                "{}-{}",
-                god.name().to_lowercase(),
-                STAGES[(stage as usize).min(2)]
-            ),
+impl Mood {
+    /// The mood of a piece by its file name: `day-*`, `night-*`, or
+    /// `<god>-<stage>` with an optional number (`maya-dark3`).
+    fn of(stem: &str) -> Option<Mood> {
+        let (head, rest) = stem.split_once('-')?;
+        match head {
+            "day" => Some(Mood::Day),
+            "night" => Some(Mood::Night),
+            _ => {
+                let god = God::ALL
+                    .into_iter()
+                    .find(|g| g.name().eq_ignore_ascii_case(head))?;
+                let stage = rest.trim_end_matches(|c: char| c.is_ascii_digit());
+                let stage = STAGES.iter().position(|&s| s == stage)?;
+                Some(Mood::God(god, stage as u8))
+            }
         }
-    }
-
-    fn path(self) -> String {
-        format!("music/{}.ogg", self.name())
-    }
-
-    fn exists(self) -> bool {
-        Path::new("assets").join(self.path()).exists()
     }
 }
 
 #[derive(Resource)]
 struct Music {
+    /// Every piece in `assets/music/`: its mood and file name.
+    pieces: Vec<(Mood, String)>,
+    /// Where each mood's round of pieces has got to.
+    turns: Vec<(Mood, usize)>,
     /// The piece playing (or fading in) and its player.
-    playing: Option<(Piece, Entity)>,
+    playing: Option<(usize, Entity)>,
     /// Seconds the present piece has played.
     played: f32,
-    /// Which piece of each bed comes next.
-    day: usize,
-    night: usize,
+    /// Where the rounds start: somewhere different every run.
+    start: usize,
     /// The god whose land the camera is in, and for how long.
     land: Option<God>,
     land_secs: f32,
@@ -129,15 +120,26 @@ struct Music {
 
 impl Music {
     fn new() -> Music {
-        // Start the beds somewhere different every run.
-        let t = std::time::SystemTime::now()
+        let mut pieces: Vec<(Mood, String)> = std::fs::read_dir(Path::new("assets/music"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter_map(|f| {
+                let stem = f.strip_suffix(".ogg")?;
+                Some((Mood::of(stem)?, f))
+            })
+            .collect();
+        pieces.sort_by(|a, b| a.1.cmp(&b.1));
+        let start = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.subsec_nanos() as usize);
         Music {
+            pieces,
+            turns: Vec::new(),
             playing: None,
             played: 0.0,
-            day: t % DAY.len(),
-            night: (t / 7) % NIGHT.len(),
+            start,
             land: None,
             land_secs: 0.0,
             stages: None,
@@ -146,18 +148,28 @@ impl Music {
         }
     }
 
-    /// The first bed piece from `turn` on that exists.
-    fn bed(night: bool, turn: usize) -> Option<Piece> {
-        (0..5)
-            .map(|k| (turn + k) % 5)
-            .map(|i| {
-                if night {
-                    Piece::Night(i)
-                } else {
-                    Piece::Day(i)
-                }
-            })
-            .find(|p| p.exists())
+    fn has(&self, mood: Mood) -> bool {
+        self.pieces.iter().any(|(m, _)| *m == mood)
+    }
+
+    /// The next piece of a mood, round and round.
+    fn next(&mut self, mood: Mood) -> Option<usize> {
+        let of: Vec<usize> = (0..self.pieces.len())
+            .filter(|&i| self.pieces[i].0 == mood)
+            .collect();
+        if of.is_empty() {
+            return None;
+        }
+        let turn = match self.turns.iter_mut().find(|(m, _)| *m == mood) {
+            Some((_, turn)) => turn,
+            None => {
+                self.turns.push((mood, self.start));
+                &mut self.turns.last_mut().expect("just pushed").1
+            }
+        };
+        let pick = of[*turn % of.len()];
+        *turn += 1;
+        Some(pick)
     }
 }
 
@@ -185,7 +197,7 @@ fn conduct(
     music.played += dt;
     let night = game.is_some() && day_night.is_some_and(|d| d.night > 0.5);
 
-    let mut god_piece = None;
+    let mut god_mood = None;
     if let Some(game) = &game {
         let stages = God::ALL.map(|g| game.game.stage(g));
         // A stage that changed is heralded; the first look only remembers.
@@ -217,36 +229,31 @@ fn conduct(
                 music.heralds.remove(0);
                 music.herald_secs = 0.0;
             }
-            god_piece = Some(Piece::God(god, stage));
+            god_mood = Some(Mood::God(god, stage));
         } else if let Some(god) = music.land
             && music.land_secs > SETTLE_SECS
         {
-            god_piece = Some(Piece::God(god, game.game.stage(god)));
+            god_mood = Some(Mood::God(god, game.game.stage(god)));
         }
     } else {
         music.stages = None;
         music.heralds.clear();
     }
 
-    let playing = music.playing.map(|(p, _)| p);
-    let wanted = god_piece.filter(|p| p.exists()).or_else(|| {
-        // Keep the bed piece that plays until its time is up.
-        match playing {
-            Some(p @ Piece::Night(_)) if night && music.played < BED_SECS => Some(p),
-            Some(p @ Piece::Day(_)) if !night && music.played < BED_SECS => Some(p),
-            _ => {
-                let turn = if night {
-                    &mut music.night
-                } else {
-                    &mut music.day
-                };
-                let piece = Music::bed(night, *turn);
-                *turn = (*turn + 1) % 5;
-                piece
-            }
-        }
-    });
+    // A god's piece if there is one for the moment, else the day or night bed.
+    let mood =
+        god_mood
+            .filter(|&m| music.has(m))
+            .unwrap_or(if night { Mood::Night } else { Mood::Day });
+    let playing = music.playing.map(|(i, _)| i);
+    // Keep the piece that plays until its time is up, then the next one of
+    // its mood; a mood with one piece keeps it.
+    let keep = playing.filter(|&i| music.pieces[i].0 == mood && music.played < PIECE_SECS);
+    let wanted = keep.or_else(|| music.next(mood));
     if wanted == playing {
+        if music.played >= PIECE_SECS {
+            music.played = 0.0;
+        }
         return;
     }
 
@@ -255,28 +262,24 @@ fn conduct(
     {
         voice.target = 0.0;
     }
-    if wanted.is_none() {
-        debug!("music: silence (night {night})");
-    }
     music.played = 0.0;
-    if let Some(piece) = wanted {
-        debug!(
-            "music: {} (night {night}, land {:?})",
-            piece.name(),
-            music.land
-        );
-        let player = commands
-            .spawn((
-                AudioPlayer::new(assets.load(piece.path())),
-                PlaybackSettings::LOOP.with_volume(Volume::SILENT),
-                Voice {
-                    gain: 0.0,
-                    target: 1.0,
-                },
-            ))
-            .id();
-        music.playing = Some((piece, player));
-    }
+    let Some(piece) = wanted else {
+        debug!("music: silence ({mood:?})");
+        return;
+    };
+    let name = &music.pieces[piece].1;
+    debug!("music: {name} ({mood:?}, land {:?})", music.land);
+    let player = commands
+        .spawn((
+            AudioPlayer::new(assets.load(format!("music/{name}"))),
+            PlaybackSettings::LOOP.with_volume(Volume::SILENT),
+            Voice {
+                gain: 0.0,
+                target: 1.0,
+            },
+        ))
+        .id();
+    music.playing = Some((piece, player));
 }
 
 /// Eases each player's volume to its target; a silenced one goes away.

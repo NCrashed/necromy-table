@@ -26,3 +26,49 @@ ahamar-dark	60	Gilt peeling to ash, hollow detuned brass, broken music box, grey
 maya-light	60	Tranquil still water, harp, hang drum and glass harmonica, soft waves, serene release, 70 BPM
 maya-mid	60	Shimmering deceit on the water, rippling celesta, whispery airy pads, seductive and slippery, 80 BPM
 maya-dark	60	Stormy black sea, surging strings, deep timpani rolls, teal lightning, tidal wrath, 90 BPM
+# More of each bed, so it does not wear thin.
+day-harvest	90	Golden harvest evening, slow warm strings and soft harp chords, a simple calm melody on clarinet, 80 BPM
+day-river	90	Flowing river valley, concert harp and cello duet, calm and open, 80 BPM
+day-caravan	90	A caravan on a sunlit road, oud and darbuka, gently swaying travel groove, 95 BPM
+day-castle	90	Courtly consort in a castle garden, recorders, lute and viol, graceful and light, 100 BPM
+day-rain	90	Soft rain on a village, felt piano and warm strings, gentle and thoughtful, 75 BPM
+day-tavern	90	Cosy tavern in the afternoon, gentle plucked lute chords and soft upright bass, relaxed and warm, 85 BPM
+day-hills	90	Green hills under wide sky, french horn and strings carrying a broad noble theme, 85 BPM
+night-embers	90	Campfire embers at night, fingerpicked acoustic guitar and soft cello, warm and quiet, 70 BPM
+night-owls	90	Owls in the dark woods, bass flute and soft marimba, hushed curiosity, 65 BPM
+night-crypt	90	Old crypt at midnight, hammered dulcimer over a low string drone, cold and patient, 55 BPM
+night-stars	90	Clear starry sky, celesta and shimmering high strings, wonder and stillness, 60 BPM
+night-fog	90	Fog creeping over marshes, bowed psaltery and low drone, uneasy calm, 55 BPM
+night-watch	90	A night watch on the walls, slow brushed snare and low strings, steady and wary, 70 BPM
+night-lullaby	90	A lullaby at a sleeping village, music box and harp, tender with a hint of sorrow, 60 BPM
+# A second and a third piece for every god and stage.
+bhava-light2	60	Morning dew in a young forest, bamboo flutes and plucked zither, fresh and hopeful, 85 BPM
+bhava-light3	60	Seedlings opening, handpan and wooden chimes, bird-like flute trills, playful growth, 95 BPM
+bhava-mid2	60	Dense canopy, polyrhythmic log drums and marimbas interlocking, teeming life, 100 BPM
+bhava-mid3	60	Vines winding upward, layered clarinets and pizzicato strings twisting together, 90 BPM
+bhava-dark2	60	Roots strangling ruins, slow creaking cellos and wooden rattles, suffocating, 80 BPM
+bhava-dark3	60	Undergrowth swallowing the road, detuned kalimbas over a deep log drum pulse, relentless, 85 BPM
+trishna-light2	60	Wedding feast, warm sustained strings and soft frame drum groove, glowing and generous, 95 BPM
+trishna-light3	60	Festival bonfire at dusk, deep hand drums and warm drone, sparks and joy, 95 BPM
+trishna-mid2	60	Craving, pulsing tabla over a sitar drone, a melody that keeps reaching, 110 BPM
+trishna-mid3	60	Burning desire, low pulsing strings and frame drums, slowly building tension, 100 BPM
+trishna-dark2	60	Ravenous frenzy, blazing ritual drums and roaring low drones, wild and hot, 110 BPM
+trishna-dark3	60	Everything consumed, roaring low strings and booming drums, merciless heat, 120 BPM
+zaga-light2	60	Acceptance, slow solo cello and softly plucked lute, peaceful and plain, 55 BPM
+zaga-light3	60	Stillness of stone, low bowed bass drone and a heartbeat frame drum, 50 BPM
+zaga-mid2	60	Weary pilgrimage, hurdy-gurdy drone and slow heavy drum steps, enduring, 62 BPM
+zaga-mid3	60	Carrying a weight, dark viola and double bass in slow counterpoint, 58 BPM
+zaga-dark2	60	Grim verdict, massive slow drums and iron anvil strikes, stern and final, 60 BPM
+zaga-dark3	60	Final judgement, low brass chorale over funeral bells, heavy and solemn, 55 BPM
+ahamar-light2	60	Gilded order, baroque strings and harpsichord minuet, poised and exact, 105 BPM
+ahamar-light3	60	A royal procession, stately organ and trumpets, perfect symmetry, 90 BPM
+ahamar-mid2	60	Polite unease, a music box melody slightly off beat over a ticking metronome, 100 BPM
+ahamar-mid3	60	A courtly dance with a wrong note, pizzicato strings and clock chimes, 96 BPM
+ahamar-dark2	60	Empty throne room, cold metallic percussion and grinding gears, hollow, 85 BPM
+ahamar-dark3	60	The mask falls to ash, slow detuned harpsichord over a hollow drone, 75 BPM
+maya-light2	60	Gentle release, soft harp and flowing water textures, serene, 72 BPM
+maya-light3	60	Mist drifting over a lake, warm pads and singing glass bowls, weightless, 65 BPM
+maya-mid2	60	Luring, rippling harp arpeggios hiding a minor melody, seductive, 82 BPM
+maya-mid3	60	A mirage on the water, breathy flutes and shifting pads, deceptive, 78 BPM
+maya-dark2	60	Drowning rage, crashing waves of strings and pounding drums, furious, 95 BPM
+maya-dark3	60	Maelstrom, deep undertow of low strings and thunderous timpani, 92 BPM
