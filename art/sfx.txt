@@ -49,10 +49,10 @@ curse-laid	1.5	2	A curse is laid, a dark whispering hiss and a low bell
 curse-bit	0.8	2	A curse strikes, a sharp dark crackle
 crown	2.0	2	A royal crown is placed, a regal golden shimmer and a brass accent
 # Royal guard
-guard-horn	2.0	2	A royal patrol horn in the distance, two short notes
+guard-arrive	1.5	3	The royal guard arrives: a heavy iron gate clanks open, armoured boots stamp twice and one war drum hits; no horn, no car horn, no beep
 guard-march	1.0	3	A squad of armoured guards marching, synchronized heavy steps and chainmail
 # Turns and the end
 turn	1.0	2	Short bright notification, your turn: a resonant bell strike
-window	0.8	2	A tense moment to respond, a quick rising tick and a held breath of air
+window	0.6	3	A subtle alert that you may answer: a soft wooden tick and a faint glassy magical shimmer; no beep, no horn, no electronic tone
 victory	4.0	2	Short triumphant brass fanfare with drums, victory
 defeat	4.0	2	Short sombre low brass phrase with a muffled drum, defeat

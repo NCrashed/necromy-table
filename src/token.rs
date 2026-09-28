@@ -283,6 +283,8 @@ fn animate_tokens(
     time: Res<Time>,
     game: Res<Match>,
     mut sounds: MessageWriter<Sound>,
+    rig: Res<crate::camera::Rig>,
+    board: Res<Board>,
     camera: Single<&Transform, (With<crate::TableCamera>, Without<Token>)>,
     mut tokens: Query<(&Token, &Transform, &mut Animated, &mut Sprite)>,
 ) {
@@ -307,8 +309,15 @@ fn animate_tokens(
         // A footfall on the walk frames where a foot meets the ground.
         let frame = |clock: f32| (clock / FRAME_SECS) as u32;
         if walking && frame(anim.clock) != frame(before) && frame(anim.clock) % 3 == 0 {
-            let volume = if token.player == game.human { 1.0 } else { 0.6 };
-            sounds.write(Sound::new("step").at(volume));
+            // Rivals walk at the same time as the human: only those near
+            // where the camera looks are heard.
+            let focus = board.world_to_hex(rig.focus());
+            let hex = board.world_to_hex(transform.translation);
+            if token.player == game.human {
+                sounds.write(Sound::new("step"));
+            } else if focus.unsigned_distance_to(hex) <= crate::audio::NEAR_HEXES {
+                sounds.write(Sound::new("step").at(0.6));
+            }
         }
     }
 }

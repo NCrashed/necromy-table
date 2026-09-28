@@ -28,6 +28,11 @@ for name in "${names[@]}"; do
     ffmpeg -nostdin -loglevel error -y -i "$take" -af "$trim" "$tmp"
     peak="$(ffmpeg -nostdin -hide_banner -i "$tmp" -af astats=metadata=0 -f null - 2>&1 \
       | grep 'Peak level dB' | tail -1 | awk '{print $NF}')"
+    if [ -z "$peak" ]; then
+      echo "  $(basename "$take"): silent, skipped" >&2
+      rm -f "$tmp"
+      continue
+    fi
     gain="$(awk -v p="$peak" 'BEGIN { printf "%.2f", -1 - p }')"
     ffmpeg -nostdin -loglevel error -y -i "$tmp" -af "volume=${gain}dB" -c:a libvorbis -q:a 5 "$out/$name-$k.ogg"
     rm -f "$tmp"

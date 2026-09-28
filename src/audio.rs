@@ -23,7 +23,7 @@ use std::path::Path;
 
 use bevy::audio::{AddAudioSource, Volume};
 use bevy::prelude::*;
-use necromy_rules::{Event, God};
+use necromy_rules::{Event, God, Hex, PlayerId};
 
 use crate::board::Board;
 use crate::camera::Rig;
@@ -314,6 +314,10 @@ const SFX_GAIN: f32 = 0.8;
 const REPEAT_SECS: f32 = 0.08;
 /// At most this many effects start in one frame.
 const PER_FRAME: usize = 4;
+/// Rivals' doings are heard this many hexes from where the camera looks.
+pub const NEAR_HEXES: u32 = 4;
+/// Rivals' doings are heard one at a time, this far apart.
+const ASIDE_GAP_SECS: f32 = 0.5;
 
 /// A sound effect to play: a name from `assets/sfx/` and a loudness, 1 is
 /// the sound's usual level.
@@ -452,87 +456,6 @@ fn play_sounds(
                 .with_speed(speed),
         ));
         started += 1;
-    }
-}
-
-/// Sounds what the rules report. Battles are left to the fight on the
-/// battle panel, which deals their blows and deaths in its own time.
-fn hear_events(
-    mut game: ResMut<Match>,
-    mut sounds: MessageWriter<Sound>,
-    mut stages: Local<Option<[u8; 5]>>,
-) {
-    let stages = stages.get_or_insert_with(|| God::ALL.map(|g| game.game.stage(g)));
-    if game.heard.is_empty() {
-        return;
-    }
-    let human = game.human;
-    // Harm and deaths after a battle resolves still come in its batch.
-    let mut in_battle = game.battle.is_some();
-    let heard = std::mem::take(&mut game.bypass_change_detection().heard);
-    // The human's own doings are heard fully, the rivals' a little softer.
-    let near = |p: necromy_rules::PlayerId| if p == human { 1.0 } else { 0.6 };
-    for event in &heard {
-        let sound = match event {
-            Event::Dawn { .. } => Sound::new("dawn"),
-            Event::Dusk { .. } => Sound::new("dusk"),
-            Event::TurnStarted { player, .. } if *player == human => Sound::new("turn"),
-            Event::CardDrawn { player, .. } => Sound::new("card-draw").at(near(*player)),
-            Event::CardPlayed { player, .. } => Sound::new("card-play").at(near(*player)),
-            Event::Chain { .. } => Sound::new("chain"),
-            Event::WindowOpened { eligible, .. } if eligible.contains(&human) => {
-                Sound::new("window")
-            }
-            Event::Canceled { .. } | Event::Fizzled { .. } => Sound::new("fizzle"),
-            Event::Damaged { player, .. } if !in_battle => Sound::new("hurt").at(near(*player)),
-            Event::ChampionFell { .. } if !in_battle => Sound::new("fall"),
-            Event::Healed { player, .. } => Sound::new("heal").at(near(*player)),
-            Event::WardRaised { player, .. } => Sound::new("ward-raise").at(near(*player)),
-            Event::WardBroken { .. } => Sound::new("ward-break"),
-            Event::Rooted { .. } => Sound::new("root"),
-            Event::Hasted { player, .. } => Sound::new("haste").at(near(*player)),
-            Event::Blinked { player, .. } => Sound::new("blink").at(near(*player)),
-            Event::TrapSet { .. } => Sound::new("trap-set"),
-            Event::TrapSprung { .. } => Sound::new("trap-sprung"),
-            Event::Hid { player, .. } => Sound::new("hide").at(near(*player)),
-            Event::Revealed { .. } => Sound::new("reveal"),
-            Event::CorpseAppeared { .. } => Sound::new("corpse").at(0.7),
-            Event::CorpseTaken { .. } => Sound::new("corpse-taken"),
-            Event::GroveGrew { .. } => Sound::new("grove"),
-            Event::TerrainChanged { .. } => Sound::new("terrain"),
-            // Nearly every card is an offering too: only the human's own are heard.
-            Event::Offered {
-                player: Some(player),
-                ..
-            } if *player == human => Sound::new("offer"),
-            Event::StageChanged { god, stage } => {
-                // A higher stage is a darker one.
-                let before = std::mem::replace(&mut stages[god.index()], *stage);
-                Sound::new(if *stage > before {
-                    "stage-dark"
-                } else {
-                    "stage-light"
-                })
-            }
-            Event::WishGranted { .. } => Sound::new("wish-granted"),
-            Event::WishRefused { .. } => Sound::new("wish-refused"),
-            Event::CurseLaid { .. } => Sound::new("curse-laid"),
-            Event::CurseBit { player, .. } => Sound::new("curse-bit").at(near(*player)),
-            Event::Crowned { .. } => Sound::new("crown"),
-            Event::GuardSpawned { .. } => Sound::new("guard-horn"),
-            Event::BattleStarted { .. } | Event::GuardStruck { .. } => {
-                in_battle = true;
-                Sound::new("battle-start")
-            }
-            Event::Burned { .. } => Sound::new("card-burn"),
-            Event::Victory { player, .. } => Sound::new(if *player == human {
-                "victory"
-            } else {
-                "defeat"
-            }),
-            _ => continue,
-        };
-        sounds.write(sound);
     }
 }
 
@@ -831,5 +754,144 @@ fn speak(
             }
             speaking.voiced += 1;
         }
+    }
+}
+
+/// Where a sound belongs, which decides whether the human hears it.
+enum Heard {
+    /// The human's own doings, what is done to them, the world's turns.
+    Always,
+    /// Something at a hex, or a rival's doing where their champion stands:
+    /// heard only near where the camera looks.
+    At(Hex),
+    /// A rival's doing with no place (a chain, an answer that fizzled).
+    Aside,
+}
+
+/// Sounds what the rules report. Battles are left to the fight on the
+/// battle panel, which deals their blows and deaths in its own time.
+/// Rivals act at the same time as the human (simultaneous turns): only what
+/// happens near the camera is heard, and one such sound at a time, so a
+/// busy table does not drown the human's own play.
+#[allow(clippy::too_many_arguments)]
+fn hear_events(
+    mut game: ResMut<Match>,
+    mut sounds: MessageWriter<Sound>,
+    mut stages: Local<Option<[u8; 5]>>,
+    mut aside_at: Local<f32>,
+    rig: Option<Res<Rig>>,
+    board: Option<Res<Board>>,
+    time: Res<Time>,
+) {
+    let stages = stages.get_or_insert_with(|| God::ALL.map(|g| game.game.stage(g)));
+    if game.heard.is_empty() {
+        return;
+    }
+    let now = time.elapsed_secs();
+    let human = game.human;
+    let focus = rig
+        .zip(board)
+        .map(|(rig, board)| board.world_to_hex(rig.focus()));
+    // Harm and deaths after a battle resolves still come in its batch.
+    let mut in_battle = game.battle.is_some();
+    let heard = std::mem::take(&mut game.bypass_change_detection().heard);
+    let by = |p: PlayerId| match game.game.champion(p) {
+        _ if p == human => Heard::Always,
+        Some(c) => Heard::At(c.hex),
+        None => Heard::Aside,
+    };
+    for event in &heard {
+        let (sound, heard) = match event {
+            Event::Dawn { .. } => (Sound::new("dawn"), Heard::Always),
+            Event::Dusk { .. } => (Sound::new("dusk"), Heard::Always),
+            Event::TurnStarted { player, .. } if *player == human => {
+                (Sound::new("turn"), Heard::Always)
+            }
+            Event::CardDrawn { player, .. } if *player == human => {
+                (Sound::new("card-draw"), Heard::Always)
+            }
+            Event::CardPlayed { player, .. } => (Sound::new("card-play"), by(*player)),
+            Event::Chain { player, .. } => (Sound::new("chain"), by(*player)),
+            Event::WindowOpened { eligible, .. } if eligible.contains(&human) => {
+                (Sound::new("window"), Heard::Always)
+            }
+            Event::Canceled { .. } | Event::Fizzled { .. } => (Sound::new("fizzle"), Heard::Aside),
+            Event::Damaged { player, .. } if !in_battle => (Sound::new("hurt"), by(*player)),
+            Event::ChampionFell { player, .. } if !in_battle => (Sound::new("fall"), by(*player)),
+            Event::Healed { player, .. } => (Sound::new("heal"), by(*player)),
+            Event::WardRaised { player, .. } => (Sound::new("ward-raise"), by(*player)),
+            Event::WardBroken { player, .. } => (Sound::new("ward-break"), by(*player)),
+            Event::Rooted { player } => (Sound::new("root"), by(*player)),
+            Event::Hasted { player, .. } => (Sound::new("haste"), by(*player)),
+            Event::Blinked { player, .. } => (Sound::new("blink"), by(*player)),
+            Event::TrapSet { player, .. } => (Sound::new("trap-set"), by(*player)),
+            Event::TrapSprung { owner, .. } if *owner == human => {
+                (Sound::new("trap-sprung"), Heard::Always)
+            }
+            Event::TrapSprung { victim, .. } => (Sound::new("trap-sprung"), by(*victim)),
+            Event::Hid { player, .. } => (Sound::new("hide"), by(*player)),
+            Event::Revealed { player, .. } => (Sound::new("reveal"), by(*player)),
+            Event::CorpseAppeared { hex } => (Sound::new("corpse").at(0.7), Heard::At(*hex)),
+            Event::CorpseTaken { hex } => (Sound::new("corpse-taken"), Heard::At(*hex)),
+            Event::GroveGrew { hex } => (Sound::new("grove"), Heard::At(*hex)),
+            Event::TerrainChanged { hex, .. } => (Sound::new("terrain"), Heard::At(*hex)),
+            // Nearly every card is an offering too: only the human's own are heard.
+            Event::Offered {
+                player: Some(player),
+                ..
+            } if *player == human => (Sound::new("offer"), Heard::Always),
+            Event::StageChanged { god, stage } => {
+                // A higher stage is a darker one.
+                let before = std::mem::replace(&mut stages[god.index()], *stage);
+                let name = if *stage > before {
+                    "stage-dark"
+                } else {
+                    "stage-light"
+                };
+                (Sound::new(name), Heard::Always)
+            }
+            Event::WishGranted { .. } => (Sound::new("wish-granted"), Heard::Always),
+            Event::WishRefused { .. } => (Sound::new("wish-refused"), Heard::Always),
+            Event::CurseLaid { player, .. } => (Sound::new("curse-laid"), by(*player)),
+            Event::CurseBit { player, .. } => (Sound::new("curse-bit"), by(*player)),
+            Event::Crowned { .. } => (Sound::new("crown"), Heard::Always),
+            Event::GuardSpawned { .. } => (Sound::new("guard-arrive"), Heard::Always),
+            // The battle panel comes up over everything, whoever fights.
+            Event::BattleStarted { .. } | Event::GuardStruck { .. } => {
+                in_battle = true;
+                (Sound::new("battle-start"), Heard::Always)
+            }
+            Event::Burned { .. } => (Sound::new("card-burn"), Heard::Always),
+            Event::Victory { player, .. } => {
+                let name = if *player == human {
+                    "victory"
+                } else {
+                    "defeat"
+                };
+                (Sound::new(name), Heard::Always)
+            }
+            _ => continue,
+        };
+        let aside = match heard {
+            Heard::Always => false,
+            Heard::At(hex) => {
+                if focus.is_none_or(|f| f.unsigned_distance_to(hex) > NEAR_HEXES) {
+                    continue;
+                }
+                true
+            }
+            Heard::Aside => true,
+        };
+        if aside {
+            if now - *aside_at < ASIDE_GAP_SECS {
+                continue;
+            }
+            *aside_at = now;
+        }
+        sounds.write(if aside {
+            sound.at(sound.volume * 0.6)
+        } else {
+            sound
+        });
     }
 }
