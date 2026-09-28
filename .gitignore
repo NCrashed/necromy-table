@@ -6,3 +6,8 @@ result
 
 # Raw generated audio: regenerable. Keepers go to assets/music/ and assets/sfx/.
 /art/audio/
+
+# Windows build: scripts/build-windows.sh
+/target-windows
+/dist
+/vendor

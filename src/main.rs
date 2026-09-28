@@ -10,6 +10,7 @@ mod feed;
 mod fight;
 mod god_pick;
 mod gods_ui;
+mod gpu;
 mod hud;
 mod icons;
 mod lighting;
@@ -38,6 +39,8 @@ fn main() {
             DefaultPlugins
                 // Pixel art: nearest-neighbour sampling, no blur.
                 .set(ImagePlugin::default_nearest())
+                // Which GPU backend and DX12 shader compiler; see `gpu.rs`.
+                .set(gpu::render_plugin())
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "Necromy Table".into(),
@@ -84,6 +87,17 @@ fn main() {
         .add_plugins(AutoScreenshotPlugin)
         .add_systems(Startup, setup_scene)
         .run();
+}
+
+/// Where the game keeps what outlives a run (the ticket, tutorial progress):
+/// `$XDG_STATE_HOME/necromy-table`, `~/.local/state/necromy-table`, or on
+/// Windows (no `HOME`) `%LOCALAPPDATA%\necromy-table`.
+pub fn state_dir() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".local/state")))
+        .or_else(|| std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from))?;
+    Some(base.join("necromy-table"))
 }
 
 fn setup_scene(mut commands: Commands) {
