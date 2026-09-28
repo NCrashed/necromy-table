@@ -200,7 +200,7 @@ fn strike(
 fn mend(game: &Game, player: PlayerId, cards: &[CardId]) -> Option<Intent> {
     let me = game.champion(player)?;
     let poison = me.poison.map(|p| p.element);
-    let cures = |c: CardId| poison.is_some_and(|p| cards::cures(game.def(c), p));
+    let cures = |c: CardId| poison.is_some_and(|p| cards::cures(&game.def(c), p));
     let feeds = |c: CardId| poison.is_some_and(|p| game.def(c).element == Some(p.generated_by()));
     if me.hp * 2 > me.body && !cards.iter().any(|&c| cures(c)) {
         return None;

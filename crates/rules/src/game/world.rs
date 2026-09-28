@@ -104,6 +104,7 @@ impl Game {
     /// Dusk: Trishna pulls, then every god whose pressure crossed the
     /// threshold moves one stage and starts over.
     pub(super) fn dusk(&mut self, events: &mut Vec<Event>) {
+        self.end_truces();
         let t = God::Trishna.index();
         self.pantheon.pressure[t] = self.pantheon.pressure[t].saturating_add(TRISHNA_DRIFT);
         for god in God::ALL {

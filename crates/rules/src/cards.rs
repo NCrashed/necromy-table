@@ -181,6 +181,101 @@ impl CardDef {
     }
 }
 
+/// A change on one copy of a card, not its definition (docs/design.md §7.3):
+/// a wish blessed or blighted it, or forged it. Deltas are clamped where
+/// they apply: cost 0..=3, numbers and ranges at least 1.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardMod {
+    pub cost: i8,
+    /// To the effect's number (damage, healing, move points, cards, poison).
+    pub power: i8,
+    /// To the target's range.
+    pub range: i8,
+    /// A new element, if changed.
+    pub element: Option<Option<Element>>,
+    /// A new timing, if changed.
+    pub timing: Option<Timing>,
+    /// Its own name: a forged card's.
+    pub name: Option<String>,
+}
+
+impl CardMod {
+    /// Adds another change on top of this one.
+    pub fn stack(&mut self, more: &CardMod) {
+        self.cost = self.cost.saturating_add(more.cost);
+        self.power = self.power.saturating_add(more.power);
+        self.range = self.range.saturating_add(more.range);
+        if more.element.is_some() {
+            self.element = more.element;
+        }
+        if more.timing.is_some() {
+            self.timing = more.timing;
+        }
+        if more.name.is_some() {
+            self.name = more.name.clone();
+        }
+    }
+}
+
+fn bend(n: u8, delta: i8) -> u8 {
+    (i16::from(n) + i16::from(delta)).max(1) as u8
+}
+
+fn reach(range: u32, delta: i8) -> u32 {
+    (range as i64 + i64::from(delta)).max(1) as u32
+}
+
+impl Effect {
+    /// The effect with its number moved by `delta`, never below 1; effects
+    /// without a number stay as they are.
+    pub fn bent(self, delta: i8) -> Effect {
+        match self {
+            Effect::Damage(n) => Effect::Damage(bend(n, delta)),
+            Effect::Heal(n) => Effect::Heal(bend(n, delta)),
+            Effect::Drain(n) => Effect::Drain(bend(n, delta)),
+            Effect::Finish(n) => Effect::Finish(bend(n, delta)),
+            Effect::Haste(n) => Effect::Haste(bend(n, delta)),
+            Effect::Draw(n) => Effect::Draw(bend(n, delta)),
+            Effect::Poison(n) => Effect::Poison(bend(n, delta)),
+            Effect::Trap(TrapEffect::Damage(n)) => Effect::Trap(TrapEffect::Damage(bend(n, delta))),
+            Effect::Trap(TrapEffect::Poison(n)) => Effect::Trap(TrapEffect::Poison(bend(n, delta))),
+            other => other,
+        }
+    }
+}
+
+impl TargetRule {
+    /// The rule with its range moved by `delta`, never below 1.
+    pub fn reaching(self, delta: i8) -> TargetRule {
+        match self {
+            TargetRule::Champion { range } => TargetRule::Champion {
+                range: reach(range, delta),
+            },
+            TargetRule::Enemy { range } => TargetRule::Enemy {
+                range: reach(range, delta),
+            },
+            TargetRule::EmptyHex { range } => TargetRule::EmptyHex {
+                range: reach(range, delta),
+            },
+            other => other,
+        }
+    }
+}
+
+impl CardDef {
+    /// This definition as one changed copy plays.
+    pub fn with(self, m: &CardMod) -> CardDef {
+        CardDef {
+            cost: (i16::from(self.cost) + i16::from(m.cost)).clamp(0, 3) as u8,
+            effect: self.effect.bent(m.power),
+            target: self.target.reaching(m.range),
+            element: m.element.unwrap_or(self.element),
+            timing: m.timing.unwrap_or(self.timing),
+            ..self
+        }
+    }
+}
+
 // One positional row per card keeps the pool readable as a table.
 #[allow(clippy::too_many_arguments)]
 const fn card(
@@ -333,6 +428,13 @@ fn answers(def: &CardDef, ward: Element) -> bool {
 /// A heal of the element that quenches the poison takes it off.
 pub fn cures(def: &CardDef, poison: Element) -> bool {
     def.effect.heals() && def.element == Some(poison.quenched_by())
+}
+
+/// The pool's card of this name.
+pub fn def_named(name: &str) -> Option<DefId> {
+    POOL.iter()
+        .position(|d| d.name == name)
+        .map(|i| DefId(i as u16))
 }
 
 #[cfg(test)]

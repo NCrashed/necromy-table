@@ -17,7 +17,7 @@ pub mod rng;
 pub use board::{Board, Corpse, Terrain, Tile};
 pub mod cards;
 
-pub use cards::{CardDef, CardId, CardKind, DefId, Effect, TargetRule, Timing};
+pub use cards::{CardDef, CardId, CardKind, CardMod, DefId, Effect, TargetRule, Timing};
 pub use game::{
     Act, BodyVerb, CHOSEN, Champion, Character, Check, CheckKind, Condition, Cure, Deed, Event,
     Fighter, GUARD_DICE, GUARD_RELIEF, GUARD_STEPS, GUARD_THRESHOLD, Game, Goal, Guard, Intent,

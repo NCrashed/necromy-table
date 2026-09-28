@@ -25,7 +25,7 @@ use necromy_dice::Face;
 
 use crate::board::{Board, Corpse, Terrain};
 use crate::cards::{
-    self, CardDef, CardId, CardKind, DefId, Effect, TargetRule, Timing, TrapEffect,
+    self, CardDef, CardId, CardKind, CardMod, DefId, Effect, TargetRule, Timing, TrapEffect,
 };
 use crate::gods::{Element, God};
 use crate::rng::Rng;
@@ -379,6 +379,50 @@ pub enum Event {
         player: PlayerId,
         price: wish::Price,
     },
+    /// A wish told `player` the secret condition of `about` (§7.3).
+    SecretLearned {
+        player: PlayerId,
+        about: PlayerId,
+    },
+    /// A wish showed `player` the hand of `about`; others see it empty.
+    HandSeen {
+        player: PlayerId,
+        about: PlayerId,
+        cards: Vec<DefId>,
+    },
+    /// A god blessed (or blighted) one copy of a card in `owner`'s hand.
+    CardChanged {
+        owner: PlayerId,
+        card: CardId,
+        god: God,
+        blessed: bool,
+    },
+    /// A god forged a new card into `player`'s hand.
+    CardForged {
+        player: PlayerId,
+        card: CardId,
+        god: God,
+    },
+    /// No fighting between the two until dusk, kept by `god`.
+    TruceMade {
+        player: PlayerId,
+        other: PlayerId,
+        god: God,
+    },
+    /// `player` fought or harmed `other` in a truce.
+    TruceBroken {
+        player: PlayerId,
+        other: PlayerId,
+        god: God,
+    },
+    /// The two changed places: `player` now stands at `to`, `other` at
+    /// `other_to`.
+    Swapped {
+        player: PlayerId,
+        to: Hex,
+        other: PlayerId,
+        other_to: Hex,
+    },
     TerrainChanged {
         hex: Hex,
         terrain: Terrain,
@@ -707,6 +751,12 @@ pub struct Game {
     last_fight: u32,
     /// Deeds since the last story check.
     pending_story: Vec<(PlayerId, style::Deed)>,
+    /// Changes on single copies of cards (§7.3): blessed, blighted, forged.
+    mods: BTreeMap<CardId, CardMod>,
+    /// Secrets learned through a wish: (who knows, whose secret).
+    known: Vec<(PlayerId, PlayerId)>,
+    /// Truces a wish made, until the next dusk.
+    truces: Vec<wish::Truce>,
     /// A scripted scene (a tutorial chapter, `scenario.rs`): the world holds
     /// still. No new bodies, stories or draws; dawn and the guard only if
     /// the scene lets them.
@@ -794,6 +844,9 @@ impl Game {
             next_line: 0,
             last_fight: 0,
             pending_story: Vec::new(),
+            mods: BTreeMap::new(),
+            known: Vec::new(),
+            truces: Vec::new(),
             scripted: None,
             log: Vec::new(),
         };
@@ -941,8 +994,26 @@ impl Game {
         self.defs[card.0 as usize]
     }
 
-    pub fn def(&self, card: CardId) -> &'static CardDef {
-        self.def_id(card).def()
+    /// The card as it plays: its definition with any change on this copy.
+    pub fn def(&self, card: CardId) -> CardDef {
+        let def = *self.def_id(card).def();
+        match self.mods.get(&card) {
+            Some(m) => def.with(m),
+            None => def,
+        }
+    }
+
+    /// The change on this copy of a card, if a wish made one.
+    pub fn card_mod(&self, card: CardId) -> Option<&CardMod> {
+        self.mods.get(&card)
+    }
+
+    /// The card's name: a forged card's own, else its definition's.
+    pub fn card_name(&self, card: CardId) -> &str {
+        self.mods
+            .get(&card)
+            .and_then(|m| m.name.as_deref())
+            .unwrap_or(self.def_id(card).def().name)
     }
 
     pub fn slice(&self) -> &[DefId] {
@@ -1516,6 +1587,7 @@ impl Game {
             target,
             response: false,
         });
+        self.hostile_play(player, card, target, events);
         // Zaga's Burden: past the second card a turn, every card is loud.
         let turn = &mut self.turns[player.0 as usize];
         turn.cards = turn.cards.saturating_add(1);
@@ -1660,6 +1732,7 @@ impl Game {
                 target,
                 response: true,
             });
+            self.hostile_play(player, card, target, events);
             self.resolve(player, card, target, 0, events);
         }
 
@@ -2328,7 +2401,10 @@ pub use stealth::RevealReason;
 pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
 pub use victory::{Check, CheckKind, Condition, OPEN_COUNT, REFUSAL_THREAT, SECRET_FROM_ROUND};
-pub use wish::{Act, MAX_ACTS, Price, Said, Wish, WishKind, god_terrain, likes_a_stake, taste_for};
+pub use wish::{
+    Act, MAX_ACTS, Price, Said, Truce, Wish, WishKind, forge_template, god_terrain, likes_a_stake,
+    taste_for,
+};
 pub use world::{Pantheon, STAGE_THRESHOLD, STAGES, TRISHNA_DRIFT};
 
 #[cfg(test)]

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use super::style::StyleReason;
 use super::{Event, Game, PlayerId, RuleError};
 use crate::board::Terrain;
-use crate::cards::CardId;
+use crate::cards::{CardId, CardMod};
 use crate::gods::God;
 
 /// What a model made of a free-text wish (§7.1): the words, its grade and
@@ -49,10 +49,24 @@ pub enum WishKind {
     Fortune,
     /// "Give me victory": crude.
     Doom,
+    /// "Let me know what they want": a rival's secret condition.
+    Secret,
+    /// "Show me what they hold": a rival's hand, once.
+    Hand,
+    /// "Bless what I hold": a card in hand costs less and does more.
+    Bless,
+    /// "Let their hand betray them": a rival's card costs more, does less.
+    Blight,
+    /// "Give me a new weapon": a card of the god's own.
+    Forge,
+    /// "Let there be peace between us": no fighting until dusk.
+    Truce,
+    /// "Let us trade places".
+    Swap,
 }
 
 impl WishKind {
-    pub const ALL: [WishKind; 7] = [
+    pub const ALL: [WishKind; 14] = [
         WishKind::Strength,
         WishKind::Weaken,
         WishKind::Land,
@@ -60,6 +74,13 @@ impl WishKind {
         WishKind::Peace,
         WishKind::Fortune,
         WishKind::Doom,
+        WishKind::Secret,
+        WishKind::Hand,
+        WishKind::Bless,
+        WishKind::Blight,
+        WishKind::Forge,
+        WishKind::Truce,
+        WishKind::Swap,
     ];
 
     /// Asks for the outcome itself instead of going through the world: always
@@ -69,7 +90,15 @@ impl WishKind {
     }
 
     pub const fn needs_target(self) -> bool {
-        matches!(self, WishKind::Weaken)
+        matches!(
+            self,
+            WishKind::Weaken
+                | WishKind::Secret
+                | WishKind::Hand
+                | WishKind::Blight
+                | WishKind::Truce
+                | WishKind::Swap
+        )
     }
 }
 
@@ -78,12 +107,41 @@ impl WishKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Act {
     Strength,
-    Weaken { target: PlayerId },
+    Weaken {
+        target: PlayerId,
+    },
     Land,
     Dead,
     Peace,
     Fortune,
     Doom,
+    /// Learn the rival's secret condition, for good.
+    Secret {
+        target: PlayerId,
+    },
+    /// See the rival's hand, once.
+    Hand {
+        target: PlayerId,
+    },
+    /// A card in the asker's hand, the one named or else the dearest:
+    /// cheaper and stronger.
+    Bless {
+        card: Option<CardId>,
+    },
+    /// A card in the rival's hand: dearer and weaker.
+    Blight {
+        target: PlayerId,
+    },
+    /// A new card of the god's element into the asker's hand.
+    Forge,
+    /// No fighting between the asker and the rival until dusk.
+    Truce {
+        target: PlayerId,
+    },
+    /// The asker and the rival change places.
+    Swap {
+        target: PlayerId,
+    },
 }
 
 impl Act {
@@ -96,19 +154,35 @@ impl Act {
             Act::Peace => WishKind::Peace,
             Act::Fortune => WishKind::Fortune,
             Act::Doom => WishKind::Doom,
+            Act::Secret { .. } => WishKind::Secret,
+            Act::Hand { .. } => WishKind::Hand,
+            Act::Bless { .. } => WishKind::Bless,
+            Act::Blight { .. } => WishKind::Blight,
+            Act::Forge => WishKind::Forge,
+            Act::Truce { .. } => WishKind::Truce,
+            Act::Swap { .. } => WishKind::Swap,
         }
     }
 
     pub const fn target(self) -> Option<PlayerId> {
         match self {
-            Act::Weaken { target } => Some(target),
+            Act::Weaken { target }
+            | Act::Secret { target }
+            | Act::Hand { target }
+            | Act::Blight { target }
+            | Act::Truce { target }
+            | Act::Swap { target } => Some(target),
             _ => None,
         }
     }
 
-    /// Budget the act takes (§7.3). Every act of the first set costs 1.
+    /// Budget the act takes (§7.3): a new card and a leap across the
+    /// table are worth more.
     pub const fn cost(self) -> u8 {
-        1
+        match self {
+            Act::Forge | Act::Swap { .. } => 2,
+            _ => 1,
+        }
     }
 
     /// The act of a prepared `kind`, aimed at `target` if it needs one.
@@ -121,7 +195,31 @@ impl Act {
             WishKind::Peace => Act::Peace,
             WishKind::Fortune => Act::Fortune,
             WishKind::Doom => Act::Doom,
+            WishKind::Secret => Act::Secret { target: target? },
+            WishKind::Hand => Act::Hand { target: target? },
+            WishKind::Bless => Act::Bless { card: None },
+            WishKind::Blight => Act::Blight { target: target? },
+            WishKind::Forge => Act::Forge,
+            WishKind::Truce => Act::Truce { target: target? },
+            WishKind::Swap => Act::Swap { target: target? },
         })
+    }
+}
+
+/// A truce a wish made (§7.3): neither fights the other until the dusk of
+/// `until`; who breaks it carries the curse of the god who granted it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Truce {
+    pub a: PlayerId,
+    pub b: PlayerId,
+    pub god: God,
+    /// The round whose dusk ends it.
+    pub until: u32,
+}
+
+impl Truce {
+    pub fn binds(&self, x: PlayerId, y: PlayerId) -> bool {
+        (self.a, self.b) == (x, y) || (self.a, self.b) == (y, x)
     }
 }
 
@@ -195,21 +293,25 @@ pub const fn likes_a_stake(god: God) -> bool {
 pub const fn taste_for(god: God, kind: WishKind) -> i8 {
     use WishKind::*;
     match (god, kind) {
-        // Hunger loves strength and feasts of the dead; quiet bores it.
-        (God::Trishna, Strength | Dead) => 1,
-        (God::Trishna, Peace) => -1,
-        // Order loves land and judgement; the dead are paperwork.
-        (God::Ahamar, Land | Weaken) => 1,
-        (God::Ahamar, Dead) => -1,
-        // Dissolution loves letting go and loosening a rival's grip.
-        (God::Maya, Peace | Weaken) => 1,
-        (God::Maya, Strength) => -1,
-        // Renunciation loves quiet and giving the dead rest; not strength.
-        (God::Zaga, Peace | Dead) => 1,
-        (God::Zaga, Strength) => -1,
-        // Growth loves the land and strength; not harm.
-        (God::Bhava, Land | Strength) => 1,
-        (God::Bhava, Weaken) => -1,
+        // Hunger loves strength, feasts of the dead and a gift that feeds;
+        // quiet and truce bore it.
+        (God::Trishna, Strength | Dead | Forge) => 1,
+        (God::Trishna, Peace | Truce) => -1,
+        // Order loves land, judgement, a contract and the registry of
+        // secrets; the dead are paperwork, a swap is disorder.
+        (God::Ahamar, Land | Weaken | Truce | Secret) => 1,
+        (God::Ahamar, Dead | Swap) => -1,
+        // Dissolution loves letting go, loosening a grip, seeing through,
+        // one thing becoming another; not strength, not a new thing to hold.
+        (God::Maya, Peace | Weaken | Swap | Hand) => 1,
+        (God::Maya, Strength | Forge) => -1,
+        // Renunciation loves quiet, the dead at rest and the price a desire
+        // exacts; not strength, not blessing what is held.
+        (God::Zaga, Peace | Dead | Blight) => 1,
+        (God::Zaga, Strength | Bless) => -1,
+        // Growth loves the land, strength, what grows in the hand; not harm.
+        (God::Bhava, Land | Strength | Bless | Forge) => 1,
+        (God::Bhava, Weaken | Blight) => -1,
         _ => 0,
     }
 }
@@ -276,6 +378,11 @@ impl Game {
         for act in &wish.acts {
             if let Some(t) = act.target()
                 && (t == player || self.champion(t).is_none())
+            {
+                return Err(RuleError::InvalidWish);
+            }
+            if let Act::Bless { card: Some(card) } = act
+                && !self.hand(player).contains(card)
             {
                 return Err(RuleError::InvalidWish);
             }
@@ -419,6 +526,8 @@ impl Game {
         events: &mut Vec<Event>,
     ) {
         let me = self.hex_of(player);
+        // Cards bend by one, by two for a strong wish.
+        let boost = 1 + i8::from(power >= 4);
         match act {
             Act::Strength => {
                 self.heal(player, power, events);
@@ -476,6 +585,90 @@ impl Game {
                 for p in self.players().filter(|&p| p != player).collect::<Vec<_>>() {
                     self.damage(p, 1, events);
                 }
+            }
+            Act::Secret { target } => {
+                if !self.known.contains(&(player, target)) {
+                    self.known.push((player, target));
+                }
+                events.push(Event::SecretLearned {
+                    player,
+                    about: target,
+                });
+            }
+            Act::Hand { target } => {
+                let cards = self.hands[target.0 as usize]
+                    .iter()
+                    .map(|&c| self.def_id(c))
+                    .collect();
+                events.push(Event::HandSeen {
+                    player,
+                    about: target,
+                    cards,
+                });
+            }
+            Act::Bless { card } => {
+                if let Some(card) = card.or_else(|| self.dearest_card(player)) {
+                    let change = CardMod {
+                        cost: -1,
+                        power: boost,
+                        ..CardMod::default()
+                    };
+                    self.change_card(player, card, change, god, true, events);
+                }
+            }
+            Act::Blight { target } => {
+                if let Some(card) = self.dearest_card(target) {
+                    let change = CardMod {
+                        cost: 1,
+                        power: -boost,
+                        ..CardMod::default()
+                    };
+                    self.change_card(target, card, change, god, false, events);
+                }
+            }
+            Act::Forge => {
+                let template = crate::cards::def_named(forge_template(god))
+                    .expect("every god has a card to forge from");
+                let card = CardId(self.defs.len() as u32);
+                self.defs.push(template);
+                self.hands[player.0 as usize].push(card);
+                self.mods.insert(
+                    card,
+                    CardMod {
+                        cost: -1,
+                        power: boost,
+                        ..CardMod::default()
+                    },
+                );
+                events.push(Event::CardForged { player, card, god });
+            }
+            Act::Truce { target } => {
+                self.truces.retain(|t| !t.binds(player, target));
+                self.truces.push(Truce {
+                    a: player,
+                    b: target,
+                    god,
+                    until: self.round,
+                });
+                events.push(Event::TruceMade {
+                    player,
+                    other: target,
+                    god,
+                });
+            }
+            Act::Swap { target } => {
+                let (here, there) = (self.hex_of(player), self.hex_of(target));
+                for (who, to) in [(player, there), (target, here)] {
+                    let champ = self.champ_mut(who);
+                    champ.hex = to;
+                    champ.seen_at = to;
+                }
+                events.push(Event::Swapped {
+                    player,
+                    to: there,
+                    other: target,
+                    other_to: here,
+                });
             }
         }
     }
@@ -548,6 +741,101 @@ impl Game {
         {
             let god = curses.remove(i);
             events.push(Event::CurseLifted { player, god });
+        }
+    }
+}
+
+/// The pool card a god forges a new one from (§7.3): its own element's
+/// strongest gift.
+pub const fn forge_template(god: God) -> &'static str {
+    match god {
+        God::Bhava => "Живица",
+        God::Trishna => "Пламя пира",
+        God::Zaga => "Отзвучавшая нота",
+        God::Ahamar => "Приговор порядка",
+        God::Maya => "Дымная ладонь",
+    }
+}
+
+impl Game {
+    /// The dearest card in a hand: the one a blessing or a blight weighs on.
+    fn dearest_card(&self, player: PlayerId) -> Option<CardId> {
+        self.hands[player.0 as usize]
+            .iter()
+            .copied()
+            .max_by_key(|&c| (self.def(c).cost, std::cmp::Reverse(c)))
+    }
+
+    /// One copy of a card changes; its owner is told.
+    fn change_card(
+        &mut self,
+        owner: PlayerId,
+        card: CardId,
+        change: CardMod,
+        god: God,
+        blessed: bool,
+        events: &mut Vec<Event>,
+    ) {
+        self.mods.entry(card).or_default().stack(&change);
+        events.push(Event::CardChanged {
+            owner,
+            card,
+            god,
+            blessed,
+        });
+    }
+
+    /// A fight or a harmful card between the two sides of a truce breaks it:
+    /// the breaker carries the curse of the god who made it, and loses face.
+    pub(super) fn break_truce(&mut self, by: PlayerId, other: PlayerId, events: &mut Vec<Event>) {
+        let Some(i) = self.truces.iter().position(|t| t.binds(by, other)) else {
+            return;
+        };
+        let truce = self.truces.remove(i);
+        events.push(Event::TruceBroken {
+            player: by,
+            other,
+            god: truce.god,
+        });
+        self.curses[by.0 as usize].push(truce.god);
+        events.push(Event::CurseLaid {
+            player: by,
+            god: truce.god,
+        });
+        self.add_style(by, -2, StyleReason::Wish, events);
+    }
+
+    /// Truces end at the dusk of the day they were made.
+    pub(super) fn end_truces(&mut self) {
+        let round = self.round;
+        self.truces.retain(|t| t.until > round);
+    }
+
+    /// Truces in force: who with whom, and which god keeps them.
+    pub fn truces(&self) -> &[Truce] {
+        &self.truces
+    }
+
+    /// Whether `viewer` has learned `player`'s secret through a wish.
+    pub fn knows_secret(&self, viewer: PlayerId, player: PlayerId) -> bool {
+        self.known.contains(&(viewer, player))
+    }
+}
+
+impl Game {
+    /// A harmful card at a rival in a truce breaks it.
+    pub(super) fn hostile_play(
+        &mut self,
+        player: PlayerId,
+        card: CardId,
+        target: super::Target,
+        events: &mut Vec<Event>,
+    ) {
+        if let super::Target::Champion(other) = target
+            && other != player
+            && self.def(card).effect.is_harmful()
+        {
+            self.break_truce(player, other, events);
         }
     }
 }

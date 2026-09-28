@@ -14,6 +14,7 @@
 //! left unseen, not who holds it.
 
 use super::{Choice, Event, Game, Intent, Phase, PlayerId, Target};
+use crate::cards::CardId;
 use crate::rng::Rng;
 
 impl Game {
@@ -46,6 +47,10 @@ impl Game {
         for (&i, def) in hidden.iter().zip(defs) {
             v.defs[i] = def;
         }
+        // A change on a card nobody shows would give it away (§7.3).
+        for &i in &hidden {
+            v.mods.remove(&CardId(i as u32));
+        }
         v.rng.shuffle(&mut v.deck);
 
         // A hidden rival stands where they were last seen (§11.6).
@@ -54,11 +59,14 @@ impl Game {
                 c.hex = c.seen_at;
             }
         }
+        // Rivals' secrets stay hidden, unless a wish told this viewer (§7.3).
         for (i, secret) in v.secrets.iter_mut().enumerate() {
-            if !mine(PlayerId(i as u8)) {
+            let p = PlayerId(i as u8);
+            if !mine(p) && !viewer.is_some_and(|w| self.knows_secret(w, p)) {
                 *secret = None;
             }
         }
+        v.known.retain(|&(who, _)| mine(who));
         for window in &mut v.windows {
             for (p, choice) in window.choices.iter_mut() {
                 if !mine(*p) {
@@ -88,6 +96,12 @@ impl Game {
                 player: *player,
                 card: *card,
                 def: view.def_id(*card),
+            },
+            // What a wish showed one player of a rival's hand stays theirs.
+            Event::HandSeen { player, about, .. } if Some(*player) != viewer => Event::HandSeen {
+                player: *player,
+                about: *about,
+                cards: Vec::new(),
             },
             Event::Moved { player, .. }
             | Event::Blinked { player, .. }

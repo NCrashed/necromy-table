@@ -2528,3 +2528,169 @@ fn a_wish_beyond_its_budget_is_cut_and_a_price_must_be_payable() {
         Event::WishGranted { grade: 0, dropped: 1, wish, .. } if wish.acts == [Act::Fortune]
     )));
 }
+
+/// How far a granted wish bends a card: 1, or 2 at full strength (grade 3).
+fn boost_of(events: &[Event]) -> u8 {
+    let grade = events
+        .iter()
+        .find_map(|e| match e {
+            Event::WishGranted { grade, .. } => Some(*grade),
+            _ => None,
+        })
+        .expect("a wish was granted");
+    1 + u8::from(grade + 1 >= 4)
+}
+
+/// Crowns `me` and grants `act` from `god` at once, with no price.
+fn wish_now(g: &mut Game, me: PlayerId, god: God, act: Act) -> Vec<Event> {
+    crown(g, me);
+    g.apply(
+        me,
+        Intent::Wish {
+            god,
+            wish: Wish::one(act),
+            said: None,
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_learned_secret_is_seen_by_its_learner_only() {
+    let (mut g, me, foe) = duel(3);
+    let third = g.players().find(|&p| p != me && p != foe).unwrap();
+    assert!(g.view_for(Some(me), 1).secret(foe).is_none());
+    wish_now(&mut g, me, God::Ahamar, Act::Secret { target: foe });
+    assert_eq!(g.view_for(Some(me), 1).secret(foe), g.secret(foe));
+    assert!(g.view_for(Some(third), 1).secret(foe).is_none());
+    assert!(!g.view_for(Some(foe), 1).knows_secret(me, foe), "not told");
+}
+
+#[test]
+fn a_seen_hand_is_told_to_the_seer_only() {
+    let (mut g, me, foe) = duel(3);
+    g.give(foe, "Искра");
+    let events = wish_now(&mut g, me, God::Maya, Act::Hand { target: foe });
+    let seen = events
+        .iter()
+        .find(|e| matches!(e, Event::HandSeen { .. }))
+        .unwrap();
+    let Event::HandSeen { cards, .. } = seen else {
+        unreachable!()
+    };
+    assert_eq!(cards.len(), g.hand(foe).len());
+    let for_foe = Game::event_for(&g.view_for(Some(foe), 1), Some(foe), seen).unwrap();
+    assert!(matches!(for_foe, Event::HandSeen { cards, .. } if cards.is_empty()));
+}
+
+#[test]
+fn a_blessing_bends_one_copy_and_a_rival_cannot_see_it() {
+    let (mut g, me, foe) = duel(3);
+    let flame = g.give(me, "Пламя пира");
+    let other = g.give(me, "Пламя пира");
+    let events = wish_now(&mut g, me, God::Bhava, Act::Bless { card: None });
+    assert_eq!(g.def(flame).cost, 1, "cheaper by one");
+    assert_eq!(
+        g.def(flame).effect,
+        Effect::Damage(2 + boost_of(&events)),
+        "stronger by the wish's boost"
+    );
+    assert_eq!(g.def(other).cost, 2, "the other copy as printed");
+    assert!(g.view_for(Some(me), 1).card_mod(flame).is_some());
+    assert!(g.view_for(Some(foe), 1).card_mod(flame).is_none());
+}
+
+#[test]
+fn a_blight_weighs_on_the_rivals_dearest_card() {
+    let (mut g, me, foe) = duel(3);
+    let feast = g.give(foe, "Пламя пира");
+    let spark = g.give(foe, "Искра");
+    let events = wish_now(&mut g, me, God::Zaga, Act::Blight { target: foe });
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::CardChanged { owner, blessed: false, .. } if *owner == foe
+    )));
+    assert_eq!(g.def(feast).cost, 3);
+    assert_eq!(g.def(feast).effect, Effect::Damage(1));
+    assert_eq!(g.def(spark).cost, 0, "the cheaper card is spared");
+    assert!(
+        g.view_for(Some(foe), 1).card_mod(feast).is_some(),
+        "the owner sees it"
+    );
+}
+
+#[test]
+fn a_forged_card_is_the_gods_own_and_better() {
+    let (mut g, me, _) = duel(3);
+    let before = g.hand(me).len();
+    let events = wish_now(&mut g, me, God::Trishna, Act::Forge);
+    let boost = boost_of(&events);
+    assert_eq!(g.hand(me).len(), before + 1);
+    let card = *g.hand(me).last().unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::CardForged { card: c, .. } if *c == card))
+    );
+    assert_eq!(g.def(card).name, forge_template(God::Trishna));
+    assert_eq!(g.def(card).cost, 1);
+    assert_eq!(g.def(card).effect, Effect::Damage(2 + boost));
+}
+
+#[test]
+fn a_truce_breaks_on_a_blow_and_ends_at_dusk() {
+    let (mut g, me, foe) = duel(1);
+    wish_now(&mut g, me, God::Ahamar, Act::Truce { target: foe });
+    assert_eq!(g.truces().len(), 1);
+    let style = g.style(me);
+    let foe_hex = g.champion(foe).unwrap().hex;
+    let events = g.apply(me, Intent::Move { to: foe_hex }).unwrap();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::TruceBroken { player, god: God::Ahamar, .. } if *player == me
+    )));
+    assert!(g.curses(me).contains(&God::Ahamar));
+    assert_eq!(g.style(me), style.saturating_sub(2));
+    assert!(g.truces().is_empty());
+
+    let (mut g, me, foe) = duel(3);
+    wish_now(&mut g, me, God::Ahamar, Act::Truce { target: foe });
+    to_next_dusk(&mut g);
+    assert!(g.truces().is_empty(), "gone at dusk");
+}
+
+#[test]
+fn a_swap_trades_places() {
+    let (mut g, me, foe) = duel(3);
+    let (a, b) = (g.champion(me).unwrap().hex, g.champion(foe).unwrap().hex);
+    wish_now(&mut g, me, God::Maya, Act::Swap { target: foe });
+    assert_eq!(g.champion(me).unwrap().hex, b);
+    assert_eq!(g.champion(foe).unwrap().hex, a);
+}
+
+#[test]
+fn a_blessing_takes_the_card_named_or_none_not_in_hand() {
+    let (mut g, me, foe) = duel(3);
+    let spark = g.give(me, "Искра");
+    let feast = g.give(me, "Пламя пира");
+    wish_now(&mut g, me, God::Bhava, Act::Bless { card: Some(spark) });
+    assert!(g.card_mod(spark).is_some(), "the one named");
+    assert!(g.card_mod(feast).is_none(), "not the dearest");
+
+    let (mut g, me, foe2) = duel(3);
+    let theirs = g.give(foe2, "Искра");
+    crown(&mut g, me);
+    assert_eq!(
+        g.apply(
+            me,
+            Intent::Wish {
+                god: God::Bhava,
+                wish: Wish::one(Act::Bless { card: Some(theirs) }),
+                said: None,
+            },
+        ),
+        Err(RuleError::InvalidWish),
+        "not a card of one's own"
+    );
+    let _ = foe;
+}

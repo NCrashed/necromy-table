@@ -1092,9 +1092,19 @@ fn place(
     mut dusk: Single<&mut Node, With<crate::gods_ui::DuskPanel>>,
 ) {
     // The fight plays in the middle: up to the top edge. The wish panel
-    // takes the top half: down below it.
-    let top = if game.game.wish_due() == Some(game.human) {
-        492.0
+    // fills the middle: the lesson goes to the column right of it.
+    let wishing = game.game.wish_due() == Some(game.human);
+    let (left, right) = if wishing {
+        (Val::Auto, px(10.0))
+    } else {
+        (px(388.0), Val::Auto)
+    };
+    if panel.left != left || panel.right != right {
+        panel.left = left;
+        panel.right = right;
+    }
+    let top = if wishing {
+        300.0
     } else if game.game.winner().is_some() {
         // Under the end-of-match panel.
         524.0
@@ -1116,6 +1126,7 @@ fn rebuild(
     mut commands: Commands,
     time: Res<Time>,
     lesson: Res<Lesson>,
+    game: Res<Match>,
     font: Res<UiFont>,
     panel: Single<(Entity, &mut Visibility), With<LessonPanel>>,
     mut hinted: Local<bool>,
@@ -1136,7 +1147,12 @@ fn rebuild(
                 flex_direction: FlexDirection::Column,
                 row_gap: px(8.0),
                 padding: UiRect::all(px(18.0)),
-                width: px(456.0),
+                // Narrow beside the wish panel, which fills the middle.
+                width: px(if game.game.wish_due() == Some(game.human) {
+                    290.0
+                } else {
+                    456.0
+                }),
                 ..default()
             },
             Frame::Plate,

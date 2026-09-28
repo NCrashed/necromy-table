@@ -249,6 +249,13 @@ pub fn wish(kind: necromy_rules::WishKind) -> &'static str {
         WishKind::Peace => "Уйми шум вокруг меня",
         WishKind::Fortune => "Дай мне богатства",
         WishKind::Doom => "Дай мне победу",
+        WishKind::Secret => "Открой мне, чего хочет соперник",
+        WishKind::Hand => "Покажи, что у соперника в руке",
+        WishKind::Bless => "Благослови то, что я держу",
+        WishKind::Blight => "Пусть рука соперника его предаст",
+        WishKind::Forge => "Дай мне новое оружие",
+        WishKind::Truce => "Пусть между нами будет мир",
+        WishKind::Swap => "Поменяй нас местами",
     }
 }
 
@@ -513,4 +520,31 @@ pub fn patronage(p: necromy_rules::Patronage) -> &'static str {
         Voice => "Голос",
         Chosen => "Избранник",
     }
+}
+
+/// A line for a card a wish changed (§7.3): what changed, green when it is
+/// a gift to its holder, red when a blight.
+pub fn card_mod(m: &necromy_rules::CardMod) -> (String, bevy::color::Color) {
+    let mut parts = Vec::new();
+    if m.cost != 0 {
+        parts.push(format!("цена {:+}", m.cost));
+    }
+    if m.power != 0 {
+        parts.push(format!("сила {:+}", m.power));
+    }
+    if m.range != 0 {
+        parts.push(format!("дальность {:+}", m.range));
+    }
+    let gift = m.power - m.cost + m.range >= 0;
+    let head = if gift {
+        "Дар бога"
+    } else {
+        "Порча"
+    };
+    let color = if gift {
+        bevy::color::Color::srgb(0.55, 0.9, 0.5)
+    } else {
+        bevy::color::Color::srgb(1.0, 0.5, 0.45)
+    };
+    (format!("{head}: {}", parts.join(", ")), color)
 }

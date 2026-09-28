@@ -100,6 +100,8 @@ impl Game {
     ) {
         self.turns[actor.0 as usize].move_points -= cost;
         events.push(Event::BattleStarted { attacker, defender });
+        // A fight inside a truce breaks it (§7.3).
+        self.break_truce(attacker, defender, events);
         self.last_fight = self.round;
         // Attacking is loud (§6.5).
         self.add_threat(attacker, 1, events);

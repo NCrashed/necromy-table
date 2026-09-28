@@ -193,7 +193,13 @@ fn rebuild_hand(
                 (focus.card == Some(game.game.def(card).name))
                     .then_some(Color::srgb(0.75, 0.55, 1.0))
             }),
-            extra: Vec::new(),
+            // A wish changed this copy (§7.3): say how, green for a gift.
+            extra: game
+                .game
+                .card_mod(card)
+                .map(names::card_mod)
+                .into_iter()
+                .collect(),
             badge: crate::ring_ui::badge(&game.game, game.human, card),
             cost: Some(game.game.cost_of(game.human, card)),
         };
@@ -203,7 +209,7 @@ fn rebuild_hand(
             &card_art,
             &stat_art,
             &game.game,
-            def,
+            &def,
             look,
         );
         commands
@@ -311,7 +317,7 @@ fn rebuild_incoming(
         &card_art,
         &stat_art,
         g,
-        g.def(card),
+        &g.def(card),
         look,
     );
     let mut children = vec![header, card];

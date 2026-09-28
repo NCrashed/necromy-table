@@ -56,13 +56,24 @@ fn persona(god: God) -> &'static str {
 /// What the god likes being asked for (mirrors `necromy_rules::taste_for`).
 fn likes(god: God) -> &'static str {
     match god {
-        God::Trishna => "Ты любишь просьбы о силе и о мёртвых (пир), тишина тебя скучает.",
-        God::Ahamar => {
-            "Ты любишь просьбы о земле и о суде над соперником, мёртвые для тебя — бумаги."
+        God::Trishna => {
+            "Ты любишь просьбы о силе, о мёртвых (пир) и о новом даре; тишина и мир тебя скучают."
         }
-        God::Maya => "Ты любишь просьбы о тишине и о слабости соперника, не любишь просьбы о силе.",
-        God::Zaga => "Ты любишь просьбы о тишине и о покое мёртвых, не любишь просьбы о силе.",
-        God::Bhava => "Ты любишь просьбы о земле и о силе, не любишь вред.",
+        God::Ahamar => {
+            "Ты любишь просьбы о земле, о суде над соперником, о договоре мира и о чужих тайнах; \
+             мёртвые для тебя — бумаги, обмен местами — беспорядок."
+        }
+        God::Maya => {
+            "Ты любишь просьбы о тишине, о слабости соперника, об обмене местами и о взгляде \
+             в чужую руку; не любишь просьбы о силе и о новых вещах."
+        }
+        God::Zaga => {
+            "Ты любишь просьбы о тишине, о покое мёртвых и о порче чужой руки; не любишь \
+             просьбы о силе и о благословении."
+        }
+        God::Bhava => {
+            "Ты любишь просьбы о земле, о силе, о благословении и о новом даре; не любишь вред и порчу."
+        }
     }
 }
 
@@ -75,6 +86,13 @@ fn kind_id(kind: WishKind) -> &'static str {
         WishKind::Peace => "peace",
         WishKind::Fortune => "fortune",
         WishKind::Doom => "doom",
+        WishKind::Secret => "secret",
+        WishKind::Hand => "hand",
+        WishKind::Bless => "bless",
+        WishKind::Blight => "blight",
+        WishKind::Forge => "forge",
+        WishKind::Truce => "truce",
+        WishKind::Swap => "swap",
     }
 }
 
@@ -88,6 +106,13 @@ pub fn kind_phrase(kind: WishKind) -> &'static str {
         WishKind::Peace => "уйми шум вокруг меня",
         WishKind::Fortune => "дай мне богатства",
         WishKind::Doom => "дай мне победу",
+        WishKind::Secret => "открой мне, чего хочет соперник",
+        WishKind::Hand => "покажи мне, что у соперника в руке",
+        WishKind::Bless => "благослови то, что я держу",
+        WishKind::Blight => "пусть рука соперника его предаст",
+        WishKind::Forge => "дай мне новое оружие",
+        WishKind::Truce => "пусть между нами будет мир",
+        WishKind::Swap => "поменяй нас местами",
     }
 }
 
@@ -170,7 +195,15 @@ pub fn wish(
          - peace: тишина для самого просящего: «уйми шум», «спрячь меня», «пусть \
          гвардия отстанет»; Угроза просящего падает. Это не вред сопернику\n\
          - fortune: просьба о богатстве, золоте, очках, Стиле\n\
-         - doom: просьба о победе, о смерти всех врагов, об уничтожении\n\n\
+         - doom: просьба о победе, о смерти всех врагов, об уничтожении\n\
+         - secret: узнать тайное условие победы соперника, его замысел; укажи target\n\
+         - hand: увидеть карты в руке соперника; укажи target\n\
+         - bless: карта в руке просящего дешевеет и усиливается, «благослови, пусть моя карта \
+         расцветёт, окрепнет»; если он называет карту, укажи её в card\n\
+         - blight: порча на лучшую карту в руке соперника: дороже и слабее; укажи target\n\
+         - forge: новая карта стихии бога в руку просящего, «дай оружие, дар, амулет»\n\
+         - truce: мир с соперником до заката, нарушивший проклят; укажи target\n\
+         - swap: просящий и соперник меняются местами; укажи target\n\n\
          Оцени стиль желания от 0 до 3:\n\
          0 — грубо: желание прямо требует результата (победы, смерти всех, богатства, \
          очков), как бы красиво оно ни звучало. Такие всегда fortune или doom с оценкой 0.\n\
@@ -227,9 +260,10 @@ pub fn wish(
                     "type": "object",
                     "properties": {
                         "kind": { "enum": WishKind::ALL.map(kind_id) },
-                        "target": { "enum": targets }
+                        "target": { "enum": targets },
+                        "card": { "enum": cards.clone() }
                     },
-                    "required": ["kind", "target"]
+                    "required": ["kind", "target", "card"]
                 }
             },
             "price": {
@@ -281,7 +315,17 @@ pub fn read_wish(
                 .filter(|&p| p != player)
                 .max_by_key(|&p| (game.style(p), p.0))
         });
-        acts.extend(Act::of(kind, target));
+        // A blessing may name a card of the asker's hand.
+        let named_card = item["card"].as_str().and_then(|name| {
+            game.hand(player)
+                .iter()
+                .copied()
+                .find(|&c| game.card_name(c) == name)
+        });
+        acts.extend(match Act::of(kind, target) {
+            Some(Act::Bless { .. }) => Some(Act::Bless { card: named_card }),
+            other => other,
+        });
     }
     if acts.is_empty() {
         return Err(format!("no act in {reply}"));

@@ -783,6 +783,15 @@ impl Match {
             match event {
                 Event::Moved { player, to, .. } => self.steps.push((*player, *to)),
                 Event::Blinked { player, to, .. } => self.steps.push((*player, *to)),
+                Event::Swapped {
+                    player,
+                    to,
+                    other,
+                    other_to,
+                } => {
+                    self.steps.push((*player, *to));
+                    self.steps.push((*other, *other_to));
+                }
                 // Seen again: the token goes where they really are.
                 Event::Revealed { player, hex, .. } => self.steps.push((*player, *hex)),
                 Event::ChampionFell {
@@ -1127,6 +1136,90 @@ impl Match {
                 } else {
                     ""
                 }
+            ),
+            // What a wish told one player stays in their feed (§7.3).
+            Event::SecretLearned { player, about } if *player == me => {
+                match self.game.secret(*about) {
+                    Some(c) => {
+                        let (name, explain) = names::condition(c);
+                        format!("Тайное условие {}: «{name}». {explain}", self.name(*about))
+                    }
+                    None => format!("Тайна {} осталась тайной.", self.name(*about)),
+                }
+            }
+            Event::SecretLearned { player, about } => format!(
+                "{} узнаёт тайное условие {}.",
+                self.name(*player),
+                self.name(*about)
+            ),
+            Event::HandSeen {
+                player,
+                about,
+                cards,
+            } if *player == me => {
+                let names: Vec<String> = cards
+                    .iter()
+                    .map(|d| format!("«{}»", d.def().name))
+                    .collect();
+                if names.is_empty() {
+                    format!("Рука {} пуста.", self.name(*about))
+                } else {
+                    format!("В руке {}: {}.", self.name(*about), names.join(", "))
+                }
+            }
+            Event::HandSeen { player, about, .. } => format!(
+                "{} заглядывает в руку {}.",
+                self.name(*player),
+                self.name(*about)
+            ),
+            Event::CardChanged {
+                owner,
+                card,
+                god,
+                blessed,
+            } => {
+                let what = if *owner == me {
+                    format!("твою «{}»", self.game.card_name(*card))
+                } else {
+                    format!("карту {}", self.name(*owner))
+                };
+                if *blessed {
+                    format!("{} благословляет {what}.", names::god(*god))
+                } else {
+                    format!("{} наводит порчу на {what}.", names::god(*god))
+                }
+            }
+            Event::CardForged { player, card, god } => {
+                if *player == me {
+                    format!(
+                        "{} куёт тебе новую карту: «{}».",
+                        names::god(*god),
+                        self.game.card_name(*card)
+                    )
+                } else {
+                    format!(
+                        "{} куёт новую карту для {}.",
+                        names::god(*god),
+                        self.name(*player)
+                    )
+                }
+            }
+            Event::TruceMade { player, other, god } => format!(
+                "{} скрепляет мир: {} и {} не сражаются до заката.",
+                names::god(*god),
+                self.name(*player),
+                self.name(*other)
+            ),
+            Event::TruceBroken { player, other, god } => format!(
+                "{} нарушает мир с {}: проклятие {} и −2 Стиля.",
+                self.name(*player),
+                self.name(*other),
+                names::god_genitive(*god)
+            ),
+            Event::Swapped { player, other, .. } => format!(
+                "{} и {} меняются местами.",
+                self.name(*player),
+                self.name(*other)
             ),
             Event::PricePaid { player, price } => format!(
                 "{} отдаёт богу {}.",
