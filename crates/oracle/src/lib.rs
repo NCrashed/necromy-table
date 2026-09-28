@@ -11,14 +11,19 @@
 
 pub mod client;
 pub mod prompt;
+pub mod route;
 
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 pub use client::{Message, alive};
+pub use route::{Route, Voice};
+use std::sync::Arc;
 
 /// Where `llama-server` listens unless `NECROMY_ORACLE` says otherwise; the
 /// same default as the first-person game, so both can share one server.
+/// `NECROMY_ORACLE` may list spares after the main voice, comma-separated
+/// (`Route`).
 pub const DEFAULT_ADDR: &str = "127.0.0.1:8080";
 
 pub fn addr_from_env() -> String {
@@ -49,7 +54,8 @@ pub struct Oracle {
 }
 
 impl Oracle {
-    pub fn spawn(addr: String) -> Oracle {
+    /// Jobs go to whichever address of `route` answers when they run.
+    pub fn spawn(route: Arc<Route>) -> Oracle {
         let (jobs, inbox) = channel::<Job>();
         let (outbox, answers) = channel();
         std::thread::Builder::new()
@@ -57,7 +63,7 @@ impl Oracle {
             .spawn(move || {
                 for job in inbox {
                     let result = client::chat(
-                        &addr,
+                        route.addr(),
                         &job.messages,
                         job.schema.as_ref(),
                         job.max_tokens,

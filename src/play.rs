@@ -137,6 +137,9 @@ pub type Gate = std::sync::Arc<dyn Fn(&Game, PlayerId, &Intent) -> bool + Send +
 pub struct OracleState {
     /// The model answers: wishes can be written in free words.
     pub online: bool,
+    /// The main voice is down and a spare answers (the server's
+    /// `NECROMY_ORACLE` lists it).
+    pub spare: bool,
     /// The god thinking about the human's wish.
     pub listening: Option<God>,
     /// Why the last free-words wish was not heard.
@@ -676,6 +679,20 @@ impl Match {
                 ),
                 FromTable::Oracle(news) => match news {
                     OracleNews::Online(online) => self.oracle.online = online,
+                    // Told in the feed, so whoever runs the server notices.
+                    OracleNews::Spare(spare) => {
+                        if spare != self.oracle.spare {
+                            self.feed.push(
+                                if spare {
+                                    "Голос богов слабеет: говорит запасная модель."
+                                } else {
+                                    "Голос богов вернулся в полную силу."
+                                }
+                                .into(),
+                            );
+                        }
+                        self.oracle.spare = spare;
+                    }
                     OracleNews::Listening(god) => self.oracle.listening = god,
                     OracleNews::NotHeard(why) => self.oracle.failed = Some(why),
                     OracleNews::WishVoice { serial, text } => {

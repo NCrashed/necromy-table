@@ -12,8 +12,6 @@
 //! out, so a slow screen never holds the table for long.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
 use necromy_oracle::{Job, Oracle, prompt};
 use necromy_rules::{Event, Game, God, Intent, Phase, PlayerId, RuleError, Setup, bot};
@@ -28,8 +26,6 @@ pub use clock::{Clock, Decision, Timers};
 pub const BOT_STEP_SECS: f32 = 0.35;
 /// Longest wait for a seat to show a change before bots go on without it.
 pub const SHOW_TIMEOUT_SECS: f32 = 12.0;
-/// Seconds between health probes of the model.
-const PROBE_SECS: u64 = 5;
 /// Cosmetic voice jobs are skipped while this many already wait.
 const MAX_QUEUED_VOICES: usize = 2;
 /// Letters of a wish draft passed on to the others (the panel takes 200).
@@ -125,6 +121,9 @@ pub enum FromTable {
 pub enum OracleNews {
     /// Whether the model answers; wishes in free words need it.
     Online(bool),
+    /// The main voice is down and a spare answers (`NECROMY_ORACLE` lists
+    /// it): the game shows it, so whoever runs the server can react.
+    Spare(bool),
     /// A god is thinking about this seat's wish, or stopped.
     Listening(Option<God>),
     /// The wish could not be heard; the seat may try again.
@@ -152,8 +151,9 @@ enum Purpose {
 
 struct Voice {
     oracle: Oracle,
-    online: Arc<AtomicBool>,
-    told_online: bool,
+    route: Arc<necromy_oracle::Route>,
+    /// The voice's state as last told to the seats.
+    told: Option<necromy_oracle::Voice>,
     next_id: u64,
     /// In send order.
     pending: Vec<(u64, Purpose)>,
@@ -216,24 +216,12 @@ impl Table {
             timers,
         };
         let voice = config.oracle.map(|addr| {
-            let online = Arc::new(AtomicBool::new(false));
-            {
-                let (addr, online) = (addr.clone(), online.clone());
-                std::thread::Builder::new()
-                    .name("oracle-probe".into())
-                    .spawn(move || {
-                        // Until the table is gone: only this thread holds the flag then.
-                        while Arc::strong_count(&online) > 1 {
-                            online.store(necromy_oracle::alive(&addr), Ordering::Relaxed);
-                            std::thread::sleep(Duration::from_secs(PROBE_SECS));
-                        }
-                    })
-                    .expect("spawn the oracle probe");
-            }
+            // One probe per address list and process, shared by every table.
+            let route = necromy_oracle::Route::shared(&addr);
             Voice {
-                oracle: Oracle::spawn(addr),
-                online,
-                told_online: false,
+                oracle: Oracle::spawn(route.clone()),
+                route,
+                told: None,
                 next_id: 0,
                 pending: Vec::new(),
             }
@@ -535,7 +523,7 @@ impl Table {
     fn online(&self) -> bool {
         self.voice
             .as_ref()
-            .is_some_and(|v| v.online.load(Ordering::Relaxed))
+            .is_some_and(|v| v.route.voice() != necromy_oracle::Voice::Silent)
     }
 
     /// The Dominant writes their wish: everyone else sees it as it is typed.
@@ -549,7 +537,14 @@ impl Table {
             let other = PlayerId(i as u8);
             if other != seat && self.seats[i].watched() {
                 let text = text.clone();
-                self.send(other, FromTable::Drafting { player: seat, god, text });
+                self.send(
+                    other,
+                    FromTable::Drafting {
+                        player: seat,
+                        god,
+                        text,
+                    },
+                );
             }
         }
     }
@@ -629,9 +624,11 @@ impl Table {
         let Some(voice) = self.voice.as_mut() else {
             return;
         };
-        let online = voice.online.load(Ordering::Relaxed);
-        let changed = online != voice.told_online;
-        voice.told_online = online;
+        let now = voice.route.voice();
+        let changed = voice.told != Some(now);
+        voice.told = Some(now);
+        let online = now != necromy_oracle::Voice::Silent;
+        let spare = now == necromy_oracle::Voice::Spare;
         let mut answers = Vec::new();
         while let Some(answer) = voice.oracle.poll() {
             if let Some(i) = voice.pending.iter().position(|(id, _)| *id == answer.id) {
@@ -643,6 +640,10 @@ impl Table {
                 self.send(
                     PlayerId(i as u8),
                     FromTable::Oracle(OracleNews::Online(online)),
+                );
+                self.send(
+                    PlayerId(i as u8),
+                    FromTable::Oracle(OracleNews::Spare(spare)),
                 );
             }
         }

@@ -142,7 +142,10 @@ fn a_wish_being_written_is_seen_by_the_others() {
         if let Some(p) = t.game().wish_due() {
             break p;
         }
-        assert!(t.game().winner().is_none(), "the match ended without a wish");
+        assert!(
+            t.game().winner().is_none(),
+            "the match ended without a wish"
+        );
         t.tick(BOT_STEP_SECS);
     };
     let other = everyone.iter().copied().find(|&p| p != writer).unwrap();
@@ -155,7 +158,11 @@ fn a_wish_being_written_is_seen_by_the_others() {
         },
     );
     for &p in &everyone {
-        assert!(!t.drain(p).iter().any(|m| matches!(m, FromTable::Drafting { .. })));
+        assert!(
+            !t.drain(p)
+                .iter()
+                .any(|m| matches!(m, FromTable::Drafting { .. }))
+        );
     }
     t.submit(
         writer,

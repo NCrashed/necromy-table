@@ -46,7 +46,12 @@ fn main() -> std::io::Result<()> {
     }
     let listener = TcpListener::bind(&listen)?;
     match &oracle {
-        Some(addr) => eprintln!("necromy-server on {listen}; gods' voice: llama-server at {addr}"),
+        Some(addr) => {
+            eprintln!("necromy-server on {listen}; gods' voice: llama-server at {addr}");
+            // Probe from the start, not from the first table: the journal
+            // tells the voice's state (and every switch to a spare) at once.
+            necromy_oracle::Route::shared(addr);
+        }
         None => eprintln!("necromy-server on {listen}; gods' voice off (templates)"),
     }
 

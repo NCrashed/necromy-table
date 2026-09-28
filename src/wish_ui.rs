@@ -441,6 +441,14 @@ fn rebuild_panel(
             11.0,
             DIM,
         ));
+    } else if game.oracle.spare {
+        rows.push(text_block(
+            &mut commands,
+            &font,
+            "Голос богов слабеет: говорит запасная модель, она медленнее и понимает хуже.",
+            11.0,
+            DIM,
+        ));
     }
     if matches!(
         g.secret(game.human),
