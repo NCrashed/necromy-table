@@ -627,6 +627,7 @@ fn body_cards_consume_the_corpse_underfoot() {
 
 #[test]
 fn bots_never_stall_or_break_rules() {
+    let mut poisoned = 0;
     for seed in 0..30 {
         let (mut g, _) = Game::new(Setup {
             seed,
@@ -652,7 +653,13 @@ fn bots_never_stall_or_break_rules() {
             .filter(|e| matches!(e, Event::CardPlayed { .. }))
             .count();
         assert!(played > 10, "seed {seed}: bots played only {played} cards");
+        poisoned += g
+            .log()
+            .iter()
+            .filter(|e| matches!(e, Event::Poisoned { .. }))
+            .count();
     }
+    assert!(poisoned > 0, "no bot ever poisoned anyone");
 }
 
 // ---- Battles (§12) ----
@@ -2283,4 +2290,130 @@ fn wrath_shortens_the_reach_of_reactions() {
             .any(|e| matches!(e, Event::WindowOpened { .. }))
     );
     assert!(g.to_answer(foe).is_none());
+}
+
+// ---- Poison (§20.1) ----
+
+fn play_at(g: &mut Game, me: PlayerId, name: &str, target: PlayerId) {
+    let card = g.give(me, name);
+    g.apply(
+        me,
+        Intent::Play {
+            card,
+            target: Target::Champion(target),
+        },
+    )
+    .unwrap();
+    g.pass_all();
+}
+
+#[test]
+fn poison_bites_down_to_one_and_wears_off() {
+    let (mut g, me, foe) = duel(2);
+    play_at(&mut g, me, "Болиголов", foe);
+    let poison = g.champion(foe).unwrap().poison;
+    assert_eq!(
+        poison,
+        Some(Poison {
+            element: Element::Wood,
+            stacks: 2
+        })
+    );
+    g.champ_mut(foe).hp = 2;
+    let mut events = Vec::new();
+    g.start_turn(foe, &mut events);
+    assert_eq!(g.champion(foe).unwrap().hp, 1);
+    // The last health is never poison's to take.
+    g.start_turn(foe, &mut events);
+    assert_eq!(g.champion(foe).unwrap().hp, 1);
+    assert_eq!(g.champion(foe).unwrap().poison, None);
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::PoisonBit {
+            amount: 0,
+            hp: 1,
+            stacks: 0,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn new_poison_adds_up_and_takes_its_element() {
+    let (mut g, me, foe) = duel(2);
+    play_at(&mut g, me, "Болиголов", foe);
+    play_at(&mut g, me, "Чумной вздох", foe);
+    let poison = g.champion(foe).unwrap().poison.unwrap();
+    assert_eq!(poison.element, Element::Earth);
+    assert_eq!(poison.stacks, 2 + 3);
+}
+
+#[test]
+fn quenching_heal_cures_generating_heal_feeds() {
+    let (mut g, me, foe) = duel(1);
+    let wood = Some(Poison {
+        element: Element::Wood,
+        stacks: 2,
+    });
+    // Metal quenches wood: the heal takes the poison off.
+    g.champ_mut(foe).poison = wood;
+    play_at(&mut g, me, "Калёное железо", foe);
+    assert_eq!(g.champion(foe).unwrap().poison, None);
+
+    // Water generates wood: healing with it feeds the poison.
+    g.champ_mut(me).poison = wood;
+    g.champ_mut(me).hp = 1;
+    play_at(&mut g, me, "Дымная ладонь", foe);
+    assert_eq!(g.champion(me).unwrap().poison.unwrap().stacks, 3);
+    // Metal then water is a generation chain: the drain heals 2.
+    assert_eq!(g.champion(me).unwrap().hp, 3);
+}
+
+#[test]
+fn a_ward_stops_poison_unless_it_is_quenched() {
+    let (mut g, me, foe) = duel(2);
+    g.champ_mut(foe).ward = Some(Element::Water);
+    play_at(&mut g, me, "Болиголов", foe);
+    assert_eq!(g.champion(foe).unwrap().poison, None);
+    // Wood quenches earth: the ward breaks and the poison gets in.
+    g.champ_mut(foe).ward = Some(Element::Earth);
+    play_at(&mut g, me, "Болиголов", foe);
+    assert_eq!(g.champion(foe).unwrap().ward, None);
+    assert!(g.champion(foe).unwrap().poison.is_some());
+}
+
+#[test]
+fn a_temple_and_death_cleanse() {
+    let (mut g, me, foe) = duel(2);
+    let poison = Some(Poison {
+        element: Element::Earth,
+        stacks: 3,
+    });
+    g.champ_mut(me).poison = poison;
+    let tile = g.board.tile_mut(Hex::new(0, 0)).unwrap();
+    tile.terrain = Terrain::Temple;
+    tile.region = Some(God::Zaga);
+    g.apply(me, Intent::EndTurn).unwrap();
+    assert_eq!(g.champion(me).unwrap().poison, None);
+
+    g.champ_mut(foe).poison = poison;
+    let mut events = Vec::new();
+    g.fall(foe, &mut events);
+    assert_eq!(g.champion(foe).unwrap().poison, None);
+}
+
+#[test]
+fn poison_traps_poison() {
+    let (mut g, me, foe) = duel(2);
+    let card = g.give(foe, "Мёртвая вода");
+    g.traps.push(Trap {
+        owner: foe,
+        hex: Hex::new(1, 0),
+        card,
+    });
+    g.hands[foe.0 as usize].clear();
+    g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    g.pass_all();
+    let poison = g.champion(me).unwrap().poison.unwrap();
+    assert_eq!((poison.element, poison.stacks), (Element::Water, 2));
 }

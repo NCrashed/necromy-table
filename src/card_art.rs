@@ -83,6 +83,10 @@ fn art_file(name: &str) -> Option<&'static str> {
         "Пелена" => "veil",
         "Короткий путь" => "shortcut",
         "Бинт" => "bandage",
+        "Болиголов" => "hemlock",
+        "Чумной вздох" => "plague-breath",
+        "Калёное железо" => "searing-iron",
+        "Мёртвая вода" => "dead-water",
         _ => return None,
     })
 }

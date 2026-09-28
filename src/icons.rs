@@ -427,6 +427,17 @@ pub fn ward_icon(color: [u8; 3]) -> Image {
     c.into_image()
 }
 
+/// Poison (§20.1): a drop in the colour of its element with a sickly
+/// green glint, so every element's poison still reads as poison.
+pub fn poison_icon(color: [u8; 3]) -> Image {
+    let mut c = Canvas::new();
+    c.polygon(&[(8.0, 1.0), (12.5, 9.0), (3.5, 9.0)], color);
+    c.disc(8, 10, 5, color);
+    c.disc(8, 11, 2, LIGHT_GREEN);
+    c.rect(6, 6, 6, 8, WHITE);
+    c.into_image()
+}
+
 fn lighten([r, g, b]: Rgb, t: f32) -> Rgb {
     [r, g, b].map(|c| (c as f32 + (255.0 - c as f32) * t) as u8)
 }

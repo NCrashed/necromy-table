@@ -7,7 +7,7 @@
 
 use hexx::Hex;
 
-use crate::cards::{CardId, Effect};
+use crate::cards::{self, CardId, Effect};
 use crate::game::{
     Condition, Game, Goal, Intent, PlayerId, Target, TimeOfDay, WindowKind, WishKind,
 };
@@ -158,7 +158,11 @@ fn strike(
         let def = game.def(card);
         if !matches!(
             def.effect,
-            Effect::Damage(_) | Effect::Drain(_) | Effect::Finish(_) | Effect::Root
+            Effect::Damage(_)
+                | Effect::Drain(_)
+                | Effect::Finish(_)
+                | Effect::Root
+                | Effect::Poison(_)
         ) {
             continue;
         }
@@ -177,6 +181,10 @@ fn strike(
             if matches!(def.effect, Effect::Finish(_)) && c.hp == c.body {
                 continue;
             }
+            // Poison stacks up slowly and never takes the last health.
+            if matches!(def.effect, Effect::Poison(_)) && (c.poison.is_some() || c.hp <= 1) {
+                continue;
+            }
             if best.is_none_or(|(hp, _, _)| c.hp < hp) {
                 best = Some((c.hp, card, foe));
             }
@@ -188,16 +196,21 @@ fn strike(
     })
 }
 
-/// Heal ourselves when hurt.
+/// Heal ourselves when hurt, or cure our poison; never feed it.
 fn mend(game: &Game, player: PlayerId, cards: &[CardId]) -> Option<Intent> {
     let me = game.champion(player)?;
-    if me.hp * 2 > me.body {
+    let poison = me.poison.map(|p| p.element);
+    let cures = |c: CardId| poison.is_some_and(|p| cards::cures(game.def(c), p));
+    let feeds = |c: CardId| poison.is_some_and(|p| game.def(c).element == Some(p.generated_by()));
+    if me.hp * 2 > me.body && !cards.iter().any(|&c| cures(c)) {
         return None;
     }
     cards
         .iter()
         .find(|&&c| {
             matches!(game.def(c).effect, Effect::Heal(_))
+                && (cures(c) || me.hp * 2 <= me.body)
+                && !feeds(c)
                 && game.targets(player, c).contains(&Target::Champion(player))
         })
         .map(|&card| Intent::Play {

@@ -92,6 +92,11 @@ impl Element {
         self.step(3)
     }
 
+    /// The element that feeds this one: a heal of it feeds its poison.
+    pub const fn generated_by(self) -> Element {
+        self.step(4)
+    }
+
     pub const fn is_yang(self) -> bool {
         matches!(self, Element::Wood | Element::Fire | Element::Earth)
     }

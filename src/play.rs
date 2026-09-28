@@ -13,8 +13,8 @@ use bevy::window::PrimaryWindow;
 use necromy_host::{Clock, Config, Decision, FromTable, OracleNews, Seat, Table, ToTable};
 use necromy_net::{ClientConn, ClientMsg, ServerMsg};
 use necromy_rules::{
-    CardId, Event, Fighter, Game, God, Hex, Intent, PlayerId, RuleError, Score, Target, Terrain,
-    TimeOfDay, WindowKind,
+    CardId, Cure, Event, Fighter, Game, God, Hex, Intent, PlayerId, RuleError, Score, Target,
+    Terrain, TimeOfDay, WindowKind,
 };
 
 use crate::board::{self, Board};
@@ -1029,6 +1029,30 @@ impl Match {
                 names::element(*ward)
             ),
             Event::Rooted { player } => format!("{} скован.", self.name(*player)),
+            Event::Poisoned {
+                player,
+                element,
+                stacks,
+            } => format!(
+                "{}: яд {} ({stacks}).",
+                self.name(*player),
+                names::element_genitive(*element)
+            ),
+            Event::PoisonFed { player, stacks } => {
+                format!("{}: лечение кормит яд ({stacks}).", self.name(*player))
+            }
+            Event::PoisonBit {
+                player, amount, hp, ..
+            } if *amount > 0 => format!("{}: яд, −{amount} здоровья ({hp}).", self.name(*player)),
+            Event::PoisonBit { player, .. } => {
+                format!("{}: яд не берёт последнее здоровье.", self.name(*player))
+            }
+            Event::PoisonCured { player, by } => match by {
+                Cure::Heal(e) => {
+                    format!("{}: {} снимает яд.", self.name(*player), names::element(*e))
+                }
+                Cure::Temple => format!("{}: храм очищает от яда.", self.name(*player)),
+            },
             Event::Hid { player, .. } => format!("{} уходит в тень.", self.name(*player)),
             Event::Revealed { player, why, .. } => format!(
                 "{} выходит из тени: {}.",
@@ -1525,6 +1549,9 @@ impl Match {
             Event::WardBroken { player, .. } if *player == me => "оберег сломан".into(),
             Event::WardRaised { player, .. } if *player == me => "на тебе оберег".into(),
             Event::Rooted { player } if *player == me => "ты скован".into(),
+            Event::Poisoned { player, stacks, .. } if *player == me => format!("яд ({stacks})"),
+            Event::PoisonFed { player, .. } if *player == me => "лечение кормит яд".into(),
+            Event::PoisonCured { player, .. } if *player == me => "яд снят".into(),
             Event::Canceled { card, .. } if *card == hit.card => "карта погашена".into(),
             Event::CancelFailed { card, .. } if *card == hit.card => "погасить не вышло".into(),
             Event::Fizzled { card } if *card == hit.card => "карта ушла впустую".into(),

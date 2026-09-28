@@ -57,6 +57,8 @@ pub struct StatArt {
     icons: HashMap<StatIcon, Handle<Image>>,
     /// Ward shields per element (`Element::index`).
     pub wards: [Handle<Image>; 5],
+    /// Poison drops per element (`Element::index`).
+    pub poisons: [Handle<Image>; 5],
     /// Token sprite per seat.
     pub portraits: Vec<Handle<Image>>,
     /// The royal guard's sprite.
@@ -118,6 +120,7 @@ fn make_art(
         .map(|i| (i, images.add(icons::stat_icon(i))))
         .collect();
     let wards = God::ALL.map(|g| images.add(icons::ward_icon(g.accent())));
+    let poisons = God::ALL.map(|g| images.add(icons::poison_icon(g.accent())));
     let portraits = game
         .game
         .champions()
@@ -155,6 +158,7 @@ fn make_art(
     commands.insert_resource(StatArt {
         icons,
         wards,
+        poisons,
         portraits,
         gods,
         offering,
@@ -450,7 +454,7 @@ fn stat_sheet(
 
     // States.
     let curses = g.curses(player);
-    if c.ward.is_some() || c.rooted || !curses.is_empty() {
+    if c.ward.is_some() || c.rooted || c.poison.is_some() || !curses.is_empty() {
         let r = row(commands);
         if let Some(ward) = c.ward {
             let i = icon_node(commands, art.wards[ward.index()].clone(), 24.0, true);
@@ -470,6 +474,27 @@ fn stat_sheet(
         if c.rooted {
             let i = icon_node(commands, art.icon(StatIcon::Rooted), 24.0, true);
             let t = label(commands, font, "скован", 12.0, false);
+            commands.entity(r).add_children(&[i, t]);
+        }
+        if let Some(poison) = c.poison {
+            let i = icon_node(
+                commands,
+                art.poisons[poison.element.index()].clone(),
+                24.0,
+                true,
+            );
+            let t = label(
+                commands,
+                font,
+                &format!(
+                    "яд {} ×{} · снимет {}",
+                    names::element_genitive(poison.element),
+                    poison.stacks,
+                    names::element(poison.element.quenched_by()),
+                ),
+                12.0,
+                false,
+            );
             commands.entity(r).add_children(&[i, t]);
         }
         if c.hidden {

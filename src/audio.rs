@@ -825,6 +825,10 @@ fn hear_events(
             Event::WardRaised { player, .. } => (Sound::new("ward-raise"), by(*player)),
             Event::WardBroken { player, .. } => (Sound::new("ward-break"), by(*player)),
             Event::Rooted { player } => (Sound::new("root"), by(*player)),
+            // Poison borrows the curse sounds until it has its own.
+            Event::Poisoned { player, .. } => (Sound::new("curse-laid").at(0.7), by(*player)),
+            Event::PoisonBit { player, .. } => (Sound::new("curse-bit").at(0.7), by(*player)),
+            Event::PoisonCured { player, .. } => (Sound::new("heal"), by(*player)),
             Event::Hasted { player, .. } => (Sound::new("haste"), by(*player)),
             Event::Blinked { player, .. } => (Sound::new("blink"), by(*player)),
             Event::TrapSet { player, .. } => (Sound::new("trap-set"), by(*player)),

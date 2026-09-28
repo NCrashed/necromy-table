@@ -100,6 +100,8 @@ pub enum Effect {
     /// Reads Trishna's stage (§5): Generosity feeds everyone near, Thirst
     /// feeds the caster at the neighbours' cost, Devouring burns the bodies near.
     Feast,
+    /// Stacks of poison of the card's element (docs/design.md §20.1).
+    Poison(u8),
 }
 
 impl Effect {
@@ -127,6 +129,19 @@ impl Effect {
                 | Effect::Finish(_)
                 | Effect::Root
                 | Effect::Trap(_)
+                | Effect::Poison(_)
+        )
+    }
+
+    /// Heals someone, so its element may cure or feed a poison (§20.1).
+    pub const fn heals(self) -> bool {
+        matches!(
+            self,
+            Effect::Heal(_)
+                | Effect::Drain(_)
+                | Effect::BodyDissolve
+                | Effect::BodyRest
+                | Effect::BodySeed
         )
     }
 }
@@ -135,6 +150,7 @@ impl Effect {
 pub enum TrapEffect {
     Damage(u8),
     Root,
+    Poison(u8),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -204,6 +220,7 @@ pub const POOL: &[CardDef] = &[
     card("Живица", "Вылечить чемпиона в 3 шагах на 2.", Some(Wood), Rite, Instant, 1, Champion { range: 3 }, Heal(2)),
     card("Шипы чащи", "1 урона сопернику в 2 шагах.", Some(Wood), Trick, Instant, 0, Enemy { range: 2 }, Damage(1)),
     card("Семя в мёртвом", "Тело под тобой сразу прорастает рощей. Вылечись на 2.", Some(Wood), Body, Own, 0, Corpse, BodySeed),
+    card("Болиголов", "Сопернику в 2 шагах яд 2: −1 здоровья в начале хода, не ниже 1.", Some(Wood), Trick, Instant, 0, Enemy { range: 2 }, Poison(2)),
     // Fire — Trishna
     card("Пламя пира", "2 урона сопернику в 3 шагах.", Some(Fire), Rite, Own, 2, Enemy { range: 3 }, Damage(2)),
     card("Сжечь как топливо", "Тело под тобой: +2 Духа и +1 очко движения.", Some(Fire), Body, Own, 0, Corpse, BodyFuel),
@@ -218,12 +235,14 @@ pub const POOL: &[CardDef] = &[
     card("Бремя", "Соперник в 2 шагах теряет ход.", Some(Earth), Trick, Instant, 0, Enemy { range: 2 }, Root),
     card("Отзвучавшая нота", "3 урона раненому сопернику в 2 шагах.", Some(Earth), Rite, Own, 2, Enemy { range: 2 }, Finish(3)),
     card("Власяница", "Оберег земли на себя.", Some(Earth), Trick, Own, 0, Caster, Ward),
+    card("Чумной вздох", "Сопернику в 2 шагах яд 3: −1 здоровья в начале хода, не ниже 1.", Some(Earth), Rite, Own, 1, Enemy { range: 2 }, Poison(3)),
     // Metal — Ahamar
     card("Именной оберег", "Оберег железа на чемпиона в 3 шагах.", Some(Metal), Rite, Instant, 1, Champion { range: 3 }, Ward),
     card("Вписать в легион", "Тело под тобой: оберег железа.", Some(Metal), Body, Own, 0, Corpse, BodyLegion),
     card("Реестр", "Ловушка рядом: вошедший соперник получает 2 урона.", Some(Metal), Trick, Own, 0, EmptyHex { range: 1 }, Trap(TrapEffect::Damage(2))),
     card("Приговор порядка", "2 урона сопернику в 2 шагах.", Some(Metal), Rite, Own, 2, Enemy { range: 2 }, Damage(2)),
     card("Присяга", "Ответ: оберег железа на себя до удара.", Some(Metal), Trick, Response, 0, Caster, Ward),
+    card("Калёное железо", "Вылечить чемпиона рядом на 1. Снимает яд дерева.", Some(Metal), Trick, Instant, 0, Champion { range: 1 }, Heal(1)),
     // Water — Maya
     card("Растворить душу", "Тело под тобой: +1 Духа, вылечись на 2.", Some(Water), Body, Own, 0, Corpse, BodyDissolve),
     card("Туманный шаг", "Перенестись на пустую клетку в 3 шагах.", Some(Water), Rite, Own, 1, EmptyHex { range: 3 }, Blink),
@@ -231,6 +250,7 @@ pub const POOL: &[CardDef] = &[
     card("Дымная ладонь", "1 урона сопернику в 3 шагах, вылечись на 1.", Some(Water), Trick, Instant, 0, Enemy { range: 3 }, Drain(1)),
     card("Бирюзовый оберег", "Оберег воды на себя.", Some(Water), Rite, Own, 1, Caster, Ward),
     card("Пелена", "Скройся: соперники не видят тебя, пока ты не раскроешься.", Some(Water), Rite, Own, 1, Caster, Hide),
+    card("Мёртвая вода", "Ловушка рядом: вошедший соперник получает яд 2.", Some(Water), Trick, Own, 0, EmptyHex { range: 1 }, Trap(TrapEffect::Poison(2))),
     // Neutral
     card("Короткий путь", "+1 очко движения в этот ход.", None, Trick, Own, 0, Caster, Haste(1)),
     card("Бинт", "Вылечись на 1.", None, Trick, Instant, 0, Caster, Heal(1)),
@@ -240,8 +260,9 @@ pub const POOL: &[CardDef] = &[
 pub const SLICE_SIZE: usize = 20;
 pub const COPIES: u32 = 2;
 
-/// Picks this match's slice of the pool, then makes sure every ward in it
-/// has an answer: a harmful card of the one element that quenches it (§2).
+/// Picks this match's slice of the pool, then makes sure every ward and
+/// every poison in it has an answer (§2, §20.1): a harmful card, or a heal,
+/// of the one element that quenches it.
 pub fn match_slice(rng: &mut Rng) -> Vec<DefId> {
     let mut all: Vec<DefId> = (0..POOL.len() as u16).map(DefId).collect();
     rng.shuffle(&mut all);
@@ -249,22 +270,43 @@ pub fn match_slice(rng: &mut Rng) -> Vec<DefId> {
 
     loop {
         let missing = slice.iter().find_map(|id| {
-            let def = id.def();
-            let ward = ward_element(def)?;
-            let answered = slice.iter().any(|a| answers(a.def(), ward));
-            (!answered).then_some(ward)
+            let need = Need::of(id.def())?;
+            let answered = slice.iter().any(|a| need.met_by(a.def()));
+            (!answered).then_some(need)
         });
-        let Some(ward) = missing else { break };
+        let Some(need) = missing else { break };
         // The pool itself always holds an answer; tests check that.
         let answer = all
             .iter()
-            .find(|a| !slice.contains(a) && answers(a.def(), ward))
+            .find(|a| !slice.contains(a) && need.met_by(a.def()))
             .copied()
-            .expect("the pool answers every ward");
+            .expect("the pool answers every ward and poison");
         slice.push(answer);
     }
     slice.sort();
     slice
+}
+
+/// What a card in the slice asks the slice to answer.
+#[derive(Clone, Copy)]
+enum Need {
+    Ward(Element),
+    Poison(Element),
+}
+
+impl Need {
+    fn of(def: &CardDef) -> Option<Need> {
+        ward_element(def)
+            .map(Need::Ward)
+            .or_else(|| poison_element(def).map(Need::Poison))
+    }
+
+    fn met_by(self, def: &CardDef) -> bool {
+        match self {
+            Need::Ward(ward) => answers(def, ward),
+            Need::Poison(poison) => cures(def, poison),
+        }
+    }
 }
 
 /// Element of the ward a card raises, if it raises one.
@@ -276,8 +318,21 @@ pub fn ward_element(def: &CardDef) -> Option<Element> {
     }
 }
 
+/// Element of the poison a card lays, if it lays one.
+pub fn poison_element(def: &CardDef) -> Option<Element> {
+    match def.effect {
+        Effect::Poison(_) | Effect::Trap(TrapEffect::Poison(_)) => def.element,
+        _ => None,
+    }
+}
+
 fn answers(def: &CardDef, ward: Element) -> bool {
     def.effect.is_harmful() && def.element == Some(ward.quenched_by())
+}
+
+/// A heal of the element that quenches the poison takes it off.
+pub fn cures(def: &CardDef, poison: Element) -> bool {
+    def.effect.heals() && def.element == Some(poison.quenched_by())
 }
 
 #[cfg(test)]
@@ -304,6 +359,27 @@ mod tests {
             for id in &slice {
                 if let Some(ward) = ward_element(id.def()) {
                     assert!(slice.iter().any(|a| answers(a.def(), ward)), "seed {seed}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn slices_always_cure_their_poisons() {
+        for def in POOL {
+            if let Some(poison) = poison_element(def) {
+                assert!(
+                    POOL.iter().any(|a| cures(a, poison)),
+                    "{} has no cure",
+                    def.name
+                );
+            }
+        }
+        for seed in 0..200 {
+            let slice = match_slice(&mut Rng::new(seed));
+            for id in &slice {
+                if let Some(poison) = poison_element(id.def()) {
+                    assert!(slice.iter().any(|a| cures(a.def(), poison)), "seed {seed}");
                 }
             }
         }

@@ -70,6 +70,8 @@ pub struct Champion {
     pub hidden: bool,
     /// Where rivals saw them last; views show a hidden rival here.
     pub seen_at: Hex,
+    /// Loses a health each turn, down to one (§20.1).
+    pub poison: Option<Poison>,
 }
 
 impl Champion {
@@ -100,6 +102,7 @@ impl Champion {
             rooted: false,
             hidden: false,
             seen_at: hex,
+            poison: None,
         }
     }
 
@@ -489,6 +492,28 @@ pub enum Event {
     },
     Rooted {
         player: PlayerId,
+    },
+    /// Poison laid or added to; `stacks` is the total now (§20.1).
+    Poisoned {
+        player: PlayerId,
+        element: Element,
+        stacks: u8,
+    },
+    /// A heal of the generating element fed the poison a stack.
+    PoisonFed {
+        player: PlayerId,
+        stacks: u8,
+    },
+    /// The turn started poisoned: `amount` (0 at one health) and a stack gone.
+    PoisonBit {
+        player: PlayerId,
+        amount: u8,
+        hp: u8,
+        stacks: u8,
+    },
+    PoisonCured {
+        player: PlayerId,
+        by: Cure,
     },
     Hasted {
         player: PlayerId,
@@ -1475,6 +1500,7 @@ impl Game {
         {
             self.offer(Some(player), god, 1, events);
             self.record_deed(player, style::Deed::Prayed);
+            self.cure(player, Cure::Temple, events);
         }
         self.stealth_at_turn_end(player, events);
     }
@@ -1808,7 +1834,7 @@ impl Game {
                     && self.pierce(t, def.element, events)
                 {
                     self.damage(t, n(x), events);
-                    self.heal(caster, n(x), events);
+                    self.mend(caster, n(x), def.element, events);
                 }
             }
             Effect::Finish(x) => {
@@ -1830,7 +1856,7 @@ impl Game {
             }
             Effect::Heal(x) => {
                 if let Some(t) = aimed {
-                    self.heal(t, n(x), events);
+                    self.mend(t, n(x), def.element, events);
                 }
             }
             Effect::Ward => {
@@ -1916,20 +1942,27 @@ impl Game {
             Effect::BodyDissolve => {
                 self.take_corpse(caster, events);
                 self.gain_spirit(caster, n(1), events);
-                self.heal(caster, n(2), events);
+                self.mend(caster, n(2), def.element, events);
             }
             Effect::BodyRest => {
                 self.take_corpse(caster, events);
-                self.heal(caster, n(1), events);
+                self.mend(caster, n(1), def.element, events);
                 self.draw(caster, 1, events);
             }
             Effect::BodySeed => {
                 let hex = self.hex_of(caster);
                 self.take_corpse(caster, events);
                 self.grow(hex, events);
-                self.heal(caster, n(2), events);
+                self.mend(caster, n(2), def.element, events);
             }
             Effect::Feast => self.feast(caster, n(1), events),
+            Effect::Poison(x) => {
+                if let (Some(t), Some(element)) = (aimed, def.element)
+                    && self.pierce(t, def.element, events)
+                {
+                    self.poison(t, element, n(x), events);
+                }
+            }
         }
         self.discard.push(card);
     }
@@ -2047,6 +2080,13 @@ impl Game {
                         self.damage(victim, x, events)
                     }
                     Effect::Trap(TrapEffect::Root) => self.root(victim, events),
+                    Effect::Trap(TrapEffect::Poison(x)) => {
+                        let shift = self.stage_shift(def.element, true);
+                        let x = (i16::from(x) + i16::from(shift)).max(1) as u8;
+                        if let Some(element) = def.element {
+                            self.poison(victim, element, x, events);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -2081,6 +2121,7 @@ impl Game {
         champ.hp = champ.body;
         champ.ward = None;
         champ.rooted = false;
+        champ.poison = None;
         // Maya's Rest: death is a release, the Spirit comes back whole.
         if self.law_active(Law::Rest) {
             let champ = self.champ_mut(player);
@@ -2216,6 +2257,7 @@ impl Game {
             move_points: self.move_points(player),
         });
         self.bite_curses(player, events);
+        self.bite_poison(player, events);
         let champ = &self.champions[player.0 as usize];
         if champ.spirit_points < champ.spirit {
             self.gain_spirit(player, 1, events);
@@ -2273,6 +2315,7 @@ impl Game {
 mod battle;
 mod guard;
 mod laws;
+mod poison;
 mod scenario;
 mod stealth;
 mod story;
@@ -2284,6 +2327,7 @@ mod world;
 pub use battle::Score;
 pub use guard::{GUARD_DICE, GUARD_RELIEF, GUARD_STEPS, Guard};
 pub use laws::{BURDEN_FREE, CHOSEN, CRACK_REACH, Law, Patronage, SENTENCE_THRESHOLD, SIGN, VOICE};
+pub use poison::{Cure, Poison};
 pub use scenario::{Scenario, SceneSeat, SceneWorld};
 pub use stealth::RevealReason;
 pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};

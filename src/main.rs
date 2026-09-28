@@ -225,6 +225,11 @@ fn auto_screenshot(
         // The human has a trap on the board.
         (Some("trap"), Some(game)) => game.game.traps().iter().any(|t| t.owner == game.human),
         (Some("hidden"), Some(game)) => game.game.players().any(|p| game.game.is_hidden(p)),
+        // The human is poisoned: the drop on their sheet.
+        (Some("poison"), Some(game)) => game
+            .game
+            .champion(game.human)
+            .is_some_and(|c| c.poison.is_some()),
         (Some("incoming"), Some(game)) => matches!(
             game.human_window(),
             Some(necromy_rules::WindowKind::Target { target, .. }) if target == game.human
