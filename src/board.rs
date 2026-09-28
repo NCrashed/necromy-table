@@ -81,18 +81,19 @@ const TILE_ART: [(Terrain, &str, usize); 10] = [
     (Terrain::Plains, "ground/meadow", 2),
     (Terrain::Forest, "ground/forest", 1),
     (Terrain::Grove, "ground/forest", 1),
-    (Terrain::Mountain, "ground/rock", 3),
-    (Terrain::Swamp, "ground/swamp", 3),
-    (Terrain::Settlement, "ground/village", 1),
+    (Terrain::Mountain, "ground/rock", 2),
+    (Terrain::Swamp, "ground/swamp", 2),
+    (Terrain::Settlement, "ground/village", 2),
     (Terrain::Temple, "ground/paving", 2),
     (Terrain::Table, "ground/paving", 2),
     (Terrain::Ruins, "ground/ruins", 2),
     (Terrain::Stones, "ground/moss", 2),
 ];
 
-/// Tile images are 64×64 with the hexagon in the top 55.4 rows: the quad is
-/// shifted so the hexagon, not the image, sits on the hex centre.
-const ART_HEX_CENTRE_PX: f32 = 64.0 * 0.866_025_4 / 2.0;
+/// Tile images are `TILE_PX` square with the hexagon a little above the
+/// middle (measured on the 128 px set): the quad is shifted so the hexagon,
+/// not the image, sits on the hex centre.
+const ART_HEX_CENTRE_PX: f32 = 61.0;
 
 /// The meshes a hex's ground switches between when its terrain changes.
 #[derive(Resource)]
@@ -189,10 +190,10 @@ fn spawn_board(
             })
             .collect(),
     );
-    // A 64 px image spans the hex's width (two sizes), inset like the mesh.
+    // A tile image spans the hex's width (two sizes), inset like the mesh.
     let art_size = 2.0 * HEX_SIZE * TILE_INSET;
     let art_quad = meshes.add(Plane3d::default().mesh().size(art_size, art_size));
-    let art_shift = Vec3::Z * (32.0 - ART_HEX_CENTRE_PX) / 64.0 * art_size;
+    let art_shift = Vec3::Z * (TILE_PX / 2.0 - ART_HEX_CENTRE_PX) / TILE_PX * art_size;
     // Terrains with painted tiles need no icon.
     let icons: HashMap<Terrain, Handle<StandardMaterial>> = TERRAINS
         .into_iter()
@@ -436,7 +437,7 @@ fn sync_markers(
             .filter(|h| images.contains(*h));
         match painted {
             Some(image) => (hex, image.clone(), CORPSE_PPM),
-            None => (hex, sprites.corpse.clone(), 16.0),
+            None => (hex, sprites.corpse.clone(), TEXELS),
         }
     });
     let traps = game
@@ -453,7 +454,7 @@ fn sync_markers(
                 .filter(|h| images.contains(*h));
             match painted {
                 Some(image) => (t.hex, image.clone(), CORPSE_PPM),
-                None => (t.hex, sprites.trap.clone(), 16.0),
+                None => (t.hex, sprites.trap.clone(), TEXELS),
             }
         });
     // Owner flags stand at the back left of the hex, out of the champion's way.
@@ -463,7 +464,7 @@ fn sync_markers(
             hex,
             sprites.flags[god.index()].clone(),
             Vec3::new(-0.45, 0.0, -0.2),
-            16.0,
+            TEXELS,
         ))
     });
     // Hidden rivals: a mark where they were last seen, which is where the
@@ -478,11 +479,10 @@ fn sync_markers(
                 c.hex,
                 sprites.trails[c.god.index()].clone(),
                 Vec3::ZERO,
-                8.0,
+                TEXELS,
             ))
         });
     let front = Vec3::new(0.0, 0.0, 0.35);
-    // Pixels per metre: markers are small, the trail is drawn twice as big.
     let corpses = corpses.map(|(h, i, ppm)| (h, i, front, ppm));
     let traps = traps.map(|(h, i, ppm)| (h, i, front, ppm));
     let wanted: Vec<_> = corpses.chain(traps).chain(flags).chain(trails).collect();
@@ -528,6 +528,13 @@ fn sync_markers(
 
 /// Tiles are drawn at this share of their size so the grid reads.
 const TILE_INSET: f32 = 0.95;
+
+/// Texels per world unit, the same for every sprite and tile on the table,
+/// so none is drawn with bigger pixels than another: a 128 px tile spans a
+/// hex (`camera.rs` makes a texel a whole number of screen pixels).
+pub const TEXELS: f32 = TILE_PX / (2.0 * HEX_SIZE * TILE_INSET);
+/// Width of a ground tile picture.
+const TILE_PX: f32 = 128.0;
 
 /// The ground of a hex: a painted tile as painted, or a flat terrain colour
 /// tinted towards its region's god where there is no tile. `stage` of the region's god recolours both: light a touch
@@ -607,8 +614,8 @@ fn hex_mesh(layout: &HexLayout) -> Mesh {
     .with_inserted_indices(Indices::U16(info.indices))
 }
 
-/// Painted corpses: about 0.75 m across for a 60 px body.
-const CORPSE_PPM: f32 = 80.0;
+/// Painted corpses and traps: at the one texel density.
+const CORPSE_PPM: f32 = TEXELS;
 
 /// A tiny shrouded body lying on its side.
 const CORPSE_ROWS: [&str; 5] = [
@@ -623,13 +630,50 @@ const CORPSE_ROWS: [&str; 5] = [
 const TRAP_ROWS: [&str; 4] = [".r...r...r.", "#r#.#r#.#r#", "#xxxxxxxxx#", ".#########."];
 
 /// A question mark in the hidden rival's colour: last seen here.
-const TRAIL_ROWS: [&str; 9] = [
-    ".###.", "#fff#", "#f#f#", "..#f#", ".#f#.", ".#f#.", "..#..", ".#f#.", "..#..",
+const TRAIL_ROWS: [&str; 14] = [
+    "..#####..",
+    ".#FFFFF#.",
+    "#Ff###fF#",
+    "#f#...#f#",
+    ".#....#f#",
+    "....##ff#",
+    "...#ff##.",
+    "...#f#...",
+    "...#f#...",
+    "....#....",
+    ".........",
+    "...###...",
+    "...#F#...",
+    "...###...",
 ];
 
-/// A small pennant on a pole; `f` takes the owner's colour.
-const FLAG_ROWS: [&str; 9] = [
-    "#ffff.", "#fffff", "#ffff.", "#.....", "#.....", "#.....", "#.....", "#.....", "##....",
+/// A pennant on a pole; `f` takes the owner's colour, `F` and `d` its
+/// light and shade.
+const FLAG_ROWS: [&str; 24] = [
+    ".###.........",
+    ".#x#.........",
+    ".#w##########",
+    ".#w#FFFFFFFF#",
+    ".#w#Fffffff#.",
+    ".#w#fffffff#.",
+    ".#w#ffffff#..",
+    ".#w#fffffff#.",
+    ".#w#fdddddd#.",
+    ".#w##########",
+    ".#w#.........",
+    ".#w#.........",
+    ".#w#.........",
+    ".#w#.........",
+    ".#w#.........",
+    ".#w#.........",
+    ".#w#.........",
+    ".#w#.........",
+    ".#w#.........",
+    ".#w#.........",
+    ".#w#.........",
+    ".#w#.........",
+    "##w##........",
+    "#####........",
 ];
 
 /// Builds a small sprite from rows of palette letters; `.` is transparent and
@@ -656,6 +700,15 @@ fn pixel_sprite(rows: &[&str], fill: [u8; 3]) -> Image {
                 b'x' => [150, 140, 128, 255],
                 b'r' => [214, 62, 44, 255],
                 b'f' => [fill[0], fill[1], fill[2], 255],
+                b'F' => {
+                    let l = fill.map(|c| (c as u16 + (255 - c as u16) / 2) as u8);
+                    [l[0], l[1], l[2], 255]
+                }
+                b'd' => {
+                    let d = fill.map(|c| (c as u16 * 3 / 5) as u8);
+                    [d[0], d[1], d[2], 255]
+                }
+                b'w' => [122, 86, 52, 255],
                 _ => continue,
             };
             let i = (y * w as usize + x) * 4;

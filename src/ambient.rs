@@ -194,7 +194,7 @@ fn spawn_fireflies(
                     swarm
                         .spawn((
                             Firefly { centre, phase },
-                            billboard(sprites.firefly.clone(), 40.0, true),
+                            billboard(sprites.firefly.clone(), crate::board::TEXELS, true),
                             Transform::from_translation(centre),
                         ))
                         // Each firefly lights the stones and grass around it.
@@ -240,7 +240,7 @@ fn smoke(
         chimney.next += PUFF_EVERY;
         commands.spawn((
             Puff { age: 0.0 },
-            billboard(sprites.puff.clone(), 30.0, false),
+            billboard(sprites.puff.clone(), crate::board::TEXELS, false),
             Transform::from_translation(at.translation()).with_scale(Vec3::splat(0.4)),
         ));
     }

@@ -1,7 +1,13 @@
 //! The table camera, as in Armello: the table turned with the human's side
 //! towards them, close on their champion, following them.
 //!
-//! Wheel zooms between a close look and the whole board; right or middle
+//! The view is orthographic and pixel-true: one texel of any sprite or tile
+//! (`board::TEXELS` per world unit) covers a whole number of screen pixels
+//! at every zoom step but the overview, and the camera snaps to the pixel
+//! grid, so nothing on the table is drawn with bigger or smaller pixels
+//! than its neighbours.
+//!
+//! Wheel zooms step by step between a close look and the whole board; right or middle
 //! drag and WASD/arrows pan; Q/E turn the table by a hex side; F goes back
 //! to the champion and follows again. The rig holds where the camera
 //! should be; the camera eases towards it every frame.
@@ -14,20 +20,26 @@ use std::f32::consts::{FRAC_PI_3, TAU};
 use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 
-use crate::board::{Board, HEX_SIZE};
+use crate::board::{Board, HEX_SIZE, TEXELS};
 use crate::play::{Match, Selection};
 use crate::token::Token;
 
 /// Downward tilt of the view.
 const PITCH: f32 = 0.95;
-const NEAR: f32 = 6.0;
-const FAR: f32 = 25.0;
-/// Where a match starts: the champion and a ring of hexes around them.
-const START: f32 = 11.0;
+/// Screen pixels per texel at each zoom step; the first is the overview,
+/// the only one where texels are smaller than a pixel.
+const ZOOMS: [f32; 5] = [0.5, 1.0, 2.0, 3.0, 4.0];
+/// Where a match starts: close on the champion.
+const START: f32 = 2.0;
+const OVERVIEW: f32 = 0.5;
+/// How far back the eye stands; orthographic, so only clipping cares.
+const EYE_DISTANCE: f32 = 60.0;
+/// Keyboard panning speed, in screen pixels per second.
+const PAN_PIXELS: f32 = 700.0;
 /// How quickly the camera catches up with the rig (per second).
 const EASE: f32 = 8.0;
 /// How far past the followed champion the camera looks, into the table.
-const LOOK_AHEAD: f32 = 2.5;
+const LOOK_AHEAD: f32 = 0.6;
 
 pub struct CameraPlugin;
 
@@ -48,7 +60,8 @@ impl Plugin for CameraPlugin {
 #[derive(Resource)]
 pub struct Rig {
     focus: Vec3,
-    distance: f32,
+    /// Screen pixels per texel, one of `ZOOMS`.
+    zoom: f32,
     /// Turn of the table around its centre; 0 looks from +Z.
     yaw: f32,
     /// Keep the human's champion in focus.
@@ -61,19 +74,30 @@ impl Default for Rig {
     fn default() -> Rig {
         Rig {
             focus: Vec3::ZERO,
-            distance: FAR,
+            zoom: OVERVIEW,
             yaw: 0.0,
             following: false,
-            shown: (Vec3::ZERO, FAR, 0.0),
+            shown: (Vec3::ZERO, OVERVIEW, 0.0),
         }
     }
 }
 
-/// The camera for a look at `focus` from `distance`, turned by `yaw`.
-fn place(focus: Vec3, distance: f32, yaw: f32) -> Transform {
+/// World units per screen pixel at a zoom.
+fn per_pixel(zoom: f32) -> f32 {
+    1.0 / (TEXELS * zoom)
+}
+
+/// The camera for a look at `focus`, turned by `yaw`, its position snapped
+/// to whole screen pixels so still things do not shimmer as it moves.
+fn place(focus: Vec3, zoom: f32, yaw: f32) -> Transform {
     let back = Vec3::new(yaw.sin(), 0.0, yaw.cos()) * PITCH.cos();
-    let eye = focus + (back + Vec3::Y * PITCH.sin()) * distance;
-    Transform::from_translation(eye).looking_at(focus, Vec3::Y)
+    let eye = focus + (back + Vec3::Y * PITCH.sin()) * EYE_DISTANCE;
+    let mut t = Transform::from_translation(eye).looking_at(focus, Vec3::Y);
+    let px = per_pixel(zoom);
+    let (right, up) = (t.right().as_vec3(), t.up().as_vec3());
+    let snap = |v: f32| (v / px).round() * px - v;
+    t.translation += right * snap(eye.dot(right)) + up * snap(eye.dot(up));
+    t
 }
 
 /// At the start: the human's side of the table towards them, their
@@ -81,11 +105,11 @@ fn place(focus: Vec3, distance: f32, yaw: f32) -> Transform {
 fn seat_the_camera(game: Res<Match>, board: Res<Board>, mut rig: ResMut<Rig>) {
     if std::env::var("NECROMY_CAMERA").is_ok_and(|v| v == "overview") {
         *rig = Rig {
-            focus: Vec3::new(0.0, 0.0, 1.5),
-            distance: 22.0,
+            focus: Vec3::ZERO,
+            zoom: OVERVIEW,
             yaw: 0.0,
             following: false,
-            shown: (Vec3::new(0.0, 0.0, 1.5), 22.0, 0.0),
+            shown: (Vec3::ZERO, OVERVIEW, 0.0),
         };
         return;
     }
@@ -103,7 +127,7 @@ fn seat_the_camera(game: Res<Match>, board: Res<Board>, mut rig: ResMut<Rig>) {
         board.hex_to_world(champion.hex) - Vec3::new(yaw.sin(), 0.0, yaw.cos()) * LOOK_AHEAD;
     *rig = Rig {
         focus,
-        distance: START,
+        zoom: START,
         yaw,
         following: true,
         shown: (focus, START, yaw),
@@ -127,7 +151,19 @@ fn steer(
             MouseScrollUnit::Line => w.y,
             MouseScrollUnit::Pixel => w.y / 40.0,
         };
-        rig.distance = (rig.distance * 0.88f32.powf(notches)).clamp(NEAR, FAR);
+        // One step per notch, towards the nearest step in that direction.
+        let at = ZOOMS
+            .iter()
+            .position(|&z| z >= rig.zoom)
+            .unwrap_or(ZOOMS.len() - 1);
+        let next = if notches > 0.0 {
+            (at + 1).min(ZOOMS.len() - 1)
+        } else if notches < 0.0 {
+            at.saturating_sub(1)
+        } else {
+            at
+        };
+        rig.zoom = ZOOMS[next];
     }
 
     // Pan in the table's own directions, faster when far away.
@@ -141,14 +177,14 @@ fn steer(
     let drag: Vec2 = motion.read().map(|m| m.delta).sum();
     if dragging && drag != Vec2::ZERO {
         // A pixel of drag moves the board about a pixel under the cursor.
-        let per_pixel = rig.distance * 1.1 / window.height().max(1.0);
-        pan -= right * drag.x * per_pixel;
-        pan -= towards_me * drag.y * per_pixel / PITCH.sin();
+        let px = per_pixel(rig.zoom) * window.scale_factor();
+        pan -= right * drag.x * px;
+        pan -= towards_me * drag.y * px / PITCH.sin();
     }
 
     // The keyboard belongs to the wish while the human writes one.
     if game.game.wish_due() != Some(game.human) {
-        let step = rig.distance * 0.9 * time.delta_secs();
+        let step = PAN_PIXELS * per_pixel(rig.zoom) * time.delta_secs();
         let held = |a: KeyCode, b: KeyCode| keys.pressed(a) || keys.pressed(b);
         if held(KeyCode::KeyA, KeyCode::ArrowLeft) {
             pan -= right * step;
@@ -197,10 +233,11 @@ fn follow(game: Res<Match>, tokens: Query<(&Token, &Transform)>, mut rig: ResMut
 pub fn apply(
     time: Res<Time>,
     mut rig: ResMut<Rig>,
-    mut camera: Single<&mut Transform, With<crate::TableCamera>>,
+    camera: Single<(&mut Transform, &mut Projection), With<crate::TableCamera>>,
 ) {
+    let (mut camera, mut projection) = camera.into_inner();
     let k = 1.0 - (-EASE * time.delta_secs()).exp();
-    let (focus, distance, yaw) = rig.shown;
+    let (focus, zoom, yaw) = rig.shown;
     // Turn the short way round.
     let mut turn = (rig.yaw - yaw) % TAU;
     if turn > TAU / 2.0 {
@@ -210,13 +247,24 @@ pub fn apply(
     }
     let shown = (
         focus.lerp(rig.focus, k),
-        distance + (rig.distance - distance) * k,
+        // Lands exactly on the step, so texels end up whole pixels.
+        if (rig.zoom - zoom).abs() < 0.005 {
+            rig.zoom
+        } else {
+            zoom + (rig.zoom - zoom) * k
+        },
         yaw + turn * k,
     );
     // The rig is only read here; writing it back must not look like a change.
     rig.bypass_change_detection().shown = shown;
     let wanted = place(shown.0, shown.1, shown.2);
-    if **camera != wanted {
-        **camera = wanted;
+    if *camera != wanted {
+        *camera = wanted;
+    }
+    if let Projection::Orthographic(ortho) = projection.as_mut() {
+        let scale = per_pixel(shown.1);
+        if ortho.scale != scale {
+            ortho.scale = scale;
+        }
     }
 }

@@ -1187,13 +1187,11 @@ fn keys(
         selection.card = None;
     }
     let human = game.human;
-    // Space with a card aimed at you: go on without waiting (a pass).
-    let aimed_at_me = matches!(
-        game.game.window().map(|w| w.kind),
-        Some(WindowKind::Target { target, .. }) if target == human
-    );
-    if keys.just_pressed(KeyCode::Space) && aimed_at_me && game.human_awaited() {
+    // Space in any window waiting on you: go on without answering (a pass),
+    // as P does; on your own turn it ends the turn.
+    if keys.just_pressed(KeyCode::Space) && game.game.window().is_some() && game.human_awaited() {
         selection.card = None;
+        selection.burn.clear();
         let _ = game.act(human, Intent::Pass);
         return;
     }
@@ -1255,7 +1253,7 @@ fn auto_pass(
         }
     };
     let aimed_at_me = matches!(kind, WindowKind::Target { target, .. } if target == game.human);
-    let nothing_to_answer = game.game.playable(game.human).is_empty();
+    let nothing_to_answer = !worth_answering(&game.game, game.human, kind);
     if aimed_at_me && now - opened < READ_INCOMING_SECS {
         let left = nothing_to_answer.then(|| (READ_INCOMING_SECS - (now - opened)).ceil());
         countdown.set_if_neq(IncomingCountdown(left));
@@ -1268,10 +1266,22 @@ fn auto_pass(
         return;
     }
     // Under autoplay the table's bot answers for the seat.
-    if game.game.playable(game.human).is_empty() && !game.autoplay {
+    if nothing_to_answer && !game.autoplay {
         let human = game.human;
         let _ = game.act(human, Intent::Pass);
     }
+}
+
+/// Whether the human has a card worth stopping the table for in this
+/// window. A heal can wait for their own turn, so a hand of heals alone
+/// does not hold up a rival's move; with a card aimed at them any answer
+/// counts, a heal before the blow included. They may still play a heal in
+/// a window that waits on them for something else.
+pub fn worth_answering(g: &necromy_rules::Game, human: PlayerId, kind: WindowKind) -> bool {
+    let aimed_at_me = matches!(kind, WindowKind::Target { target, .. } if target == human);
+    g.playable(human)
+        .into_iter()
+        .any(|card| aimed_at_me || !matches!(g.def(card).effect, necromy_rules::Effect::Heal(_)))
 }
 
 /// Forget an aimed card that can no longer be played.

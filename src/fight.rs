@@ -139,6 +139,9 @@ pub struct FightArt {
     /// Per god: the champion sheet (idle) and the fight sheet, if any.
     idle: [Option<Handle<Image>>; 5],
     fight: [Option<Handle<Image>>; 5],
+    /// The royal guard's sheets, if any (`sprites/guard-champion.png`, `guard-fight.png`).
+    guard_idle: Option<Handle<Image>>,
+    guard_fight: Option<Handle<Image>>,
     idle_layout: Handle<TextureAtlasLayout>,
     fight_layout: Handle<TextureAtlasLayout>,
 }
@@ -162,6 +165,8 @@ fn load_art(
         shadow: images.add(shadow()),
         idle: load("champion"),
         fight: load("fight"),
+        guard_idle: exists_then_load(&assets, "sprites/guard-champion.png"),
+        guard_fight: exists_then_load(&assets, "sprites/guard-fight.png"),
         idle_layout: layouts.add(TextureAtlasLayout::from_grid(
             UVec2::splat(CELL),
             IDLE_COLUMNS,
@@ -207,6 +212,13 @@ fn shadow() -> Image {
         }
     }
     image
+}
+
+fn exists_then_load(assets: &AssetServer, path: &'static str) -> Option<Handle<Image>> {
+    std::path::Path::new("assets")
+        .join(path)
+        .exists()
+        .then(|| assets.load(path))
 }
 
 /// Frames in a row of a sheet: cells from the left until an empty one.
@@ -392,9 +404,14 @@ fn pose(
         let facing = if side == 0 { 1.0 } else { -1.0 };
 
         // The frame: from the fight sheet when there is one, else idle.
-        let fight_sheet = god
-            .and_then(|g| art.fight[g.index()].clone())
-            .filter(|h| images.contains(h));
+        // No champion on this side: the royal guard.
+        let guard = who.is_none();
+        let fight_sheet = if guard {
+            art.guard_fight.clone()
+        } else {
+            god.and_then(|g| art.fight[g.index()].clone())
+        }
+        .filter(|h| images.contains(h));
         let rows = fight_sheet.as_ref().and_then(|h| {
             let sheet = images.get(h)?;
             Some(
@@ -417,7 +434,11 @@ fn pose(
             Act::Death { t } => row_frame(ROW_DEATH, t, true),
             Act::Idle | Act::Block { .. } => None,
         };
-        let idle_sheet = god.and_then(|g| art.idle[g.index()].clone());
+        let idle_sheet = if guard {
+            art.guard_idle.clone()
+        } else {
+            god.and_then(|g| art.idle[g.index()].clone())
+        };
         let (new_image, atlas) = match (fight_frame, &fight_sheet, &idle_sheet) {
             (Some((row, f)), Some(sheet), _) => (
                 sheet.clone(),

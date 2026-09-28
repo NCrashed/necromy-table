@@ -83,6 +83,11 @@ fn setup_scene(mut commands: Commands) {
     commands.spawn((
         TableCamera,
         Camera3d::default(),
+        // Orthographic and pixel-true; `camera.rs` sets the scale.
+        Projection::Orthographic(OrthographicProjection {
+            far: 200.0,
+            ..OrthographicProjection::default_3d()
+        }),
         // The table's own sky light; `lighting.rs` turns it to night.
         AmbientLight::default(),
         Transform::from_xyz(0.0, 18.0, 15.5).looking_at(Vec3::new(0.0, 0.0, 2.6), Vec3::Y),

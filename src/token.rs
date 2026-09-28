@@ -18,7 +18,7 @@ use crate::play::Match;
 
 const SPRITE_W: u32 = 16;
 const SPRITE_H: u32 = 24;
-const PIXELS_PER_METRE: f32 = 16.0;
+const PIXELS_PER_METRE: f32 = crate::board::TEXELS;
 const MOVE_SPEED: f32 = 6.0;
 
 pub struct TokenPlugin;
@@ -81,8 +81,8 @@ const SHEET_COLUMNS: u32 = if IDLE_FRAMES > WALK_FRAMES {
 } else {
     WALK_FRAMES
 };
-/// A champion on the table: about 1.6 m, the drawn figure ~58 px tall.
-const SHEET_PIXELS_PER_METRE: f32 = 36.0;
+/// A champion on the table: drawn at the table's texel density like everything else.
+const SHEET_PIXELS_PER_METRE: f32 = crate::board::TEXELS;
 /// Empty rows under the feet in a frame.
 const SHEET_FEET_PX: f32 = 17.0;
 const FRAME_SECS: f32 = 0.14;
@@ -91,6 +91,8 @@ const FRAME_SECS: f32 = 0.14;
 struct ChampionSheets {
     /// Per god (`God::index`), when its sheet exists.
     sheets: [Option<Handle<Image>>; 5],
+    /// The royal guard's sheet (`sprites/guard-champion.png`), same layout.
+    guard: Option<Handle<Image>>,
     layout: Handle<TextureAtlasLayout>,
 }
 
@@ -113,7 +115,14 @@ fn load_sheets(
         None,
         None,
     ));
-    commands.insert_resource(ChampionSheets { sheets, layout });
+    let guard = std::path::Path::new("assets/sprites/guard-champion.png")
+        .exists()
+        .then(|| assets.load("sprites/guard-champion.png"));
+    commands.insert_resource(ChampionSheets {
+        sheets,
+        guard,
+        layout,
+    });
 }
 
 /// Which way a token looks, as the camera sees it.
@@ -278,20 +287,47 @@ fn animate_tokens(
     let away = camera.forward().with_y(0.0).normalize_or_zero();
     for (token, transform, mut anim, mut sprite) in &mut tokens {
         let walking = token.is_walking();
-        if let Some(target) = token.waypoints.front() {
-            let way = (*target - transform.translation).with_y(0.0);
-            if way.length_squared() > 1e-4 {
-                let (x, y) = (way.dot(right), way.dot(away));
-                anim.facing = if x.abs() > y.abs() {
-                    if x > 0.0 { Facing::East } else { Facing::West }
-                } else if y > 0.0 {
-                    Facing::North
-                } else {
-                    Facing::South
-                };
-            }
+        let way = token
+            .waypoints
+            .front()
+            .map(|target| *target - transform.translation);
+        step_frame(
+            &mut anim,
+            &mut sprite,
+            way,
+            walking,
+            right,
+            away,
+            time.delta_secs(),
+        );
+    }
+}
+
+/// Turns a sheet token towards where it goes (as the camera sees it) and
+/// advances its idle or walk frames.
+fn step_frame(
+    anim: &mut Animated,
+    sprite: &mut Sprite,
+    way: Option<Vec3>,
+    walking: bool,
+    right: Vec3,
+    away: Vec3,
+    dt: f32,
+) {
+    {
+        if let Some(way) = way.map(|w| w.with_y(0.0))
+            && way.length_squared() > 1e-4
+        {
+            let (x, y) = (way.dot(right), way.dot(away));
+            anim.facing = if x.abs() > y.abs() {
+                if x > 0.0 { Facing::East } else { Facing::West }
+            } else if y > 0.0 {
+                Facing::North
+            } else {
+                Facing::South
+            };
         }
-        anim.clock += time.delta_secs();
+        anim.clock += dt;
         let (first_row, frames) = if walking {
             (4, WALK_FRAMES)
         } else {
@@ -399,21 +435,68 @@ fn face_camera(
 }
 
 /// Spawns, walks and removes the guard token to match the rules.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn sync_guard(
     mut commands: Commands,
     time: Res<Time>,
     game: Res<Match>,
     board: Res<Board>,
+    sheets: Res<ChampionSheets>,
     mut images: ResMut<Assets<Image>>,
-    mut guards: Query<(Entity, &mut Transform), With<GuardToken>>,
+    camera: Single<&Transform, (With<crate::TableCamera>, Without<GuardToken>)>,
+    mut guards: Query<
+        (Entity, &mut Transform, Option<(&mut Animated, &mut Sprite)>),
+        With<GuardToken>,
+    >,
 ) {
     match (game.game.guard(), guards.single_mut()) {
-        (Some(guard), Ok((_, mut transform))) => {
+        (Some(guard), Ok((_, mut transform, look))) => {
             let target = board.hex_to_world(guard.hex);
             let delta = target - transform.translation;
             transform.translation += delta.clamp_length_max(MOVE_SPEED * 0.5 * time.delta_secs());
+            if let Some((mut anim, mut sprite)) = look {
+                let right = camera.right().with_y(0.0).normalize_or_zero();
+                let away = camera.forward().with_y(0.0).normalize_or_zero();
+                let walking = delta.length_squared() > 1e-4;
+                step_frame(
+                    &mut anim,
+                    &mut sprite,
+                    Some(delta),
+                    walking,
+                    right,
+                    away,
+                    time.delta_secs(),
+                );
+            }
         }
         (Some(guard), Err(_)) => {
+            let at = Transform::from_translation(board.hex_to_world(guard.hex));
+            let sheet = sheets.guard.clone().filter(|h| images.contains(h));
+            if let Some(sheet) = sheet {
+                commands.spawn((
+                    GuardToken,
+                    Billboard,
+                    NotShadowCaster,
+                    NotShadowReceiver,
+                    Animated::default(),
+                    Sprite::from_atlas_image(
+                        sheet,
+                        TextureAtlas {
+                            layout: sheets.layout.clone(),
+                            index: 0,
+                        },
+                    ),
+                    Sprite3d {
+                        pixels_per_metre: SHEET_PIXELS_PER_METRE,
+                        pivot: Some(Vec2::new(0.5, SHEET_FEET_PX / SHEET_FRAME as f32)),
+                        alpha_mode: AlphaMode::Mask(0.5),
+                        unlit: false,
+                        ..default()
+                    },
+                    at,
+                ));
+                return;
+            }
             commands.spawn((
                 GuardToken,
                 Billboard,
@@ -432,7 +515,7 @@ fn sync_guard(
                 Transform::from_translation(board.hex_to_world(guard.hex)),
             ));
         }
-        (None, Ok((entity, _))) => commands.entity(entity).despawn(),
+        (None, Ok((entity, ..))) => commands.entity(entity).despawn(),
         (None, Err(_)) => {}
     }
 }

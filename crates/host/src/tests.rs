@@ -95,7 +95,7 @@ fn a_broken_intent_is_refused_to_its_sender() {
     let someone_else = t
         .game()
         .players()
-        .find(|p| !t.game().awaiting().contains(p))
+        .find(|p| *p != human && !t.game().awaiting().contains(p))
         .unwrap();
     // A human seat cannot act for another seat, and out of turn is refused.
     t.submit(someone_else, ToTable::Act(Intent::EndTurn));

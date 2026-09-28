@@ -41,10 +41,12 @@ impl Plugin for PropsPlugin {
 #[derive(Clone, Copy)]
 struct PropKind {
     file: &'static str,
-    /// Height of the drawn part, in metres on the table.
+    /// Height it was once drawn at, in metres, with its visible pixel
+    /// height: lights were placed for that size and are scaled from it.
+    /// The prop itself is drawn at `board::TEXELS`.
     height: f32,
-    /// Its visible pixels: height and the empty rows below its base.
     px_high: f32,
+    /// Empty rows below its base.
     px_below: f32,
     /// How far from the hex centre it stands.
     radius: f32,
@@ -424,7 +426,7 @@ fn sync_props(
                     .get(pick.file)
                     .and_then(|h| pictures.get(h))
                     .map_or(32.0, half_width_px);
-                px * pick.height / pick.px_high
+                px / crate::board::TEXELS
             });
             let room = (EDGE_REACH - half).max(MIN_RADIUS);
             let jitter = (hex_seed(hex, 20 + i as i32) % 100) as f32 / 100.0 * JITTER;
@@ -439,7 +441,10 @@ fn spawn_prop(commands: &mut Commands, images: &PropImages, kind: PropKind, hex:
     let Some(image) = images.0.get(kind.file) else {
         return;
     };
-    let pixels_per_metre = kind.px_high / kind.height;
+    // Every prop at the table's one texel density: its size is its pixels.
+    let pixels_per_metre = crate::board::TEXELS;
+    // Lights were placed for the height the prop used to be drawn at.
+    let shrink = kind.px_high / pixels_per_metre / kind.height;
     let mut prop = commands.spawn((
         Prop(hex),
         Billboard,
@@ -474,7 +479,7 @@ fn spawn_prop(commands: &mut Commands, images: &PropImages, kind: PropKind, hex:
     if let Some(light) = kind.light {
         prop.with_child((
             lamp(light.color, light.glow, light.range),
-            Transform::from_xyz(0.0, light.height, 0.25),
+            Transform::from_xyz(0.0, light.height * shrink, 0.25),
         ));
     }
 }
@@ -490,7 +495,8 @@ type SharedProps<'w, 's> = Query<
 /// A prop with its own material, so it alone can fade.
 #[derive(Component)]
 struct Fade {
-    faded: bool,
+    /// How opaque the prop is now; eases towards its target.
+    alpha: f32,
 }
 
 /// `bevy_sprite3d` shares one material per image; a prop that may fade
@@ -509,17 +515,21 @@ fn own_materials(
         copy.perceptual_roughness = 1.0;
         copy.reflectance = 0.0;
         material.0 = materials.add(copy);
-        commands.entity(entity).insert(Fade { faded: false });
+        commands.entity(entity).insert(Fade { alpha: 1.0 });
     }
 }
 
 /// How close in front of a champion a prop must stand to be seen through.
 const FADE_REACH: f32 = 0.95;
 const FADE_ALPHA: f32 = 0.35;
+/// Opacity per second a prop gains or loses: a walker passing behind a
+/// row of trees makes them ease, not blink.
+const FADE_SPEED: f32 = 3.0;
 
 /// A prop between the camera and a champion goes see-through: trees must
 /// not swallow the pieces.
 fn fade_occluders(
+    time: Res<Time>,
     camera: Single<&Transform, With<crate::TableCamera>>,
     tokens: Query<(&Transform, &Visibility), With<crate::token::Token>>,
     mut props: Query<(&Transform, &MeshMaterial3d<StandardMaterial>, &mut Fade)>,
@@ -538,14 +548,22 @@ fn fade_occluders(
             let ahead = d.dot(towards_camera);
             ahead > 0.0 && ahead < FADE_REACH && d.dot(across).abs() < 0.6
         });
-        if covers == fade.faded {
+        let target = if covers { FADE_ALPHA } else { 1.0 };
+        if fade.alpha == target {
             continue;
         }
-        fade.faded = covers;
+        let step = FADE_SPEED * time.delta_secs();
+        fade.alpha = if fade.alpha < target {
+            (fade.alpha + step).min(target)
+        } else {
+            (fade.alpha - step).max(target)
+        };
         if let Some(mut m) = materials.get_mut(&material.0) {
-            if covers {
+            // Blend only while see-through: masked props sort and depth-test
+            // like the rest of the board.
+            if fade.alpha < 1.0 {
                 m.alpha_mode = AlphaMode::Blend;
-                m.base_color = Color::srgba(1.0, 1.0, 1.0, FADE_ALPHA);
+                m.base_color = Color::srgba(1.0, 1.0, 1.0, fade.alpha);
             } else {
                 m.alpha_mode = AlphaMode::Mask(0.5);
                 m.base_color = Color::WHITE;

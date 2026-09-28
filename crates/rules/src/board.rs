@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::gods::God;
 use crate::rng::Rng;
 
-pub const BOARD_RADIUS: u32 = 5;
+pub const BOARD_RADIUS: u32 = 7;
+/// Settlements in each god's region.
+pub const SETTLEMENTS_PER_REGION: usize = 3;
 
 /// Rounds a corpse lies untouched before it sprouts into a grove (Bhava's
 /// offering: docs/design.md §9, cards on bodies).
@@ -87,29 +89,44 @@ impl Board {
         }
 
         let starts = God::ALL.map(|god| closest_to_bisector(god, BOARD_RADIUS));
-        let temples = God::ALL.map(|god| closest_to_bisector(god, 3));
+        // Temples a little past halfway out, between the start and the Table.
+        let temples = God::ALL.map(|god| closest_to_bisector(god, 4));
         for god in God::ALL {
             set(&mut tiles, starts[god.index()], Terrain::Plains);
             set(&mut tiles, temples[god.index()], Terrain::Temple);
 
-            // Two settlements per region, off the bisector.
+            // Settlements per region, off the bisector.
             let mut spots: Vec<Hex> = hexes
                 .iter()
                 .copied()
                 .filter(|&h| region_of(h) == Some(god))
-                .filter(|&h| (2..=4).contains(&h.ulength()))
+                .filter(|&h| (2..=BOARD_RADIUS - 1).contains(&h.ulength()))
                 .filter(|&h| h != temples[god.index()] && h != starts[god.index()])
                 .collect();
             rng.shuffle(&mut spots);
             let mut placed: Vec<Hex> = Vec::new();
             for spot in spots {
-                if placed.len() == 2 {
+                if placed.len() == SETTLEMENTS_PER_REGION {
                     break;
                 }
                 if placed.iter().all(|p| p.unsigned_distance_to(spot) >= 2) {
                     set(&mut tiles, spot, Terrain::Settlement);
                     placed.push(spot);
                 }
+            }
+
+            // One ring of standing stones per region, a rare sight apart from
+            // the settlements, the temple and the start.
+            let stones = hexes
+                .iter()
+                .copied()
+                .filter(|&h| region_of(h) == Some(god))
+                .filter(|&h| (3..=BOARD_RADIUS - 1).contains(&h.ulength()))
+                .filter(|&h| h != temples[god.index()])
+                .filter(|&h| placed.iter().all(|p| p.unsigned_distance_to(h) >= 2))
+                .collect::<Vec<_>>();
+            if let Some(&spot) = rng.pick(&stones) {
+                set(&mut tiles, spot, Terrain::Stones);
             }
         }
 
@@ -198,9 +215,9 @@ fn flavour_terrain(god: God, rng: &mut Rng) -> Terrain {
     use Terrain::*;
     let table: &[Terrain] = match god {
         God::Bhava => &[Forest, Forest, Forest, Plains, Plains, Swamp],
-        God::Trishna => &[Plains, Plains, Plains, Plains, Forest, Stones],
-        God::Zaga => &[Mountain, Mountain, Plains, Plains, Ruins, Stones],
-        God::Ahamar => &[Plains, Plains, Plains, Mountain, Stones, Ruins],
+        God::Trishna => &[Plains, Plains, Plains, Plains, Forest, Plains],
+        God::Zaga => &[Mountain, Mountain, Plains, Plains, Ruins, Plains],
+        God::Ahamar => &[Plains, Plains, Plains, Mountain, Plains, Ruins],
         God::Maya => &[Swamp, Swamp, Plains, Plains, Ruins, Forest],
     };
     *rng.pick(table).expect("non-empty table")
@@ -215,9 +232,12 @@ mod tests {
         let board = Board::generate(&mut Rng::new(1));
         for god in God::ALL {
             let n = board.tiles().filter(|(_, t)| t.region == Some(god)).count();
-            // 90 non-centre tiles over 5 wedges; a hex grid is 6-fold, so
-            // the split is only roughly even.
-            assert!((16..=20).contains(&n), "{god:?}: {n}");
+            // 3r(r+1) non-centre tiles over 5 wedges; a hex grid is 6-fold,
+            // so the split is only roughly even.
+            let r = BOARD_RADIUS as f32;
+            let share = 3.0 * r * (r + 1.0) / 5.0;
+            let gap = (n as f32 - share).abs() / share;
+            assert!(gap < 0.15, "{god:?}: {n} of about {share}");
         }
     }
 

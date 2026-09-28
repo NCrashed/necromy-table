@@ -129,7 +129,12 @@ fn make_art(
         .collect();
     let gods = God::ALL.map(|g| images.add(icons::element_icon(g.element(), g.accent())));
     let offering = images.add(icons::offering_icon());
-    let guard = images.add(token::placeholder_sprite(token::GUARD_COLOR));
+    // The guard's bust (`scripts/portraits.sh`), else the placeholder.
+    let guard = if std::path::Path::new("assets/portraits/guard.png").exists() {
+        assets.load("portraits/guard.png")
+    } else {
+        images.add(token::placeholder_sprite(token::GUARD_COLOR))
+    };
     let faces = [
         necromy_rules::Face::Strike,
         necromy_rules::Face::Shield,

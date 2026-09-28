@@ -286,7 +286,7 @@ fn rebuild_action(
                 (
                     format!("Можно ответить: {}", play::window_name(&game, k)),
                     what,
-                    Some((ActionButton::Pass, "Пас\n(P)")),
+                    Some((ActionButton::Pass, "Пас\n(пробел)")),
                     false,
                 )
             }

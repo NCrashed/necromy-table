@@ -401,7 +401,7 @@ fn centre_column(
         }
         for (button, text) in [
             (BattleButton::Throw, "Бросить (Enter)"),
-            (BattleButton::NoCards, "Без карт (P)"),
+            (BattleButton::NoCards, "Без карт (пробел)"),
         ] {
             let b = commands
                 .spawn((
