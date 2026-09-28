@@ -24,6 +24,9 @@ use serde::{Deserialize, Serialize};
 /// Bumped whenever a message changes shape; mismatched sides refuse.
 pub const PROTOCOL: u32 = 10;
 pub const DEFAULT_PORT: u16 = 7878;
+/// Our playtest server (aerospace, service/necromy-table.nix): where the
+/// menu points unless `NECROMY_SERVER` or the field says otherwise.
+pub const PUBLIC_SERVER: &str = "81.88.219.217";
 /// A view of the match is a few kilobytes; anything near this is garbage.
 const MAX_FRAME: usize = 4 << 20;
 

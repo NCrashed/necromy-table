@@ -110,8 +110,9 @@ impl Front {
         Front {
             name: env("NECROMY_NAME")
                 .or_else(|| env("USER"))
+                .or_else(|| env("USERNAME"))
                 .unwrap_or_else(|| "Игрок".into()),
-            server: env("NECROMY_SERVER").unwrap_or_else(|| "127.0.0.1".into()),
+            server: env("NECROMY_SERVER").unwrap_or_else(|| necromy_net::PUBLIC_SERVER.into()),
             code: String::new(),
             focus: Field::Name,
             conn: None,
@@ -669,7 +670,7 @@ fn menu(commands: &mut Commands, font: &UiFont, front: &Front, rows: &mut Vec<En
     rows.push(text(
         commands,
         font,
-        "Tab — следующее поле. Сервер: scripts/table-server.sh или адрес друга.",
+        "Tab — следующее поле. Сервер по умолчанию — наш; свой: scripts/table-server.sh.",
         11.0,
         DIM,
     ));
@@ -875,12 +876,7 @@ impl Ticket {
         if let Some(p) = std::env::var_os("NECROMY_TICKET") {
             return Some(p.into());
         }
-        let state = std::env::var_os("XDG_STATE_HOME")
-            .map(std::path::PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".local/state"))
-            })?;
-        Some(state.join("necromy-table").join("ticket"))
+        Some(crate::state_dir()?.join("ticket"))
     }
 
     pub fn save(&self) {
