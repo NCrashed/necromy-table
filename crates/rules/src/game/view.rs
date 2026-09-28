@@ -13,7 +13,7 @@
 //! shuffled among themselves with the server's salt: a client learns what is
 //! left unseen, not who holds it.
 
-use super::{Choice, Event, Game, PlayerId, Target};
+use super::{Choice, Event, Game, Intent, Phase, PlayerId, Target};
 use crate::rng::Rng;
 
 impl Game {
@@ -59,11 +59,19 @@ impl Game {
                 *secret = None;
             }
         }
-        if let Some(window) = v.window.as_mut() {
+        for window in &mut v.windows {
             for (p, choice) in window.choices.iter_mut() {
                 if !mine(*p) {
                     *choice = Choice::Pass;
                 }
+            }
+        }
+        // A rival's held action would give away a card in hand or a step.
+        for (i, turn) in v.turns.iter_mut().enumerate() {
+            if !mine(PlayerId(i as u8))
+                && let Phase::Held { intent, .. } = &mut turn.phase
+            {
+                *intent = Intent::EndTurn;
             }
         }
         v
@@ -186,7 +194,7 @@ mod tests {
     fn rivals_choices_in_a_window_stay_hidden() {
         let mut g = game();
         for _ in 0..2000 {
-            if let Some(w) = g.window()
+            if let Some(w) = g.windows().first()
                 && w.choices.values().any(|c| *c != Choice::Pass)
             {
                 let chooser = *w
@@ -197,7 +205,7 @@ mod tests {
                     .0;
                 let viewer = g.players().find(|&p| p != chooser).unwrap();
                 let v = g.view_for(Some(viewer), 3);
-                let vw = v.window().unwrap();
+                let vw = v.windows().first().unwrap();
                 assert!(vw.has_chosen(chooser));
                 assert!(
                     vw.choices

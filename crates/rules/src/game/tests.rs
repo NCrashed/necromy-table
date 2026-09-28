@@ -38,8 +38,10 @@ impl Game {
         if let Some(d) = self.wish_due {
             self.apply(d, Intent::RefuseWish).unwrap();
         }
-        while self.window.is_some() {
-            let p = self.awaiting()[0];
+        loop {
+            let Some(p) = self.players().find(|&p| self.to_answer(p).is_some()) else {
+                break;
+            };
             self.apply(p, Intent::Pass).unwrap();
         }
     }
@@ -47,6 +49,34 @@ impl Game {
     fn end_turn_and_settle(&mut self) {
         self.apply(self.current_player(), Intent::EndTurn).unwrap();
         self.pass_all();
+    }
+
+    /// The first player still acting, in initiative order: the one a test
+    /// drives. Everyone acts at once now (§11.2).
+    fn current_player(&self) -> PlayerId {
+        self.acting().first().copied().unwrap_or(self.order[0])
+    }
+
+    /// The oldest open window.
+    fn window(&self) -> Option<&Window> {
+        self.windows.first()
+    }
+
+    fn mp(&self) -> u32 {
+        self.move_points(self.current_player())
+    }
+
+    fn reach(&self) -> HashMap<Hex, u32> {
+        self.reachable(self.current_player())
+    }
+
+    fn attackable_now(&self) -> Vec<Hex> {
+        self.attackable(self.current_player())
+    }
+
+    /// `player` has taken their turn already this round.
+    fn finish(&mut self, player: PlayerId) {
+        self.turns[player.0 as usize].phase = Phase::Done;
     }
 }
 
@@ -67,6 +97,13 @@ fn duel(distance: i32) -> (Game, PlayerId, PlayerId) {
     }
     g.place(me, Hex::new(0, 0));
     g.place(foe, Hex::new(distance, 0));
+    // Only `me` is still taking their turn: the others went already, so the
+    // duel plays out in order as it would between neighbours (§11.2).
+    for p in g.players().collect::<Vec<_>>() {
+        if p != me {
+            g.finish(p);
+        }
+    }
     // Mid stages: cards work exactly as printed (§5).
     g.pantheon.stages = [1; 5];
     g.pantheon.pressure = [0; 5];
@@ -120,16 +157,91 @@ fn everyone_starts_with_a_hand() {
 }
 
 #[test]
-fn only_the_current_player_acts() {
+fn everyone_takes_their_turn_at_once() {
     let (mut game, _) = Game::new(five());
-    let other = game
-        .players()
-        .find(|&p| p != game.current_player())
-        .unwrap();
-    assert_eq!(
-        game.apply(other, Intent::EndTurn),
-        Err(RuleError::NotYourTurn)
-    );
+    assert_eq!(game.acting().len(), 5);
+    assert_eq!(game.awaiting().len(), 5);
+    let p = game.order()[2];
+    game.apply(p, Intent::EndTurn).unwrap();
+    assert_eq!(game.phase(p), &Phase::Done);
+    // Done for the round: nothing more until the next one.
+    assert_eq!(game.apply(p, Intent::EndTurn), Err(RuleError::NotYourTurn));
+    assert_eq!(game.round(), 1);
+}
+
+/// `duel`, but the foe has not taken their turn yet either.
+fn duel_both_acting(distance: i32) -> (Game, PlayerId, PlayerId) {
+    let (mut g, me, foe) = duel(distance);
+    g.turns[foe.0 as usize].phase = Phase::Acting;
+    (g, me, foe)
+}
+
+#[test]
+fn a_step_near_an_acting_rival_waits_for_their_turn_to_end() {
+    let (mut g, me, foe) = duel_both_acting(3);
+    let events = g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    assert!(events.contains(&Event::Held {
+        player: me,
+        on: Some(foe)
+    }));
+    assert_eq!(g.champion(me).unwrap().hex, Hex::ZERO, "the step waits");
+    assert!(!g.awaiting().contains(&me));
+    // Someone far away is not in the way: the foe goes on as they like.
+    let events = g.apply(foe, Intent::EndTurn).unwrap();
+    assert!(events.contains(&Event::Resumed { player: me }));
+    assert_eq!(g.champion(me).unwrap().hex, Hex::new(1, 0));
+    // Played now, against a rival who is done: they may react.
+    assert!(g.to_answer(foe).is_some());
+}
+
+#[test]
+fn a_held_card_is_dropped_when_its_target_walked_away() {
+    let (mut g, me, foe) = duel_both_acting(2);
+    let spark = g.give(me, "Искра");
+    g.apply(
+        me,
+        Intent::Play {
+            card: spark,
+            target: Target::Champion(foe),
+        },
+    )
+    .unwrap();
+    assert!(matches!(g.phase(me), Phase::Held { .. }));
+    assert!(g.hand(me).contains(&spark), "nothing is spent while held");
+    g.apply(foe, Intent::Move { to: Hex::new(3, 0) }).unwrap();
+    g.pass_all();
+    g.apply(foe, Intent::Move { to: Hex::new(4, 0) }).unwrap();
+    g.pass_all();
+    let events = g.apply(foe, Intent::EndTurn).unwrap();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::HoldDropped {
+            player,
+            why: RuleError::InvalidTarget
+        } if *player == me
+    )));
+    assert_eq!(g.phase(me), &Phase::Acting, "the turn goes on");
+    assert!(g.hand(me).contains(&spark));
+}
+
+#[test]
+fn a_rival_who_is_done_is_no_obstacle() {
+    let (mut g, me, foe) = duel(3);
+    let events = g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    assert!(!events.iter().any(|e| matches!(e, Event::Held { .. })));
+    assert!(g.to_answer(foe).is_some(), "an Enter window for the foe");
+}
+
+#[test]
+fn the_round_ends_when_everyone_is_done() {
+    let (mut game, _) = Game::new(five());
+    for p in game.order().to_vec() {
+        assert_eq!(game.round(), 1);
+        game.apply(p, Intent::EndTurn).unwrap();
+        game.pass_all();
+    }
+    assert_eq!(game.round(), 2);
+    assert_eq!(game.acting().len(), 5);
 }
 
 #[test]
@@ -142,13 +254,13 @@ fn moves_cost_points_and_must_be_adjacent() {
         Err(RuleError::NotAdjacent)
     );
     let (&to, &cost) = game
-        .reachable()
+        .reach()
         .iter()
         .find(|(h, _)| h.unsigned_distance_to(at) == 1)
         .unwrap();
     game.apply(p, Intent::Move { to }).unwrap();
     game.pass_all();
-    assert_eq!(game.move_points(), MOVE_POINTS - cost);
+    assert_eq!(game.mp(), MOVE_POINTS - cost);
 }
 
 #[test]
@@ -175,34 +287,6 @@ fn untouched_corpses_grow_groves() {
             .any(|e| matches!(e, Event::GroveGrew { .. }));
     }
     assert!(grew);
-}
-
-#[test]
-fn end_window_waits_for_every_rival_and_hides_choices() {
-    let (mut g, me, _) = duel(1);
-    let events = g.apply(me, Intent::EndTurn).unwrap();
-    assert!(matches!(
-        events.last(),
-        Some(Event::WindowOpened {
-            kind: WindowKind::End { .. },
-            ..
-        })
-    ));
-    assert_eq!(
-        g.current_player(),
-        me,
-        "turn passes only when the window closes"
-    );
-    let waiting = g.awaiting();
-    assert_eq!(waiting.len(), 4);
-    for (i, p) in waiting.iter().enumerate() {
-        let events = g.apply(*p, Intent::Pass).unwrap();
-        let closed = events
-            .iter()
-            .any(|e| matches!(e, Event::WindowClosed { .. }));
-        assert_eq!(closed, i == 3);
-    }
-    assert_ne!(g.current_player(), me);
 }
 
 #[test]
@@ -465,6 +549,11 @@ fn traps_spring_on_rivals_only() {
     while g.current_player() != foe {
         g.end_turn_and_settle();
     }
+    // Out of the way: a rival still acting nearby would hold the foe's steps.
+    if g.phase(me) == &Phase::Acting {
+        g.apply(me, Intent::EndTurn).unwrap();
+        g.pass_all();
+    }
     let hp = g.champion(foe).unwrap().hp;
     g.apply(foe, Intent::Move { to: Hex::new(2, 0) }).unwrap();
     g.pass_all();
@@ -495,8 +584,8 @@ fn falling_leaves_a_body_and_wakes_at_home() {
 }
 
 #[test]
-fn root_in_the_end_window_costs_the_next_turn() {
-    let (mut g, me, foe) = duel(2);
+fn root_on_a_champion_who_is_done_costs_the_next_turn() {
+    let (mut g, me, foe) = duel_both_acting(2);
     let burden = g.give(foe, "Бремя");
     g.apply(me, Intent::EndTurn).unwrap();
     g.apply(
@@ -509,10 +598,10 @@ fn root_in_the_end_window_costs_the_next_turn() {
     .unwrap();
     g.pass_all();
     assert!(g.champion(me).unwrap().rooted);
-    while g.current_player() != me {
-        g.end_turn_and_settle();
-    }
-    assert_eq!(g.move_points(), 0);
+    g.apply(foe, Intent::EndTurn).unwrap();
+    g.pass_all();
+    assert_eq!(g.round(), 2, "everyone else was done already");
+    assert_eq!(g.move_points(me), 0);
 }
 
 #[test]
@@ -532,7 +621,7 @@ fn body_cards_consume_the_corpse_underfoot() {
     .unwrap();
     assert!(g.board().tile(here).unwrap().corpse.is_none());
     assert_eq!(g.champion(me).unwrap().spirit_points, 2);
-    assert_eq!(g.move_points(), MOVE_POINTS + 1);
+    assert_eq!(g.mp(), MOVE_POINTS + 1);
 }
 
 #[test]
@@ -575,7 +664,7 @@ fn start_battle(g: &mut Game, me: PlayerId, foe: PlayerId) -> Vec<Event> {
 #[test]
 fn stepping_onto_a_rival_opens_a_battle() {
     let (mut g, me, foe) = duel(1);
-    assert_eq!(g.attackable(), vec![Hex::new(1, 0)]);
+    assert_eq!(g.attackable_now(), vec![Hex::new(1, 0)]);
     let events = start_battle(&mut g, me, foe);
     assert!(events.iter().any(|e| matches!(
         e,
@@ -595,7 +684,7 @@ fn stepping_onto_a_rival_opens_a_battle() {
         Err(RuleError::WrongTiming)
     );
     let third = g.players().find(|&p| p != me && p != foe).unwrap();
-    assert_eq!(g.apply(third, Intent::Pass), Err(RuleError::NotYourTurn));
+    assert_eq!(g.apply(third, Intent::Pass), Err(RuleError::NoWindow));
 }
 
 #[test]
@@ -652,6 +741,8 @@ fn battle_damage_follows_the_faces_both_ways() {
         let foe = g.order()[1];
         g.place(me, Hex::ZERO);
         g.place(foe, Hex::new(1, 0));
+        // The foe has taken their turn: the attack goes ahead at once.
+        g.finish(foe);
         g.champ_mut(me).body = 20;
         g.champ_mut(me).hp = 20;
         g.champ_mut(foe).body = 20;
@@ -679,7 +770,7 @@ fn battle_damage_follows_the_faces_both_ways() {
             g.champion(me).unwrap().hp,
             20 - d.hits.saturating_sub(a.shields)
         );
-        assert_eq!(g.move_points(), 0, "a battle ends the movement");
+        assert_eq!(g.mp(), 0, "a battle ends the movement");
 
         // Every throw replays to the same faces on a client (§12.2), and each
         // explosion throws exactly as many dice as Element faces came up.
@@ -749,7 +840,7 @@ fn defending_on_a_mountain_adds_a_die() {
     let (mut g, me, foe) = duel(1);
     let might = g.champion(foe).unwrap().might;
     g.board.tile_mut(Hex::new(1, 0)).unwrap().terrain = Terrain::Mountain;
-    g.move_points = MOVE_POINTS;
+    g.turns[me.0 as usize].move_points = MOVE_POINTS;
     start_battle(&mut g, me, foe);
     assert_eq!(g.battle_dice(foe), Some(might + 1));
     assert_eq!(g.battle_dice(me), Some(g.champion(me).unwrap().might));
@@ -1105,6 +1196,8 @@ fn battle_winner_takes_style_double_from_the_dominant() {
         let foe = g.order()[1];
         g.place(me, Hex::ZERO);
         g.place(foe, Hex::new(1, 0));
+        // The foe has taken their turn: the attack goes ahead at once.
+        g.finish(foe);
         let mut ev = Vec::new();
         g.add_style(foe, 5, StyleReason::Territory, &mut ev);
         g.dominant = Some(foe);
@@ -1246,7 +1339,7 @@ fn nobody_walks_through_the_guard() {
         g.apply(me, Intent::Move { to: Hex::new(1, 0) }),
         Err(RuleError::Occupied)
     );
-    assert!(!g.reachable().contains_key(&Hex::new(1, 0)));
+    assert!(!g.reach().contains_key(&Hex::new(1, 0)));
 }
 
 #[test]
@@ -1887,7 +1980,7 @@ fn the_hidden_cannot_be_aimed_at_or_attacked() {
     let (mut g, me, foe) = duel(1);
     let mut events = Vec::new();
     g.hide(foe, &mut events);
-    assert!(g.attackable().is_empty());
+    assert!(g.attackable_now().is_empty());
     let spark = g.give(me, "Искра");
     assert!(g.targets(me, spark).is_empty());
     assert!(g.occupant(g.hex_of(foe)).is_none());
@@ -1908,7 +2001,7 @@ fn walking_into_the_hidden_is_an_ambush() {
     );
     assert!(!g.is_hidden(foe));
     assert_eq!(g.hex_of(me), Hex::ZERO, "the step does not happen");
-    assert_eq!(g.move_points(), 0, "the walk is over");
+    assert_eq!(g.mp(), 0, "the walk is over");
     assert!(matches!(
         g.window().map(|w| w.kind),
         Some(WindowKind::Battle { attacker, defender }) if attacker == foe && defender == me
@@ -2023,4 +2116,14 @@ fn the_veil_hides_anywhere() {
     .unwrap();
     g.pass_all();
     assert!(g.is_hidden(me));
+}
+
+#[test]
+fn a_hidden_rival_holds_nobody_up() {
+    let (mut g, me, foe) = duel_both_acting(3);
+    g.champ_mut(foe).hidden = true;
+    // Waiting here would tell `me` someone lies close by (§11.6).
+    let events = g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    assert!(!events.iter().any(|e| matches!(e, Event::Held { .. })));
+    assert_eq!(g.champion(me).unwrap().hex, Hex::new(1, 0));
 }

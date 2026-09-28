@@ -400,9 +400,15 @@ impl Match {
         m
     }
 
-    /// The human may walk or end the turn.
+    /// The human may walk or end the turn: acting, not held, no window of
+    /// theirs open (§11.2).
     pub fn is_human_turn(&self) -> bool {
-        self.game.window().is_none() && self.game.current_player() == self.human
+        self.game.free_to_act(self.human)
+    }
+
+    /// The window the human still has to answer, if any.
+    pub fn human_window(&self) -> Option<necromy_rules::WindowKind> {
+        self.game.to_answer(self.human).map(|w| w.kind)
     }
 
     /// Dev aid: with autoplay, `NECROMY_SCREENSHOT_WHEN=wishpanel` stops at the
@@ -780,11 +786,10 @@ impl Match {
         let me = self.human;
         Some(match event {
             Event::RoundStarted { round, time, .. } => {
-                format!("— раунд {round}: {} —", time_name(*time))
+                format!("— раунд {round}: {}, все ходят разом —", time_name(*time))
             }
             Event::Dawn { .. } => "Рассвет.".into(),
             Event::Dusk { .. } => "Закат. (Здесь проснутся боги.)".into(),
-            Event::TurnStarted { player, .. } => format!("Ход: {}", self.name(*player)),
             Event::CorpseAppeared { .. } => "На доске появилось тело.".into(),
             Event::CorpseDecayed { .. } => "Тело истлело.".into(),
             Event::GroveGrew { .. } => "Выросла роща.".into(),
@@ -811,10 +816,26 @@ impl Match {
                     names::element(*to)
                 )
             }
-            // End windows open every turn; the status line covers them.
-            Event::WindowOpened { kind, eligible }
-                if eligible.contains(&me) && !matches!(kind, WindowKind::End { .. }) =>
-            {
+            // Simultaneous turns (§11.2): an action that came too close waits.
+            Event::Held { player, on } if *player == me => match on {
+                Some(on) => format!(
+                    "{} ещё ходит: твоё действие сыграется, когда {} закончит.",
+                    self.name(*on),
+                    self.name(*on)
+                ),
+                None => "Рядом кто-то занят: твоё действие подождёт.".into(),
+            },
+            Event::Held {
+                player,
+                on: Some(on),
+            } if *on == me => format!("{} ждёт, пока ты закончишь ход.", self.name(*player)),
+            Event::Resumed { player } if *player == me => {
+                "Твоё отложенное действие играется.".into()
+            }
+            Event::HoldDropped { player, why } if *player == me => {
+                format!("Отложенное действие отменено: {}.", reason(*why))
+            }
+            Event::WindowOpened { kind, eligible } if eligible.contains(&me) => {
                 format!("Окно реакции: {}.", window_name(self, *kind))
             }
             Event::Canceled { card, .. } => format!("«{}» гаснет.", self.card_name(*card)),
@@ -1059,7 +1080,6 @@ pub fn window_name(m: &Match, kind: WindowKind) -> String {
         WindowKind::Battle { attacker, defender } => {
             format!("бой: {} против {}", m.name(attacker), m.name(defender))
         }
-        WindowKind::End { player } => format!("{} заканчивает ход", m.name(player)),
     }
 }
 
@@ -1156,7 +1176,7 @@ fn click_board(
         return;
     }
 
-    if game.is_human_turn() && game.game.attackable().contains(&hex) {
+    if game.is_human_turn() && game.game.attackable(game.human).contains(&hex) {
         let human = game.human;
         if let Err(err) = game.act(human, Intent::Move { to: hex }) {
             warn!("attack rejected: {err}");
@@ -1166,7 +1186,7 @@ fn click_board(
     if !game.is_human_turn() {
         return;
     }
-    let Some(path) = game.game.path_to(hex) else {
+    let Some(path) = game.game.path_to(game.human, hex) else {
         return;
     };
     // One intent per step, as the table receives them. A step may open a
@@ -1189,7 +1209,7 @@ fn keys(
     let human = game.human;
     // Space in any window waiting on you: go on without answering (a pass),
     // as P does; on your own turn it ends the turn.
-    if keys.just_pressed(KeyCode::Space) && game.game.window().is_some() && game.human_awaited() {
+    if keys.just_pressed(KeyCode::Space) && game.human_window().is_some() {
         selection.card = None;
         selection.burn.clear();
         let _ = game.act(human, Intent::Pass);
@@ -1209,7 +1229,7 @@ fn keys(
         }
         return;
     }
-    if keys.just_pressed(KeyCode::KeyP) && game.game.window().is_some() && game.human_awaited() {
+    if keys.just_pressed(KeyCode::KeyP) && game.human_window().is_some() {
         selection.card = None;
         selection.burn.clear();
         if let Err(err) = game.act(human, Intent::Pass) {
@@ -1235,15 +1255,11 @@ fn auto_pass(
     mut countdown: ResMut<IncomingCountdown>,
     mut game: ResMut<Match>,
 ) {
-    let Some(kind) = game.game.window().map(|w| w.kind) else {
+    let Some(kind) = game.human_window() else {
         *seen = None;
         countdown.set_if_neq(IncomingCountdown(None));
         return;
     };
-    if !game.human_awaited() {
-        countdown.set_if_neq(IncomingCountdown(None));
-        return;
-    }
     let now = time.elapsed_secs();
     let opened = match *seen {
         Some((k, at)) if k == kind => at,

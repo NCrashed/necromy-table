@@ -115,7 +115,7 @@ fn friends_meet_by_code_and_play_against_bots() {
                     round = view.round();
                     c.send(ClientMsg::Table(ToTable::Shown(serial)));
                     if view.awaiting().contains(&seat) {
-                        let intent = if view.window().is_some() {
+                        let intent = if view.to_answer(seat).is_some() {
                             Intent::Pass
                         } else {
                             Intent::EndTurn
@@ -157,7 +157,7 @@ fn a_seat_left_empty_goes_to_a_bot() {
                 round = view.round();
                 anna.send(ClientMsg::Table(ToTable::Shown(serial)));
                 if view.awaiting().contains(&seat) {
-                    let intent = if view.window().is_some() {
+                    let intent = if view.to_answer(seat).is_some() {
                         Intent::Pass
                     } else {
                         Intent::EndTurn

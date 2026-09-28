@@ -147,16 +147,17 @@ impl Game {
         events: &mut Vec<Event>,
     ) {
         events.push(Event::Stumbled { mover, hidden, hex });
-        self.move_points = 0;
+        self.turns[mover.0 as usize].move_points = 0;
         self.reveal(hidden, RevealReason::Stumbled, events);
-        self.ambush = Some(hidden);
-        self.start_battle(hidden, mover, 0, events);
+        // The one in hiding strikes first, even in the middle of their own
+        // turn (§11.2): the mover waits for the battle.
+        self.start_battle(mover, hidden, mover, 0, Some(hidden), events);
     }
 }
 
 impl Game {
-    /// Rivals after `player` in initiative who may react to something at
-    /// `at`: within reaction range and not lying hidden.
+    /// Rivals who may react to something `player` does at `at`: within
+    /// reaction range and not lying hidden, in initiative after `player`.
     pub(super) fn watchers(&self, player: PlayerId, at: Hex) -> Vec<PlayerId> {
         self.initiative_after(player)
             .into_iter()

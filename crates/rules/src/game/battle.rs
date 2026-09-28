@@ -39,21 +39,18 @@ impl Game {
             return Err(RuleError::InvalidTarget);
         }
         let cost = tile.terrain.move_cost();
-        if cost > self.move_points {
-            return Err(RuleError::NotEnoughMovePoints {
-                need: cost,
-                have: self.move_points,
-            });
+        let have = self.move_points(player);
+        if cost > have {
+            return Err(RuleError::NotEnoughMovePoints { need: cost, have });
         }
         Ok(cost)
     }
 
-    /// Hexes of rivals the current player can attack right now.
-    pub fn attackable(&self) -> Vec<Hex> {
-        if self.window.is_some() {
+    /// Hexes of rivals `player` can attack right now.
+    pub fn attackable(&self, player: PlayerId) -> Vec<Hex> {
+        if !self.free_to_act(player) {
             return Vec::new();
         }
-        let player = self.current_player();
         self.hex_of(player)
             .all_neighbors()
             .into_iter()
@@ -69,13 +66,18 @@ impl Game {
                 .board
                 .tile(c.hex)
                 .is_some_and(|t| t.terrain == Terrain::Mountain);
-        let ambush = !defending && self.ambush == Some(player);
+        // Striking from the shadow in an open battle (§11.6).
+        let ambush = !defending
+            && self.windows.iter().any(|w| {
+                w.ambush == Some(player)
+                    && matches!(w.kind, WindowKind::Battle { attacker, .. } if attacker == player)
+            });
         c.might + u8::from(high_ground) + u8::from(ambush)
     }
 
-    /// Dice `player` throws in the open Battle window, if they are in it.
+    /// Dice `player` throws in an open Battle window, if they are in one.
     pub fn battle_dice(&self, player: PlayerId) -> Option<u8> {
-        match self.window.as_ref()?.kind {
+        self.windows.iter().find_map(|w| match w.kind {
             WindowKind::Battle { attacker, .. } if attacker == player => {
                 Some(self.dice_for(player, false))
             }
@@ -83,17 +85,20 @@ impl Game {
                 Some(self.dice_for(player, true))
             }
             _ => None,
-        }
+        })
     }
 
+    /// `actor`'s step brought on a battle: they pay `cost` and wait for it.
     pub(super) fn start_battle(
         &mut self,
+        actor: PlayerId,
         attacker: PlayerId,
         defender: PlayerId,
         cost: u32,
+        ambush: Option<PlayerId>,
         events: &mut Vec<Event>,
     ) {
-        self.move_points -= cost;
+        self.turns[actor.0 as usize].move_points -= cost;
         events.push(Event::BattleStarted { attacker, defender });
         self.last_fight = self.round;
         // Attacking is loud (§6.5).
@@ -102,8 +107,11 @@ impl Game {
         self.record_deed(attacker, super::style::Deed::Fought);
         self.record_deed(defender, super::style::Deed::Fought);
         self.open_window(
+            actor,
             WindowKind::Battle { attacker, defender },
             vec![attacker, defender],
+            None,
+            ambush,
             events,
         );
     }
@@ -161,10 +169,6 @@ impl Game {
             self.battle_style(attacker, defender, events);
         } else if to_attacker > to_defender {
             self.battle_style(defender, attacker, events);
-        }
-        // A battle ends the attacker's movement for the turn.
-        if attacker == self.current_player() && !self.turn_over {
-            self.move_points = 0;
         }
     }
 

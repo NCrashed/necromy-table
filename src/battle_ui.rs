@@ -348,8 +348,11 @@ fn centre_column(
     let vs = stats::label(commands, font, "против", 16.0, true);
     commands.entity(column).add_children(&[stage, vs]);
 
-    let burning = matches!(g.window().map(|w| w.kind), Some(WindowKind::Battle { .. }));
-    let my_choice = burning && m.human_awaited();
+    let burning = g
+        .windows()
+        .iter()
+        .any(|w| matches!(w.kind, WindowKind::Battle { .. }));
+    let my_choice = matches!(m.human_window(), Some(WindowKind::Battle { .. }));
     let phase = if my_choice {
         let max = g.battle_dice(m.human).unwrap_or(0);
         format!(

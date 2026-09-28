@@ -257,7 +257,7 @@ fn rebuild_incoming(
         caster,
         target,
         card,
-    }) = g.window().map(|w| w.kind)
+    }) = g.window_for(game.human).map(|w| w.kind)
     {
         let at_me = target == game.human;
         let header = if at_me {
@@ -266,7 +266,7 @@ fn rebuild_incoming(
             format!("{} целит в {}:", game.name(caster), game.name(target))
         };
         let mut extra = Vec::new();
-        if let Some(bonus) = g.pending_bonus().filter(|&b| b > 0) {
+        if let Some(bonus) = g.pending_bonus(game.human).filter(|&b| b > 0) {
             extra.push((format!("цепочка: +{bonus}"), Color::srgb(1.0, 0.82, 0.3)));
         }
         let look = CardLook {
@@ -496,9 +496,9 @@ fn tooltip(
         lines.push("здесь королевская гвардия".into());
     }
     if game.is_human_turn() {
-        if g.attackable().contains(&hex) {
+        if g.attackable(game.human).contains(&hex) {
             lines.push("клик — напасть".into());
-        } else if let Some(cost) = g.reachable().get(&hex) {
+        } else if let Some(cost) = g.reachable(game.human).get(&hex) {
             lines.push(format!("клик — идти ({cost} очк.)"));
         }
     }

@@ -183,15 +183,12 @@ fn rebuild_status(
     commands.entity(chip).add_children(&[goblet, taste_label]);
     commands.entity(top).add_children(&[sun, round, chip]);
 
-    // Turn order: portraits left to right, the one we wait on framed in gold.
+    // Everyone plays at once (§11.2): each seat in initiative order with
+    // what it is doing, the ones the table waits on framed in gold.
     let order = stats::row(&mut commands);
     let awaited = g.awaiting();
-    for (i, &p) in g.order().iter().enumerate() {
-        if i > 0 {
-            let arrow = stats::label(&mut commands, &font, "›", 16.0, true);
-            commands.entity(order).add_child(arrow);
-        }
-        let current = p == g.current_player();
+    for &p in g.order() {
+        let current = g.phase(p) == &necromy_rules::Phase::Acting;
         let seat = commands
             .spawn((Node {
                 flex_direction: FlexDirection::Column,
@@ -219,7 +216,15 @@ fn rebuild_status(
         let name = g.champion(p).map_or("?", |c| names::god(c.god));
         let tag = if p == game.human { "ты" } else { name };
         let tag = stats::label(&mut commands, &font, tag, 10.0, p == game.human);
-        commands.entity(seat).add_children(&[portrait, tag]);
+        let (state, color) = match g.phase(p) {
+            necromy_rules::Phase::Acting => ("ходит", GOLD),
+            necromy_rules::Phase::Held { .. } => ("ждёт", Color::srgb(0.95, 0.6, 0.35)),
+            necromy_rules::Phase::Done => ("готов", Color::srgb(0.6, 0.6, 0.6)),
+        };
+        let state = commands
+            .spawn((Text::new(state), font.text(9.0), TextColor(color)))
+            .id();
+        commands.entity(seat).add_children(&[portrait, tag, state]);
         commands.entity(order).add_child(seat);
     }
 
@@ -261,7 +266,7 @@ fn rebuild_action(
     commands.entity(bar).despawn_related::<Children>();
     let g = &game.game;
     let human = game.human;
-    let kind = g.window().map(|w| w.kind);
+    let kind = game.human_window();
 
     let (title, hint, button, moves) = if let Some(card) = selection.card {
         (
@@ -277,7 +282,7 @@ fn rebuild_action(
             Some(WindowKind::Target { target, .. }) if target == human => {
                 (String::new(), "", None, false)
             }
-            Some(k) if game.human_awaited() && !g.playable(human).is_empty() => {
+            Some(k) if !g.playable(human).is_empty() => {
                 let what = if matches!(k, WindowKind::Target { .. }) {
                     "сыграй карту «ответ» из руки или пропусти"
                 } else {
@@ -297,6 +302,35 @@ fn rebuild_action(
                 Some((ActionButton::EndTurn, "Конец хода\n(пробел)")),
                 true,
             ),
+            // Simultaneous turns (§11.2): the action waits for a rival nearby.
+            None if matches!(g.phase(human), necromy_rules::Phase::Held { .. }) => {
+                let title = match g.phase(human) {
+                    necromy_rules::Phase::Held { on: Some(on), .. } => {
+                        format!("Ждём: {} ещё ходит", game.name(*on))
+                    }
+                    _ => "Ждём: рядом кто-то занят".to_string(),
+                };
+                (
+                    title,
+                    "твоё действие сыграется, когда он закончит ход",
+                    None,
+                    false,
+                )
+            }
+            None if g.phase(human) == &necromy_rules::Phase::Done && g.wish_due().is_none() => {
+                let names: Vec<String> = g
+                    .order()
+                    .iter()
+                    .filter(|&&p| g.phase(p) != &necromy_rules::Phase::Done)
+                    .map(|&p| game.name(p))
+                    .collect();
+                (
+                    format!("Ход сделан · ждём: {}", names.join(", ")),
+                    "все ходят одновременно; раунд кончится, когда закончат все",
+                    None,
+                    false,
+                )
+            }
             _ => (String::new(), "", None, false),
         }
     };
@@ -333,7 +367,7 @@ fn rebuild_action(
         let mp = stats::label(
             &mut commands,
             &font,
-            &format!("{} очк. движения", g.move_points()),
+            &format!("{} очк. движения", g.move_points(human)),
             15.0,
             true,
         );
@@ -404,20 +438,22 @@ fn action_buttons(
     }
 }
 
-/// "Твой ход" in the middle of the screen when the human's turn begins.
+/// "Твой ход" in the middle of the screen when the human's turn begins:
+/// once a round, the first moment they are free to act (after a dawn wish,
+/// say), not every time a window or a wait lets them go again.
 fn splash(
     time: Res<Time>,
     game: Res<Match>,
-    mut state: Local<(bool, Option<f32>)>,
+    mut state: Local<(u32, Option<f32>)>,
     splash: Single<(&mut TextColor, &mut TextShadow, &mut Visibility), With<Splash>>,
 ) {
     let now = time.elapsed_secs();
-    let mine = game.is_human_turn();
-    let (was_mine, started) = &mut *state;
-    if mine && !*was_mine {
+    let round = game.game.round();
+    let (shown_in, started) = &mut *state;
+    if game.is_human_turn() && *shown_in != round {
+        *shown_in = round;
         *started = Some(now);
     }
-    *was_mine = mine;
     let alpha = started.map_or(0.0, |s| {
         let t = (now - s) / SPLASH_SECS;
         if t >= 1.0 { 0.0 } else { 1.0 - t * t }

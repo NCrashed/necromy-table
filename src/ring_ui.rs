@@ -73,7 +73,7 @@ pub fn badge(g: &Game, human: PlayerId, card: CardId) -> Option<(String, Color)>
         card: pending,
         target,
         ..
-    }) = g.window().map(|w| w.kind)
+    }) = g.to_answer(human).map(|w| w.kind)
     {
         if target != human || def.timing != Timing::Response {
             return None;
@@ -100,10 +100,10 @@ pub fn badge(g: &Game, human: PlayerId, card: CardId) -> Option<(String, Color)>
         };
     }
     // A chain on your own turn.
-    if g.current_player() != human || g.window().is_some() {
+    if !g.free_to_act(human) {
         return None;
     }
-    let (prev, element) = (g.last_element()?, def.element?);
+    let (prev, element) = (g.last_element(human)?, def.element?);
     if prev.generates() != element {
         return None;
     }
@@ -154,7 +154,8 @@ fn focus(
         element(card.0)
     } else if let Some(card) = selection.card {
         element(card)
-    } else if let Some(WindowKind::Target { card, target, .. }) = g.window().map(|w| w.kind)
+    } else if let Some(WindowKind::Target { card, target, .. }) =
+        g.to_answer(game.human).map(|w| w.kind)
         && target == game.human
     {
         element(card)
@@ -455,9 +456,8 @@ fn rebuild(
                 },
             ));
             // Where the chain stands right now on the human's turn.
-            if g.current_player() == game.human
-                && g.window().is_none()
-                && let Some(prev) = g.last_element()
+            if g.free_to_act(game.human)
+                && let Some(prev) = g.last_element(game.human)
             {
                 let now = if prev.generates() == e {
                     format!(

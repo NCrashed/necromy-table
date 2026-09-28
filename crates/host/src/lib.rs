@@ -398,28 +398,37 @@ impl Table {
             return;
         }
         let wish_due = self.game.wish_due();
-        let Some(player) =
-            self.game
-                .awaiting()
-                .into_iter()
-                .find(|&p| match self.seats[p.0 as usize] {
-                    Seat::Bot => true,
-                    Seat::Autoplay { wish_by_hand } => !(wish_by_hand && wish_due == Some(p)),
-                    Seat::Human => false,
-                })
-        else {
+        // Every bot seat awaited takes one step per tick: they play their
+        // turns side by side, as people do (§11.2).
+        let bots: Vec<PlayerId> = self
+            .game
+            .awaiting()
+            .into_iter()
+            .filter(|&p| match self.seats[p.0 as usize] {
+                Seat::Bot => true,
+                Seat::Autoplay { wish_by_hand } => !(wish_by_hand && wish_due == Some(p)),
+                Seat::Human => false,
+            })
+            .collect();
+        if bots.is_empty() {
             return;
-        };
+        }
         self.since_bot = 0.0;
-        let intent = bot::choose(&self.game, player);
-        if self.act(player, intent).is_err() {
-            // A bot that cannot act must not stall the table.
-            let fallback = if self.game.window().is_some() {
-                Intent::Pass
-            } else {
-                Intent::EndTurn
-            };
-            let _ = self.act(player, fallback);
+        for player in bots {
+            // An earlier bot's step may have changed who is awaited.
+            if self.game.winner().is_some() || !self.game.awaiting().contains(&player) {
+                continue;
+            }
+            let intent = bot::choose(&self.game, player);
+            if self.act(player, intent).is_err() {
+                // A bot that cannot act must not stall the table.
+                let fallback = if self.game.to_answer(player).is_some() {
+                    Intent::Pass
+                } else {
+                    Intent::EndTurn
+                };
+                let _ = self.act(player, fallback);
+            }
         }
     }
 

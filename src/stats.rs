@@ -423,8 +423,8 @@ fn stat_sheet(
         (StatIcon::Cards, format!("{hand}/{}", c.hand_limit())),
         (StatIcon::Style, g.style(player).to_string()),
     ];
-    if g.window().is_none() && g.current_player() == player {
-        numbers.push((StatIcon::Moves, g.move_points().to_string()));
+    if g.free_to_act(player) {
+        numbers.push((StatIcon::Moves, g.move_points(player).to_string()));
     }
     let r = row(commands);
     for (icon, value) in numbers {

@@ -337,12 +337,12 @@ fn sync_tiles(
     }
     let walking = game.is_human_turn() && selection.card.is_none();
     let reachable = if walking {
-        game.game.reachable()
+        game.game.reachable(game.human)
     } else {
         Default::default()
     };
     let attackable = if walking {
-        game.game.attackable()
+        game.game.attackable(game.human)
     } else {
         Vec::new()
     };

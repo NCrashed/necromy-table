@@ -1,10 +1,18 @@
 //! Match state, intents and events (docs/design.md §11).
 //!
-//! A round is a day or a night. Inside it players take turns in initiative
-//! order, then the world acts. Dawn opens a day, dusk closes it.
+//! A round is a day or a night. Inside it players take their turns, then the
+//! world acts. Dawn opens a day, dusk closes it.
 //!
-//! Someone else's turn is a chain of reaction windows (§11.3). While a window
-//! is open only its eligible players may act, each once: a card or a pass.
+//! Everyone takes their turn at once (§11.2): each player is acting, held or
+//! done. An action that would touch a rival who is still acting (a battle,
+//! an Enter window for them, a card at them or next to them) is held until
+//! that rival ends their turn; the one who came close waits. Held actions
+//! are checked again after every intent and played, or dropped when no
+//! longer legal. The round ends when everyone is done.
+//!
+//! Reaction windows (§11.3) belong to the action that opened them; several
+//! may be open at once, but a player answers in one at most. While a window
+//! is open its eligible players act in it, each once: a card or a pass.
 //! Choices stay hidden until the last one is in, then resolve together.
 //! A response never opens another window.
 
@@ -155,8 +163,31 @@ pub enum WindowKind {
         attacker: PlayerId,
         defender: PlayerId,
     },
-    /// `player` finished their turn.
-    End { player: PlayerId },
+}
+
+/// Where a player stands in the round (§11.2).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Phase {
+    /// Taking their turn.
+    Acting,
+    /// Their `intent` touched a rival who is still acting (`on`; `None`
+    /// when naming them would give a hidden one away) or busy in another
+    /// window: it waits.
+    Held {
+        on: Option<PlayerId>,
+        intent: Intent,
+    },
+    /// Ended their turn this round.
+    Done,
+}
+
+/// A player's own turn: its phase and what is left of it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct Turn {
+    phase: Phase,
+    move_points: u32,
+    /// Element of the last card played this turn (§4 chains).
+    last_element: Option<Element>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,9 +200,15 @@ enum Choice {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Window {
     pub kind: WindowKind,
+    /// Whose action opened it; they wait until it closes.
+    pub actor: PlayerId,
     /// In resolution order.
     pub eligible: Vec<PlayerId>,
     choices: BTreeMap<PlayerId, Choice>,
+    /// The card of a Target window, resolved when the window closes.
+    pending: Option<Pending>,
+    /// A Battle window struck from the shadow: one more die (§11.6).
+    ambush: Option<PlayerId>,
 }
 
 impl Window {
@@ -217,6 +254,21 @@ pub enum Event {
     TurnStarted {
         player: PlayerId,
         move_points: u32,
+    },
+    /// `player`'s action waits for `on` to end their turn (§11.2); `None`
+    /// when the one in the way is hidden or busy elsewhere.
+    Held {
+        player: PlayerId,
+        on: Option<PlayerId>,
+    },
+    /// The held action goes ahead now.
+    Resumed {
+        player: PlayerId,
+    },
+    /// The held action is no longer legal and is dropped; the turn goes on.
+    HoldDropped {
+        player: PlayerId,
+        why: RuleError,
     },
     Moved {
         player: PlayerId,
@@ -570,8 +622,8 @@ pub struct Game {
     round: u32,
     time: TimeOfDay,
     order: Vec<PlayerId>,
-    turn: usize,
-    move_points: u32,
+    /// Per player: where they are in the round.
+    turns: Vec<Turn>,
     /// This match's slice of the pool.
     slice: Vec<DefId>,
     /// Card instance → definition.
@@ -580,12 +632,8 @@ pub struct Game {
     discard: Vec<CardId>,
     hands: Vec<Vec<CardId>>,
     traps: Vec<Trap>,
-    window: Option<Window>,
-    pending: Option<Pending>,
-    /// Element of the last card the active player played this turn.
-    last_element: Option<Element>,
-    /// The active player has ended their turn; only the End window is left.
-    turn_over: bool,
+    /// Open reaction windows, oldest first; a player is eligible in one at most.
+    windows: Vec<Window>,
     /// Battles fought so far; part of every throw's seed.
     battles: u64,
     pantheon: world::Pantheon,
@@ -617,8 +665,6 @@ pub struct Game {
     next_line: u32,
     /// Round of the last battle or guard strike.
     last_fight: u32,
-    /// Strikes from the shadow in the battle now open: one more die (§11.6).
-    ambush: Option<PlayerId>,
     /// Deeds since the last story check.
     pending_story: Vec<(PlayerId, style::Deed)>,
     log: Vec<Event>,
@@ -664,18 +710,21 @@ impl Game {
             round: 0,
             time: TimeOfDay::Night,
             order,
-            turn: 0,
-            move_points: 0,
+            turns: vec![
+                Turn {
+                    phase: Phase::Done,
+                    move_points: 0,
+                    last_element: None,
+                };
+                champions_len
+            ],
             slice,
             defs,
             deck,
             discard: Vec::new(),
             hands,
             traps: Vec::new(),
-            window: None,
-            pending: None,
-            last_element: None,
-            turn_over: false,
+            windows: Vec::new(),
             battles: 0,
             pantheon: world::Pantheon {
                 stages,
@@ -699,7 +748,6 @@ impl Game {
             lines: Vec::new(),
             next_line: 0,
             last_fight: 0,
-            ambush: None,
             pending_story: Vec::new(),
             log: Vec::new(),
         };
@@ -750,51 +798,91 @@ impl Game {
         &self.order
     }
 
-    /// Whose turn it is. During a window others may still have to act first:
-    /// see [`Game::awaiting`].
-    pub fn current_player(&self) -> PlayerId {
-        self.order[self.turn]
+    /// Where `player` is in the round: acting, held or done (§11.2).
+    pub fn phase(&self, player: PlayerId) -> &Phase {
+        &self.turns[player.0 as usize].phase
     }
 
-    /// `player` is mid-turn and may still move. False between turns, in the End
-    /// window and during the world phase.
+    /// Players still taking their turn (not held, not done), in initiative
+    /// order.
+    pub fn acting(&self) -> Vec<PlayerId> {
+        self.order
+            .iter()
+            .copied()
+            .filter(|&p| self.phase(p) == &Phase::Acting)
+            .collect()
+    }
+
+    /// `player` is mid-turn: acting or held. False once they ended it and
+    /// during the world phase.
     fn is_active(&self, player: PlayerId) -> bool {
-        !self.turn_over && self.order.get(self.turn) == Some(&player)
+        !matches!(self.phase(player), Phase::Done)
     }
 
-    pub fn move_points(&self) -> u32 {
-        self.move_points
+    /// `player` may move and play on their own turn right now: acting, not
+    /// waiting on a window of their own, not answering in one.
+    pub fn free_to_act(&self, player: PlayerId) -> bool {
+        self.wish_due.is_none()
+            && self.phase(player) == &Phase::Acting
+            && self
+                .windows
+                .iter()
+                .all(|w| w.actor != player && !w.eligible.contains(&player))
     }
 
-    pub fn window(&self) -> Option<&Window> {
-        self.window.as_ref()
+    pub fn move_points(&self, player: PlayerId) -> u32 {
+        self.turns[player.0 as usize].move_points
     }
 
-    /// Chain bonus (§4) of the card waiting in an open Target window.
-    /// The element of the last card played this turn: a card of the element
-    /// it generates chains (§4).
-    pub fn last_element(&self) -> Option<Element> {
-        self.last_element
+    /// Every open window, oldest first.
+    pub fn windows(&self) -> &[Window] {
+        &self.windows
     }
 
-    pub fn pending_bonus(&self) -> Option<u8> {
-        self.pending.map(|p| p.bonus)
+    /// The window `player` answers in, or else the one their own action
+    /// opened and they wait on.
+    pub fn window_for(&self, player: PlayerId) -> Option<&Window> {
+        self.windows
+            .iter()
+            .find(|w| w.eligible.contains(&player))
+            .or_else(|| self.windows.iter().find(|w| w.actor == player))
     }
 
-    /// Players the game is waiting on right now.
+    /// The window `player` still has to answer in, if any.
+    pub fn to_answer(&self, player: PlayerId) -> Option<&Window> {
+        self.answering(player).map(|i| &self.windows[i])
+    }
+
+    /// Index of the window `player` still has to answer in.
+    fn answering(&self, player: PlayerId) -> Option<usize> {
+        self.windows
+            .iter()
+            .position(|w| w.eligible.contains(&player) && !w.has_chosen(player))
+    }
+
+    /// The element of the last card `player` played this turn: a card of
+    /// the element it generates chains (§4).
+    pub fn last_element(&self, player: PlayerId) -> Option<Element> {
+        self.turns[player.0 as usize].last_element
+    }
+
+    /// Chain bonus (§4) of the card waiting in the Target window that
+    /// concerns `player`.
+    pub fn pending_bonus(&self, player: PlayerId) -> Option<u8> {
+        self.window_for(player)?.pending.map(|p| p.bonus)
+    }
+
+    /// Players the game is waiting on right now: those with a window to
+    /// answer, and those free to take their turn.
     pub fn awaiting(&self) -> Vec<PlayerId> {
         if let Some(d) = self.wish_due {
             return vec![d];
         }
-        match &self.window {
-            Some(w) => w
-                .eligible
-                .iter()
-                .copied()
-                .filter(|p| !w.has_chosen(*p))
-                .collect(),
-            None => vec![self.current_player()],
-        }
+        self.order
+            .iter()
+            .copied()
+            .filter(|&p| self.answering(p).is_some() || self.free_to_act(p))
+            .collect()
     }
 
     pub fn hand(&self, player: PlayerId) -> &[CardId] {
@@ -870,16 +958,19 @@ impl Game {
         Ok(tile.terrain.move_cost())
     }
 
-    /// Hexes the current player can reach this turn, with the cheapest cost.
-    pub fn reachable(&self) -> HashMap<Hex, u32> {
-        self.paths().into_iter().map(|(h, (c, _))| (h, c)).collect()
+    /// Hexes `player` can reach this turn, with the cheapest cost.
+    pub fn reachable(&self, player: PlayerId) -> HashMap<Hex, u32> {
+        self.paths(player)
+            .into_iter()
+            .map(|(h, (c, _))| (h, c))
+            .collect()
     }
 
-    /// Cheapest path for the current player to `to`, excluding the start hex.
-    pub fn path_to(&self, to: Hex) -> Option<Vec<Hex>> {
-        let paths = self.paths();
+    /// Cheapest path for `player` to `to`, excluding the start hex.
+    pub fn path_to(&self, player: PlayerId, to: Hex) -> Option<Vec<Hex>> {
+        let paths = self.paths(player);
         paths.get(&to)?;
-        let start = self.hex_of(self.current_player());
+        let start = self.hex_of(player);
         let mut path = vec![to];
         let mut at = to;
         while let Some(&(_, prev)) = paths.get(&at) {
@@ -894,13 +985,14 @@ impl Game {
     }
 
     /// Dijkstra over move costs within the remaining move points:
-    /// hex → (cost, previous hex). Empty while a window is open.
-    fn paths(&self) -> HashMap<Hex, (u32, Hex)> {
-        let start = self.hex_of(self.current_player());
+    /// hex → (cost, previous hex). Empty unless `player` is free to act.
+    fn paths(&self, player: PlayerId) -> HashMap<Hex, (u32, Hex)> {
+        let start = self.hex_of(player);
         let mut best: HashMap<Hex, (u32, Hex)> = HashMap::new();
-        if self.window.is_some() {
+        if !self.free_to_act(player) {
             return best;
         }
+        let points = self.move_points(player);
         let mut queue = BinaryHeap::new();
         queue.push(std::cmp::Reverse((0u32, start.x(), start.y())));
         while let Some(std::cmp::Reverse((cost, x, y))) = queue.pop() {
@@ -916,7 +1008,7 @@ impl Game {
                     continue;
                 }
                 let total = cost + tile.terrain.move_cost();
-                if total > self.move_points {
+                if total > points {
                     continue;
                 }
                 if best.get(&next).is_none_or(|&(c, _)| total < c) {
@@ -936,29 +1028,28 @@ impl Game {
             return Err(RuleError::NotInHand);
         }
         let def = self.def(card);
-        match &self.window {
-            Some(w) => {
-                if !w.eligible.contains(&player) {
-                    return Err(RuleError::NotYourTurn);
-                }
-                if w.has_chosen(player) {
-                    return Err(RuleError::AlreadyChose);
-                }
-                let fits = match w.kind {
+        match self.answering(player) {
+            Some(i) => {
+                let fits = match self.windows[i].kind {
                     WindowKind::Target { .. } => def.timing == Timing::Response,
                     // Cards go into a battle only as burned faces.
                     WindowKind::Battle { .. } => false,
-                    WindowKind::Enter { .. } | WindowKind::End { .. } => {
-                        def.timing == Timing::Instant
-                    }
+                    WindowKind::Enter { .. } => def.timing == Timing::Instant,
                 };
                 if !fits {
                     return Err(RuleError::WrongTiming);
                 }
             }
             None => {
-                if player != self.current_player() {
-                    return Err(RuleError::NotYourTurn);
+                if self.windows.iter().any(|w| w.eligible.contains(&player)) {
+                    return Err(RuleError::AlreadyChose);
+                }
+                if !self.free_to_act(player) {
+                    return Err(if self.windows.iter().any(|w| w.actor == player) {
+                        RuleError::WindowOpen
+                    } else {
+                        RuleError::NotYourTurn
+                    });
                 }
                 if def.timing == Timing::Response {
                     return Err(RuleError::WrongTiming);
@@ -1021,7 +1112,8 @@ impl Game {
                 }
             }
             TargetRule::Pending => {
-                if self.pending.is_some() {
+                let window = self.answering(player).map(|i| &self.windows[i]);
+                if window.is_some_and(|w| w.pending.is_some()) {
                     vec![Target::None]
                 } else {
                     Vec::new()
@@ -1093,26 +1185,199 @@ impl Game {
             return Err(RuleError::UnknownPlayer);
         }
         let mut events = Vec::new();
-        if self.window.is_some() {
-            self.apply_in_window(player, intent, &mut events)?;
+        if let Some(i) = self.answering(player) {
+            self.apply_in_window(i, player, intent, &mut events)?;
         } else {
-            if player != self.current_player() {
-                return Err(RuleError::NotYourTurn);
-            }
             match intent {
-                Intent::Move { to } => self.step(player, to, &mut events)?,
-                Intent::EndTurn => self.end_turn(player, &mut events),
-                Intent::Play { card, target } => {
-                    self.play_own(player, card, target, &mut events)?
+                Intent::Pass | Intent::Burn { .. } => {
+                    return Err(
+                        if self.windows.iter().any(|w| w.eligible.contains(&player)) {
+                            RuleError::AlreadyChose
+                        } else {
+                            RuleError::NoWindow
+                        },
+                    );
                 }
-                Intent::Pass | Intent::Burn { .. } => return Err(RuleError::NoWindow),
                 Intent::Wish { .. } | Intent::RefuseWish => return Err(RuleError::InvalidWish),
+                _ => {}
             }
+            if !self.free_to_act(player) {
+                return Err(if self.windows.iter().any(|w| w.actor == player) {
+                    RuleError::WindowOpen
+                } else if self.windows.iter().any(|w| w.eligible.contains(&player)) {
+                    RuleError::AlreadyChose
+                } else {
+                    RuleError::NotYourTurn
+                });
+            }
+            self.act_own(player, intent, &mut events)?;
         }
+        self.release_held(&mut events);
+        self.end_round_when_done(&mut events);
         self.settle_story(&mut events);
         self.check_victory(&mut events);
         self.log.extend(events.iter().cloned());
         Ok(events)
+    }
+
+    /// An intent on `player`'s own turn: checked, then held if it touches a
+    /// rival who is still acting (§11.2), else played.
+    fn act_own(
+        &mut self,
+        player: PlayerId,
+        intent: Intent,
+        events: &mut Vec<Event>,
+    ) -> Result<(), RuleError> {
+        if intent == Intent::EndTurn {
+            self.end_turn(player, events);
+            return Ok(());
+        }
+        self.check_own(player, &intent)?;
+        if let Some(on) = self.blocker(player, &intent) {
+            events.push(Event::Held { player, on });
+            self.turns[player.0 as usize].phase = Phase::Held { on, intent };
+            return Ok(());
+        }
+        self.play_out(player, intent, events)
+    }
+
+    fn play_out(
+        &mut self,
+        player: PlayerId,
+        intent: Intent,
+        events: &mut Vec<Event>,
+    ) -> Result<(), RuleError> {
+        match intent {
+            Intent::Move { to } => self.step(player, to, events),
+            Intent::Play { card, target } => self.play_own(player, card, target, events),
+            _ => Err(RuleError::WrongTiming),
+        }
+    }
+
+    /// Whether a step or a card of `player` is legal now, without doing it.
+    fn check_own(&self, player: PlayerId, intent: &Intent) -> Result<(), RuleError> {
+        match *intent {
+            Intent::Move { to } => {
+                if self.occupant(to).is_some_and(|d| d != player) {
+                    self.attack_cost(player, to).map(|_| ())
+                } else {
+                    let cost = self.step_cost(player, to)?;
+                    let have = self.move_points(player);
+                    if cost > have {
+                        return Err(RuleError::NotEnoughMovePoints { need: cost, have });
+                    }
+                    Ok(())
+                }
+            }
+            Intent::Play { card, target } => self.check_play(player, card, target),
+            _ => Err(RuleError::WrongTiming),
+        }
+    }
+
+    /// Who an own-turn intent of `player` would draw in: the defender of a
+    /// battle, the rivals an Enter window opens for, the target of a card
+    /// and those near it. The flag marks a hidden one stumbled upon, who
+    /// fights at once even mid-turn (§11.6).
+    fn touched(&self, player: PlayerId, intent: &Intent) -> Vec<(PlayerId, bool)> {
+        match *intent {
+            Intent::Move { to } => {
+                if let Some(d) = self.occupant(to).filter(|&d| d != player) {
+                    vec![(d, false)]
+                } else if let Some(h) = self.hidden_at(to).filter(|&h| h != player) {
+                    vec![(h, true)]
+                } else if self.is_hidden(player) {
+                    Vec::new()
+                } else {
+                    self.watchers(player, to)
+                        .into_iter()
+                        .map(|p| (p, false))
+                        .collect()
+                }
+            }
+            Intent::Play {
+                target: Target::Champion(aimed),
+                ..
+            } if aimed != player => std::iter::once(aimed)
+                .chain(
+                    self.watchers(player, self.hex_of(aimed))
+                        .into_iter()
+                        .filter(|&p| p != aimed),
+                )
+                .map(|p| (p, false))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Why an intent of `player` must wait, if it must: `Some(on)` with the
+    /// rival still acting, or busy in another window (`None` where naming
+    /// them would give a hidden one away).
+    fn blocker(&self, player: PlayerId, intent: &Intent) -> Option<Option<PlayerId>> {
+        for (p, hidden) in self.touched(player, intent) {
+            let busy = self
+                .windows
+                .iter()
+                .any(|w| w.actor == p || w.eligible.contains(&p));
+            if busy {
+                return Some((!hidden).then_some(p));
+            }
+            if !hidden && self.phase(p) == &Phase::Acting {
+                return Some(Some(p));
+            }
+        }
+        None
+    }
+
+    /// Held actions whose way is clear go ahead, in initiative order, or are
+    /// dropped when no longer legal.
+    fn release_held(&mut self, events: &mut Vec<Event>) {
+        loop {
+            let mut moved = false;
+            for p in self.order.clone() {
+                if self.wish_due.is_some() || self.winner.is_some() {
+                    return;
+                }
+                let Phase::Held { intent, .. } = self.phase(p).clone() else {
+                    continue;
+                };
+                let busy = self
+                    .windows
+                    .iter()
+                    .any(|w| w.actor == p || w.eligible.contains(&p));
+                if busy || self.blocker(p, &intent).is_some() {
+                    continue;
+                }
+                self.turns[p.0 as usize].phase = Phase::Acting;
+                events.push(Event::Resumed { player: p });
+                let result = self
+                    .check_own(p, &intent)
+                    .and_then(|()| self.play_out(p, intent, events));
+                if let Err(why) = result {
+                    events.push(Event::HoldDropped { player: p, why });
+                }
+                moved = true;
+            }
+            if !moved {
+                return;
+            }
+        }
+    }
+
+    /// With everyone done and no window open, the world acts and the next
+    /// round begins.
+    fn end_round_when_done(&mut self, events: &mut Vec<Event>) {
+        let done = self.turns.iter().all(|t| t.phase == Phase::Done);
+        if !done || !self.windows.is_empty() || self.wish_due.is_some() || self.winner.is_some() {
+            return;
+        }
+        self.world_phase(events);
+        if self.time == TimeOfDay::Day {
+            events.push(Event::Dusk { round: self.round });
+            self.dusk(events);
+            self.judge_the_day(events);
+            self.storyteller(events);
+        }
+        self.start_round(events);
     }
 
     fn step(
@@ -1126,19 +1391,17 @@ impl Game {
         {
             let cost = self.attack_cost(player, to)?;
             // Out of the shadow: an ambush, and then everyone sees them.
-            if self.is_hidden(player) {
-                self.ambush = Some(player);
+            let ambush = self.is_hidden(player).then_some(player);
+            if ambush.is_some() {
                 self.reveal(player, RevealReason::Attacked, events);
             }
-            self.start_battle(player, defender, cost, events);
+            self.start_battle(player, player, defender, cost, ambush, events);
             return Ok(());
         }
         let cost = self.step_cost(player, to)?;
-        if cost > self.move_points {
-            return Err(RuleError::NotEnoughMovePoints {
-                need: cost,
-                have: self.move_points,
-            });
+        let have = self.move_points(player);
+        if cost > have {
+            return Err(RuleError::NotEnoughMovePoints { need: cost, have });
         }
         if let Some(hidden) = self.hidden_at(to)
             && hidden != player
@@ -1148,7 +1411,7 @@ impl Game {
         }
         let from = self.hex_of(player);
         self.champ_mut(player).hex = to;
-        self.move_points -= cost;
+        self.turns[player.0 as usize].move_points -= cost;
         events.push(Event::Moved {
             player,
             from,
@@ -1172,11 +1435,14 @@ impl Game {
         }
         let near = self.watchers(player, at);
         self.open_window(
+            player,
             WindowKind::Enter {
                 mover: player,
                 hex: at,
             },
             near,
+            None,
+            None,
             events,
         );
         Ok(())
@@ -1184,7 +1450,7 @@ impl Game {
 
     fn end_turn(&mut self, player: PlayerId, events: &mut Vec<Event>) {
         events.push(Event::TurnEnded { player });
-        self.turn_over = true;
+        self.turns[player.0 as usize].phase = Phase::Done;
         // Ending the turn on a temple is a prayer to its god.
         let hex = self.hex_of(player);
         if let Some(tile) = self.board.tile(hex)
@@ -1195,15 +1461,6 @@ impl Game {
             self.record_deed(player, style::Deed::Prayed);
         }
         self.stealth_at_turn_end(player, events);
-        let others: Vec<PlayerId> = self
-            .initiative_after(player)
-            .into_iter()
-            .filter(|&p| !self.is_hidden(p))
-            .collect();
-        self.open_window(WindowKind::End { player }, others, events);
-        if self.window.is_none() {
-            self.advance_turn(events);
-        }
     }
 
     fn play_own(
@@ -1236,20 +1493,23 @@ impl Game {
                     .into_iter()
                     .filter(|&p| p != aimed),
             );
-            self.pending = Some(Pending {
+            let pending = Pending {
                 caster: player,
                 card,
                 target,
                 bonus,
                 canceled: false,
-            });
+            };
             self.open_window(
+                player,
                 WindowKind::Target {
                     caster: player,
                     target: aimed,
                     card,
                 },
                 eligible,
+                Some(pending),
+                None,
                 events,
             );
         } else {
@@ -1260,22 +1520,12 @@ impl Game {
 
     fn apply_in_window(
         &mut self,
+        i: usize,
         player: PlayerId,
         intent: Intent,
         events: &mut Vec<Event>,
     ) -> Result<(), RuleError> {
-        let window = self.window.as_ref().expect("checked by caller");
-        if !window.eligible.contains(&player) {
-            return Err(if player == self.current_player() {
-                RuleError::WindowOpen
-            } else {
-                RuleError::NotYourTurn
-            });
-        }
-        if window.has_chosen(player) {
-            return Err(RuleError::AlreadyChose);
-        }
-        let battle = matches!(window.kind, WindowKind::Battle { .. });
+        let battle = matches!(self.windows[i].kind, WindowKind::Battle { .. });
         let choice = match intent {
             Intent::Pass => Choice::Pass,
             Intent::Play { card, target } => {
@@ -1294,19 +1544,27 @@ impl Game {
             Intent::Move { .. } | Intent::EndTurn => return Err(RuleError::WindowOpen),
             Intent::Wish { .. } | Intent::RefuseWish => return Err(RuleError::InvalidWish),
         };
-        let window = self.window.as_mut().expect("still open");
+        let window = &mut self.windows[i];
         window.choices.insert(player, choice);
         events.push(Event::ChoiceMade { player });
         if window.eligible.iter().all(|p| window.has_chosen(*p)) {
-            self.close_window(events);
+            self.close_window(i, events);
         }
         Ok(())
     }
 
-    fn open_window(&mut self, kind: WindowKind, eligible: Vec<PlayerId>, events: &mut Vec<Event>) {
+    fn open_window(
+        &mut self,
+        actor: PlayerId,
+        kind: WindowKind,
+        eligible: Vec<PlayerId>,
+        pending: Option<Pending>,
+        ambush: Option<PlayerId>,
+        events: &mut Vec<Event>,
+    ) {
         if eligible.is_empty() {
             // Nobody may react: a pending card resolves at once.
-            if let Some(p) = self.pending.take() {
+            if let Some(p) = pending {
                 self.resolve(p.caster, p.card, p.target, p.bonus, events);
             }
             return;
@@ -1315,15 +1573,21 @@ impl Game {
             kind,
             eligible: eligible.clone(),
         });
-        self.window = Some(Window {
+        self.windows.push(Window {
             kind,
+            actor,
             eligible,
             choices: BTreeMap::new(),
+            pending,
+            ambush,
         });
     }
 
-    fn close_window(&mut self, events: &mut Vec<Event>) {
-        let window = self.window.take().expect("closing an open window");
+    /// Resolves the `i`th window: answers in initiative order, then the card
+    /// it waited on, or the battle. The window stays in place until then, so
+    /// a cancel finds its card and a battle its ambush.
+    fn close_window(&mut self, i: usize, events: &mut Vec<Event>) {
+        let window = self.windows[i].clone();
         let plays: Vec<(PlayerId, CardId, Target)> = window
             .eligible
             .iter()
@@ -1348,33 +1612,40 @@ impl Game {
             self.resolve(player, card, target, 0, events);
         }
 
-        if let Some(p) = self.pending.take() {
+        if let Some(p) = self.windows[i].pending {
             if p.canceled {
                 self.discard.push(p.card);
             } else {
                 self.resolve(p.caster, p.card, p.target, p.bonus, events);
             }
         }
-        match window.kind {
-            WindowKind::End { .. } => self.advance_turn(events),
-            WindowKind::Battle { attacker, defender } => {
-                let burned = |p: PlayerId| match window.choices.get(&p) {
-                    Some(Choice::Burn(cards)) => cards.clone(),
-                    _ => Vec::new(),
-                };
-                let (a, d) = (burned(attacker), burned(defender));
-                self.resolve_battle(attacker, defender, a, d, events);
-                self.ambush = None;
+        if let WindowKind::Battle { attacker, defender } = window.kind {
+            let burned = |p: PlayerId| match window.choices.get(&p) {
+                Some(Choice::Burn(cards)) => cards.clone(),
+                _ => Vec::new(),
+            };
+            let (a, d) = (burned(attacker), burned(defender));
+            self.resolve_battle(attacker, defender, a, d, events);
+            // A battle ends the movement of whoever brought it about.
+            if self.is_active(window.actor) {
+                self.turns[window.actor.0 as usize].move_points = 0;
             }
-            _ => {}
         }
+        self.windows.remove(i);
     }
 
     fn cancel_pending(&mut self, by: CardId, events: &mut Vec<Event>) {
         let by_element = self.def(by).element;
-        let Some(pending) = self.pending.as_mut() else {
+        // The window the cancelling card was answered in.
+        let Some(window) = self.windows.iter_mut().find(|w| {
+            w.pending.is_some()
+                && w.choices
+                    .values()
+                    .any(|c| matches!(c, Choice::Play(card, _) if *card == by))
+        }) else {
             return;
         };
+        let pending = window.pending.as_mut().expect("found by its pending card");
         let pending_element = self.defs[pending.card.0 as usize].def().element;
         // "Growth breaks through the grave": a card of the element that
         // quenches the canceller's element cannot be silenced by it.
@@ -1408,8 +1679,8 @@ impl Game {
     /// Generation chain on your own turn: +1 to the card's number. A chain
     /// that breaks the yin-yang rhythm costs a surge of qi (§4).
     fn chain(&mut self, player: PlayerId, element: Option<Element>, events: &mut Vec<Event>) -> u8 {
-        let prev = self.last_element;
-        self.last_element = element;
+        let turn = &mut self.turns[player.0 as usize];
+        let prev = std::mem::replace(&mut turn.last_element, element);
         let (Some(from), Some(to)) = (prev, element) else {
             return 0;
         };
@@ -1539,11 +1810,12 @@ impl Game {
             }
             Effect::Hide => self.hide(caster, events),
             Effect::Haste(x) => {
-                if caster == self.current_player() {
-                    self.move_points += u32::from(n(x));
+                if self.is_active(caster) {
+                    let turn = &mut self.turns[caster.0 as usize];
+                    turn.move_points += u32::from(n(x));
                     events.push(Event::Hasted {
                         player: caster,
-                        move_points: self.move_points,
+                        move_points: turn.move_points,
                     });
                 }
             }
@@ -1598,11 +1870,12 @@ impl Game {
             Effect::BodyFuel => {
                 self.take_corpse(caster, events);
                 self.gain_spirit(caster, n(2), events);
-                if caster == self.current_player() {
-                    self.move_points += 1;
+                if self.is_active(caster) {
+                    let turn = &mut self.turns[caster.0 as usize];
+                    turn.move_points += 1;
                     events.push(Event::Hasted {
                         player: caster,
-                        move_points: self.move_points,
+                        move_points: turn.move_points,
                     });
                 }
             }
@@ -1697,7 +1970,7 @@ impl Game {
 
     fn root(&mut self, player: PlayerId, events: &mut Vec<Event>) {
         if self.is_active(player) {
-            self.move_points = 0;
+            self.turns[player.0 as usize].move_points = 0;
         } else {
             self.champ_mut(player).rooted = true;
         }
@@ -1777,7 +2050,7 @@ impl Game {
         champ.ward = None;
         champ.rooted = false;
         if self.is_active(player) {
-            self.move_points = 0;
+            self.turns[player.0 as usize].move_points = 0;
         }
         events.push(Event::ChampionFell {
             player,
@@ -1814,22 +2087,6 @@ impl Game {
 
     // ---- Rounds and turns ----
 
-    fn advance_turn(&mut self, events: &mut Vec<Event>) {
-        self.turn += 1;
-        if self.turn == self.order.len() {
-            self.world_phase(events);
-            if self.time == TimeOfDay::Day {
-                events.push(Event::Dusk { round: self.round });
-                self.dusk(events);
-                self.judge_the_day(events);
-                self.storyteller(events);
-            }
-            self.start_round(events);
-        } else {
-            self.start_turn(events);
-        }
-    }
-
     fn start_round(&mut self, events: &mut Vec<Event>) {
         self.round += 1;
         self.time = match self.time {
@@ -1840,7 +2097,6 @@ impl Game {
             // Initiative rotates: the first player goes last.
             self.order.rotate_left(1);
         }
-        self.turn = 0;
         events.push(Event::RoundStarted {
             round: self.round,
             time: self.time,
@@ -1850,14 +2106,18 @@ impl Game {
             events.push(Event::Dawn { round: self.round });
             self.dawn(events);
         }
-        self.start_turn(events);
+        // Everyone takes their turn at once (§11.2).
+        for player in self.order.clone() {
+            self.start_turn(player, events);
+        }
     }
 
-    fn start_turn(&mut self, events: &mut Vec<Event>) {
-        let player = self.current_player();
-        self.move_points = MOVE_POINTS;
-        self.last_element = None;
-        self.turn_over = false;
+    fn start_turn(&mut self, player: PlayerId, events: &mut Vec<Event>) {
+        self.turns[player.0 as usize] = Turn {
+            phase: Phase::Acting,
+            move_points: MOVE_POINTS,
+            last_element: None,
+        };
         let champ = self.champ_mut(player);
         let faded = champ.ward.take().is_some();
         let rooted = std::mem::take(&mut champ.rooted);
@@ -1865,11 +2125,11 @@ impl Game {
             events.push(Event::WardFaded { player });
         }
         if rooted {
-            self.move_points = 0;
+            self.turns[player.0 as usize].move_points = 0;
         }
         events.push(Event::TurnStarted {
             player,
-            move_points: self.move_points,
+            move_points: self.move_points(player),
         });
         self.bite_curses(player, events);
         let champ = &self.champions[player.0 as usize];

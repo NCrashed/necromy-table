@@ -1,7 +1,7 @@
 //! Timers, so one player cannot hold the table (docs/design.md §17.1).
 //!
 //! Only people's seats have clocks. A turn has its own clock, which stands
-//! still while a window is open; each window a seat may answer has one; the
+//! still while the seat waits (on a window, or held on a rival, §11.2); each window a seat may answer has one; the
 //! Dominant's wish has one, which stands still while a god thinks about
 //! words already sent. When a clock runs out the table does the plainest
 //! thing for the seat: pass (in a battle, throw with nothing burned), end
@@ -52,8 +52,8 @@ pub(crate) struct SeatClock {
 impl SeatClock {
     /// After a change: start, restart or stop this seat's clocks.
     pub(crate) fn follow(&mut self, t: &Timers, game: &Game, seat: PlayerId, events: &[Event]) {
-        let awaited = game.awaiting().contains(&seat);
-        let window = game.window().is_some();
+        let window = game.to_answer(seat).is_some();
+        let free = game.free_to_act(seat);
         let wish = game.wish_due() == Some(seat);
 
         if events
@@ -66,7 +66,7 @@ impl SeatClock {
             .any(|e| matches!(e, Event::TurnEnded { player } if *player == seat))
         {
             self.turn = None;
-        } else if awaited && !window && !wish && self.turn.is_none() {
+        } else if free && self.turn.is_none() {
             // A seat taken back mid-turn gets a fresh clock.
             self.turn = Some(t.turn);
         }
@@ -74,7 +74,7 @@ impl SeatClock {
         let opened = events
             .iter()
             .any(|e| matches!(e, Event::WindowOpened { .. }));
-        self.window = match (window && awaited && !wish, self.window) {
+        self.window = match (window && !wish, self.window) {
             (false, _) => None,
             (true, Some(left)) if !opened => Some(left),
             (true, _) => Some(t.window),
@@ -93,7 +93,6 @@ impl SeatClock {
 
     /// The clock the seat should look at, if any runs for it now.
     pub(crate) fn shown(&self, game: &Game, seat: PlayerId) -> Option<Clock> {
-        let awaited = game.awaiting().contains(&seat);
         if let Some(left) = self.wish {
             return Some(Clock {
                 what: Decision::Wish,
@@ -107,7 +106,7 @@ impl SeatClock {
             });
         }
         match self.turn {
-            Some(left) if awaited && game.window().is_none() => Some(Clock {
+            Some(left) if game.free_to_act(seat) => Some(Clock {
                 what: Decision::Turn,
                 left,
             }),
@@ -124,7 +123,6 @@ impl SeatClock {
         seat: PlayerId,
         thinking: bool,
     ) -> Option<Intent> {
-        let awaited = game.awaiting().contains(&seat);
         if let Some(left) = self.wish.as_mut() {
             if !thinking {
                 *left -= dt;
@@ -143,7 +141,7 @@ impl SeatClock {
             });
         }
         match self.turn.as_mut() {
-            Some(left) if awaited && game.window().is_none() => {
+            Some(left) if game.free_to_act(seat) => {
                 *left -= dt;
                 (*left <= 0.0).then_some(Intent::EndTurn)
             }

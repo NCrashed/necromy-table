@@ -18,9 +18,9 @@ pub fn choose(game: &Game, player: PlayerId) -> Intent {
     if game.wish_due() == Some(player) {
         return wish(game, player);
     }
-    match game.window() {
+    match game.to_answer(player) {
         Some(window) => respond(game, player, window.kind),
-        None if game.current_player() == player => own_turn(game, player),
+        None if game.free_to_act(player) => own_turn(game, player),
         // Not our move at all; the caller should not have asked.
         None => Intent::EndTurn,
     }
@@ -46,11 +46,6 @@ fn respond(game: &Game, player: PlayerId, kind: WindowKind) -> Intent {
             }
         }
         WindowKind::Battle { .. } => return burn(game, player),
-        WindowKind::End { .. } => {
-            if let Some(intent) = mend(game, player, &cards) {
-                return intent;
-            }
-        }
         _ => {}
     }
     Intent::Pass
@@ -137,7 +132,7 @@ fn attack(game: &Game, player: PlayerId) -> Option<Intent> {
         return None;
     }
     let mut targets: Vec<(bool, Hex)> = game
-        .attackable()
+        .attackable(player)
         .into_iter()
         .filter_map(|hex| {
             let who = game.occupant(hex)?;
@@ -241,7 +236,7 @@ fn walk(game: &Game, player: PlayerId) -> Intent {
         .filter(|&next| next.unsigned_distance_to(target) < here)
         .filter(|&next| {
             game.step_cost(player, next)
-                .is_ok_and(|cost| cost <= game.move_points())
+                .is_ok_and(|cost| cost <= game.move_points(player))
         })
         .min_by_key(|&next| (next.unsigned_distance_to(target), next.x(), next.y()))
         .map_or(Intent::EndTurn, |to| Intent::Move { to })

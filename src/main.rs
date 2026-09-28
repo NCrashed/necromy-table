@@ -184,11 +184,18 @@ fn auto_screenshot(
         // Full night: the lights of the world are on.
         (Some("night"), Some(_)) => day_night.night >= 1.0,
         // Someone slipped out of sight (§11.6).
+        // The human's action waits for a rival still acting (§11.2).
+        (Some("held"), Some(game)) => {
+            matches!(
+                game.game.phase(game.human),
+                necromy_rules::Phase::Held { .. }
+            )
+        }
         // The human has a trap on the board.
         (Some("trap"), Some(game)) => game.game.traps().iter().any(|t| t.owner == game.human),
         (Some("hidden"), Some(game)) => game.game.players().any(|p| game.game.is_hidden(p)),
         (Some("incoming"), Some(game)) => matches!(
-            game.game.window().map(|w| w.kind),
+            game.human_window(),
             Some(necromy_rules::WindowKind::Target { target, .. }) if target == game.human
         ),
         _ => now >= shot.after,

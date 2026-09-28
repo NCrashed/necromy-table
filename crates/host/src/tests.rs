@@ -92,20 +92,19 @@ fn a_broken_intent_is_refused_to_its_sender() {
     let mut t = table(seats);
     let human = PlayerId(1);
     t.drain(human);
-    let someone_else = t
-        .game()
-        .players()
-        .find(|p| *p != human && !t.game().awaiting().contains(p))
-        .unwrap();
-    // A human seat cannot act for another seat, and out of turn is refused.
-    t.submit(someone_else, ToTable::Act(Intent::EndTurn));
-    if !t.game().awaiting().contains(&human) {
-        t.submit(human, ToTable::Act(Intent::EndTurn));
-        assert!(matches!(
-            t.drain(human).as_slice(),
-            [FromTable::Rejected(_)]
-        ));
+    if t.game().wish_due().is_some() {
+        return;
     }
+    // Everyone acts at once (§11.2): the human ends their turn, then tries
+    // again out of turn, which is refused to them alone.
+    t.submit(human, ToTable::Act(Intent::EndTurn));
+    t.drain(human);
+    t.submit(human, ToTable::Act(Intent::EndTurn));
+    assert!(
+        t.drain(human)
+            .iter()
+            .any(|m| matches!(m, FromTable::Rejected(_)))
+    );
 }
 
 #[test]
