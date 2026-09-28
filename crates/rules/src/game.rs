@@ -677,8 +677,9 @@ pub struct Game {
     /// Deeds since the last story check.
     pending_story: Vec<(PlayerId, style::Deed)>,
     /// A scripted scene (a tutorial chapter, `scenario.rs`): the world holds
-    /// still. No new bodies, guard, stories, Crown or wishes, no draws.
-    scripted: bool,
+    /// still. No new bodies, stories or draws; dawn and the guard only if
+    /// the scene lets them.
+    scripted: Option<scenario::SceneWorld>,
     log: Vec<Event>,
 }
 
@@ -762,7 +763,7 @@ impl Game {
             next_line: 0,
             last_fight: 0,
             pending_story: Vec::new(),
-            scripted: false,
+            scripted: None,
             log: Vec::new(),
         };
 
@@ -1388,7 +1389,7 @@ impl Game {
             events.push(Event::Dusk { round: self.round });
             self.dusk(events);
             self.judge_the_day(events);
-            if !self.scripted {
+            if self.scripted.is_none() {
                 self.storyteller(events);
             }
         }
@@ -2139,7 +2140,7 @@ impl Game {
     }
 
     fn refill_hand(&mut self, player: PlayerId, events: &mut Vec<Event>) {
-        if self.scripted {
+        if self.scripted.is_some() {
             return;
         }
         let limit = self.champions[player.0 as usize].hand_limit();
@@ -2166,7 +2167,7 @@ impl Game {
         });
         if self.time == TimeOfDay::Day {
             events.push(Event::Dawn { round: self.round });
-            if !self.scripted {
+            if self.scripted.is_none_or(|s| s.dawn) {
                 self.dawn(events);
             }
         }
@@ -2242,13 +2243,12 @@ impl Game {
                 events.push(Event::CorpseDecayed { hex });
             }
         }
-        if self.scripted {
-            return;
-        }
-        if self.time == TimeOfDay::Night {
+        if self.scripted.is_none() && self.time == TimeOfDay::Night {
             self.spawn_corpse(events);
         }
-        self.guard_phase(events);
+        if self.scripted.is_none_or(|s| s.guard) {
+            self.guard_phase(events);
+        }
     }
 
     fn spawn_corpse(&mut self, events: &mut Vec<Event>) {
@@ -2284,7 +2284,7 @@ mod world;
 pub use battle::Score;
 pub use guard::{GUARD_DICE, GUARD_RELIEF, GUARD_STEPS, Guard};
 pub use laws::{BURDEN_FREE, CHOSEN, CRACK_REACH, Law, Patronage, SENTENCE_THRESHOLD, SIGN, VOICE};
-pub use scenario::{Scenario, SceneSeat};
+pub use scenario::{Scenario, SceneSeat, SceneWorld};
 pub use stealth::RevealReason;
 pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};

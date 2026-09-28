@@ -1,10 +1,14 @@
 //! Scripted scenes: a small board set up by hand, for the tutorial's
 //! chapters. The match is a normal `Game` (every rule applies), only the
-//! world holds still (`scripted`): no bodies appear, no guard marches, no
-//! stories, Crown or wishes, and hands are what the scene deals, no draws.
+//! world holds still (`scripted`): no bodies appear, no stories, and hands
+//! are what the scene deals, no draws. Dawn (Style for land, the Crown,
+//! the wish) and the royal guard come only if the scene asks (`SceneWorld`).
 
 use hexx::Hex;
 
+use serde::{Deserialize, Serialize};
+
+use super::victory::Condition;
 use super::{Event, Game, PlayerId, Setup, TimeOfDay};
 use crate::board::{Board, Corpse, Terrain};
 use crate::cards::{CardId, DefId, POOL};
@@ -21,6 +25,7 @@ pub struct SceneSeat {
     pub hp: Option<u8>,
     /// Spirit left to spend; `None` keeps it full.
     pub spirit: Option<u8>,
+    pub threat: u8,
 }
 
 impl SceneSeat {
@@ -31,6 +36,7 @@ impl SceneSeat {
             hand: Vec::new(),
             hp: None,
             spirit: None,
+            threat: 0,
         }
     }
 
@@ -48,6 +54,11 @@ impl SceneSeat {
         self.spirit = Some(spirit);
         self
     }
+
+    pub fn threat(mut self, threat: u8) -> SceneSeat {
+        self.threat = threat;
+        self
+    }
 }
 
 /// A scene: the board and who sits where. The first seat acts first.
@@ -59,6 +70,20 @@ pub struct Scenario {
     pub seats: Vec<SceneSeat>,
     /// Each god's stage (0 light .. 2 dark), in ring order.
     pub stages: [u8; 5],
+    /// Each god's pressure towards the next stage (§5.1).
+    pub pressure: [i8; 5],
+    /// Open victory conditions; none by default, so nobody wins.
+    pub open: Vec<Condition>,
+    pub world: SceneWorld,
+}
+
+/// What of the world's own moves a scene lets happen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SceneWorld {
+    /// Dawn: Style for land, the Crown, the Dominant's wish.
+    pub dawn: bool,
+    /// The royal guard marches on the loudest (§6.5).
+    pub guard: bool,
 }
 
 impl Scenario {
@@ -70,6 +95,9 @@ impl Scenario {
             seats,
             // Light: the gentlest laws, none that hides or harms by itself.
             stages: [0; 5],
+            pressure: [0; 5],
+            open: Vec::new(),
+            world: SceneWorld::default(),
         }
     }
 }
@@ -91,7 +119,7 @@ impl Game {
             seed: 1,
             champions: scene.seats.iter().map(|s| s.god).collect(),
         });
-        game.scripted = true;
+        game.scripted = Some(scene.world);
         game.board = Board::plain(scene.radius);
         for &(hex, terrain) in &scene.terrain {
             if let Some(tile) = game.board.tile_mut(hex) {
@@ -106,18 +134,19 @@ impl Game {
         game.deck.clear();
         game.discard.clear();
         game.traps.clear();
-        game.open.clear();
+        game.open = scene.open.clone();
         game.secrets = vec![None; scene.seats.len()];
         game.lines.clear();
         game.guard = None;
         game.dominant = None;
         game.claims.clear();
         game.pantheon.stages = scene.stages;
-        game.pantheon.pressure = [0; 5];
+        game.pantheon.pressure = scene.pressure;
         game.order = (0..scene.seats.len() as u8).map(PlayerId).collect();
         for (i, seat) in scene.seats.iter().enumerate() {
             let player = PlayerId(i as u8);
             game.board.set_start(seat.god, seat.hex);
+            game.threat[i] = seat.threat;
             let champ = game.champ_mut(player);
             champ.hex = seat.hex;
             champ.seen_at = seat.hex;

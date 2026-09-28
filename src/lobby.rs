@@ -621,7 +621,7 @@ fn menu(commands: &mut Commands, font: &UiFont, front: &Front, rows: &mut Vec<En
     rows.push(text(
         commands,
         font,
-        "Четыре коротких главы: как ходить, играть карты, отвечать и драться.",
+        "Девять коротких глав: от первого шага до победы.",
         12.0,
         DIM,
     ));

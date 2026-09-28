@@ -62,7 +62,7 @@ struct DuskScene {
 }
 
 #[derive(Component)]
-struct DuskPanel;
+pub(crate) struct DuskPanel;
 
 #[derive(Component)]
 struct CloseDusk;

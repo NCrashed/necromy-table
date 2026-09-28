@@ -13,8 +13,10 @@
 use std::sync::Arc;
 
 use bevy::prelude::*;
+use necromy_rules::board::Board;
 use necromy_rules::{
-    Event, Game, God, Hex, Intent, PlayerId, Scenario, SceneSeat, Target, Terrain,
+    Condition, Event, Game, God, Hex, Intent, PlayerId, Scenario, SceneSeat, Target, Terrain,
+    WishKind,
 };
 
 use crate::hud::{INK, UiFont};
@@ -159,7 +161,7 @@ pub struct Chapter {
     pub steps: fn() -> Vec<Step>,
 }
 
-pub fn chapters() -> [Chapter; 4] {
+pub fn chapters() -> [Chapter; 9] {
     [
         Chapter {
             title: "Шаги по столу",
@@ -184,6 +186,36 @@ pub fn chapters() -> [Chapter; 4] {
             blurb: "Нападение, сожжённые карты, кубики.",
             scene: fight_scene,
             steps: fight_steps,
+        },
+        Chapter {
+            title: "Тела",
+            blurb: "Карты тела, клятва и манера, роща.",
+            scene: bodies_scene,
+            steps: bodies_steps,
+        },
+        Chapter {
+            title: "Земля, Стиль и Венец",
+            blurb: "Захват земли, рассвет, Венец и желание.",
+            scene: land_scene,
+            steps: land_steps,
+        },
+        Chapter {
+            title: "Боги",
+            blurb: "Подношения, давление, стадии и законы.",
+            scene: gods_scene,
+            steps: gods_steps,
+        },
+        Chapter {
+            title: "Тень и гвардия",
+            blurb: "Скрытность, Угроза и королевская гвардия.",
+            scene: shadow_scene,
+            steps: shadow_steps,
+        },
+        Chapter {
+            title: "Как побеждают",
+            blurb: "Открытые и тайные условия победы.",
+            scene: win_scene,
+            steps: win_steps,
         },
     ]
 }
@@ -515,7 +547,380 @@ fn fight_steps() -> Vec<Step> {
         .settle(),
         Step::read(
             "Удары одной стороны бьются о щиты другой, лишние удары ранят. Победа в бою приносит Стиль, а павший оставляет тело и просыпается \
-             дома. Обучение пройдено — можно садиться за стол!",
+             дома. Дальше — тела павших.",
+        ),
+    ]
+}
+
+// ---- Chapter 5: bodies ----
+
+const BODY_A: Hex = Hex::new(0, 2);
+const BODY_B: Hex = Hex::new(1, 1);
+
+fn bodies_scene() -> Scenario {
+    let mut s = Scenario::new(
+        3,
+        vec![
+            seat(God::Trishna, 0, 3).hand(&["Сжечь как топливо", "Вписать в легион"]),
+            seat(God::Zaga, -3, 0),
+        ],
+    );
+    s.corpses = vec![BODY_A, BODY_B, Hex::new(-2, 1)];
+    s.terrain = vec![
+        (Hex::new(-1, 2), Terrain::Forest),
+        (Hex::new(2, -1), Terrain::Ruins),
+        (Hex::new(1, 2), Terrain::Swamp),
+    ];
+    s
+}
+
+fn bodies_steps() -> Vec<Step> {
+    vec![
+        Step::read(
+            "На столе лежат тела павших. Карты тела играют, стоя на теле: каждая \
+             делает с ним своё и приносит богу своей стихии двойное подношение.",
+        ),
+        Step::act(
+            "Встань на ближнее тело.",
+            |e, _| matches!(e, Event::Moved { player, to, .. } if *player == ME && *to == BODY_A),
+            is_move_to(BODY_A),
+            "Встань на отмеченное тело.",
+            |_, _| Some(Intent::Move { to: BODY_A }),
+        )
+        .hexes(&[BODY_A]),
+        Step::act(
+            "«Сжечь как топливо» (огонь): тело даёт Дух и очко движения. Но это \
+             шумно — +1 Угроза. Сыграй её.",
+            |e, _| matches!(e, Event::CorpseTaken { hex } if *hex == BODY_A),
+            is_play("Сжечь как топливо"),
+            "Сыграй «Сжечь как топливо».",
+            play_demo("Сжечь как топливо"),
+        )
+        .card("Сжечь как топливо"),
+        Step::act(
+            "Тело сгорело. Перейди на следующее.",
+            |e, _| matches!(e, Event::Moved { player, to, .. } if *player == ME && *to == BODY_B),
+            is_move_to(BODY_B),
+            "Встань на отмеченное тело.",
+            |_, _| Some(Intent::Move { to: BODY_B }),
+        )
+        .hexes(&[BODY_B]),
+        Step::act(
+            "«Вписать в легион» (металл): тело становится оберегом железа на тебе. \
+             Сыграй её.",
+            |e, _| matches!(e, Event::WardRaised { player, .. } if *player == ME),
+            is_play("Вписать в легион"),
+            "Сыграй «Вписать в легион».",
+            play_demo("Вписать в легион"),
+        )
+        .card("Вписать в легион"),
+        Step::read(
+            "Нетронутое тело через несколько раундов прорастает рощей — это дар Бхаве. \
+             А у каждого чемпиона есть клятва и манера (внизу листа слева): манера на \
+             закате приносит Стиль, нарушенная клятва его отнимает. Тришна клянётся \
+             не упокаивать тела.",
+        ),
+    ]
+}
+
+// ---- Chapter 6: land, Style and the Crown ----
+
+const LAND: Hex = Hex::new(0, 2);
+
+fn land_scene() -> Scenario {
+    let mut s = Scenario::new(3, vec![seat(God::Trishna, 0, 3), seat(God::Zaga, -3, 0)]);
+    s.terrain = vec![
+        (LAND, Terrain::Settlement),
+        (Hex::new(-2, 1), Terrain::Settlement),
+        (Hex::new(1, 1), Terrain::Forest),
+        (Hex::new(2, -2), Terrain::Mountain),
+    ];
+    s.world.dawn = true;
+    s
+}
+
+fn land_steps() -> Vec<Step> {
+    vec![
+        Step::read(
+            "Поселения, храмы и Стол Ахамара в центре можно занять: просто войди туда. \
+             Отнять их можно так же — войдя следом.",
+        ),
+        Step::act(
+            "Займи поселение.",
+            |e, _| matches!(e, Event::Claimed { player, hex, .. } if *player == ME && *hex == LAND),
+            is_move_to(LAND),
+            "Войди в отмеченное поселение.",
+            |_, _| Some(Intent::Move { to: LAND }),
+        )
+        .hexes(&[LAND]),
+        Step::read(
+            "На твоей земле флаг. На каждом рассвете земля приносит Стиль — очки \
+             игры за столом (звезда на листе). У кого на рассвете больше всех Стиля, \
+             тот получает Венец и становится Доминирующим.",
+        ),
+        Step::act(
+            "Закончи ход — наступит ночь.",
+            |e, _| matches!(e, Event::RoundStarted { round: 2, .. }),
+            |_, _, i| matches!(i, Intent::EndTurn | Intent::Pass),
+            "Закончи ход: пробел или кнопка наверху.",
+            |_, _| Some(Intent::EndTurn),
+        ),
+        Step::act(
+            "Закончи ход ещё раз — придёт рассвет.",
+            |e, _| matches!(e, Event::WishDue { player } if *player == ME),
+            |_, _, i| matches!(i, Intent::EndTurn | Intent::Pass),
+            "Закончи ход: пробел или кнопка наверху.",
+            |_, _| Some(Intent::EndTurn),
+        ),
+        Step::act(
+            "Ты в Венце! Доминирующий на рассвете загадывает желание одному из \
+             богов: выбери бога и желание в панели. Бог ценит то, что ему по вкусу, \
+             и не любит повторов.",
+            |e, _| matches!(e, Event::WishGranted { player, .. } if *player == ME),
+            |_, _, i| matches!(i, Intent::Wish { .. }),
+            "Выбери желание в панели.",
+            |_, _| {
+                Some(Intent::Wish {
+                    god: God::Trishna,
+                    kind: WishKind::Strength,
+                    target: None,
+                    said: None,
+                })
+            },
+        ),
+        Step::read(
+            "Бог ответил. Удачное желание приносит Стиль, грубое — проклятие. Венец \
+             добавляет Угрозы, а отказ от желания — ещё больше. Венец держит тот, \
+             кто ведёт по Стилю.",
+        ),
+    ]
+}
+
+// ---- Chapter 7: the gods ----
+
+/// Trishna's temple on the small board, the hex beside it where the
+/// champion starts, and where the dummy stands (two hexes from her).
+fn gods_spots() -> (Hex, Hex, Hex) {
+    let board = Board::plain(3);
+    let temple = board.temple_of(God::Trishna);
+    let start = temple
+        .all_neighbors()
+        .into_iter()
+        .find(|h| h.ulength() == 3)
+        .expect("a temple halfway out touches the rim");
+    let rival = Hex::ZERO
+        .range(3)
+        .find(|h| *h != temple && h.unsigned_distance_to(start) == 2 && h.ulength() == 3)
+        .expect("room for the dummy");
+    (temple, start, rival)
+}
+
+fn gods_scene() -> Scenario {
+    let (temple, start, rival) = gods_spots();
+    let mut s = Scenario::new(
+        3,
+        vec![
+            SceneSeat::new(God::Trishna, start).hand(&["Искра"]),
+            SceneSeat::new(God::Zaga, rival),
+        ],
+    );
+    s.terrain = vec![
+        (temple, Terrain::Temple),
+        (Hex::new(-1, -1), Terrain::Forest),
+    ];
+    // One offering and a prayer from the edge: with her drift at dusk,
+    // Trishna darkens.
+    s.pressure[God::Trishna.index()] = 1;
+    s
+}
+
+fn gods_steps() -> Vec<Step> {
+    let (temple, _, _) = gods_spots();
+    vec![
+        Step::read(
+            "Справа вверху — пять богов. Каждый в своей стадии: светлой, средней или \
+             тёмной, и каждая стадия — закон для всего стола (строка под именем бога).",
+        ),
+        Step::act(
+            "Любая карта — подношение богу своей стихии. Брось «Искру» (огонь) в Загу: \
+             это подношение Тришне, смотри на панель богов.",
+            |e, _| {
+                matches!(e, Event::Offered { player: Some(p), god: God::Trishna, .. } if *p == ME)
+            },
+            is_play("Искра"),
+            "Сыграй «Искру» в Загу.",
+            play_demo("Искра"),
+        )
+        .card("Искра"),
+        Step::read(
+            "Подношение растит давление бога и остужает того, кого он гасит: огонь \
+             гасит металл, и Ахамар остыл. На закате бог с давлением +3 темнеет, с −3 \
+             светлеет. Тришна к тому же сама теплеет каждый закат.",
+        ),
+        Step::act(
+            "Молитва — тоже подношение: закончи ход в храме, и бог этого края примет \
+             её. Войди в храм Тришны.",
+            move |e, _| matches!(e, Event::Moved { player, to, .. } if *player == ME && *to == temple),
+            is_move_to(temple),
+            "Войди в отмеченный храм.",
+            move |_, _| Some(Intent::Move { to: temple }),
+        )
+        .hexes(&[temple]),
+        Step::act(
+            "Закончи ход здесь и дождись заката.",
+            |e, _| matches!(e, Event::StageChanged { god: God::Trishna, .. }),
+            |_, _, i| matches!(i, Intent::EndTurn | Intent::Pass),
+            "Закончи ход: пробел или кнопка наверху.",
+            |_, _| Some(Intent::EndTurn),
+        ),
+        Step::read(
+            "Тришна потемнела: теперь для всех действует её закон «Жажда». Твои \
+             подношения растят благосклонность бога к тебе: 3 — Знак (его карты \
+             дешевле), 6 — Голос (желания к нему сильнее), 9 — Избранник (его суровые \
+             законы тебя щадят). Наведи на бога — подсказка расскажет всё.",
+        ),
+    ]
+}
+
+// ---- Chapter 8: shadow and the guard ----
+
+const SHADOW_AT: Hex = Hex::new(0, 2);
+
+fn shadow_scene() -> Scenario {
+    let mut s = Scenario::new(
+        3,
+        vec![
+            seat(God::Trishna, 0, 2)
+                .hand(&["Пелена", "Сжечь как топливо"])
+                .threat(3),
+            seat(God::Zaga, -3, 0),
+        ],
+    );
+    s.corpses = vec![SHADOW_AT];
+    s.terrain = vec![
+        (Hex::new(1, 1), Terrain::Forest),
+        (Hex::new(-1, 1), Terrain::Swamp),
+        (Hex::new(2, -1), Terrain::Settlement),
+    ];
+    s.world.guard = true;
+    s
+}
+
+fn shadow_steps() -> Vec<Step> {
+    vec![
+        Step::read(
+            "Ночью в лесу, болоте или роще чемпион сам скрывается в конце хода. \
+             Скрытого соперники не видят, пока он не нападёт, не сыграет в них карту \
+             или не войдёт в людное место.",
+        ),
+        Step::act(
+            "«Пелена» скрывает сразу, где угодно. Сыграй её.",
+            |e, _| matches!(e, Event::Hid { player, .. } if *player == ME),
+            is_play("Пелена"),
+            "Сыграй «Пелену».",
+            play_demo("Пелена"),
+        )
+        .card("Пелена"),
+        Step::read(
+            "Ты в тени. Но Угрозу (оранжевые ячейки на листе) видно и так. Она растёт \
+             от нападений, шумных карт и Венца, а падает от карт земли и Покоя Заги.",
+        ),
+        Step::act(
+            "Ты стоишь на теле. Сожги его — «Сжечь как топливо»: это шумно, и Угроза \
+             дойдёт до 4.",
+            |e, _| matches!(e, Event::ThreatChanged { player, total, .. } if *player == ME && *total >= 4),
+            is_play("Сжечь как топливо"),
+            "Сыграй «Сжечь как топливо».",
+            play_demo("Сжечь как топливо"),
+        )
+        .card("Сжечь как топливо"),
+        Step::act(
+            "При Угрозе 4 между раундами выходит королевская гвардия. Закончи ход — \
+             и посмотри, за кем она придёт.",
+            |e, _| matches!(e, Event::GuardSpawned { .. }),
+            |_, _, i| matches!(i, Intent::EndTurn | Intent::Pass),
+            "Закончи ход: пробел или кнопка наверху.",
+            |_, _| Some(Intent::EndTurn),
+        ),
+        Step::read(
+            "Гвардия идёт за самым шумным, по два шага за раунд, и бьёт кубиками \
+             металла. Удар ранит, но снимает 3 Угрозы. Держи Угрозу ниже 4 — или будь \
+             готов к встрече.",
+        ),
+    ]
+}
+
+// ---- Chapter 9: winning ----
+
+/// Two settlements in two different lands, one step and then two more from
+/// the start.
+fn win_spots() -> (Hex, Hex, Hex) {
+    let board = Board::plain(3);
+    let start = Hex::new(0, 3);
+    let region = |h: Hex| board.tile(h).and_then(|t| t.region);
+    for first in start.all_neighbors() {
+        if !board.contains(first) || region(first).is_none() {
+            continue;
+        }
+        let second = Hex::ZERO.range(3).find(|&h| {
+            h != start
+                && region(h).is_some()
+                && region(h) != region(first)
+                && (1..=2).contains(&h.unsigned_distance_to(first))
+        });
+        if let Some(second) = second {
+            return (start, first, second);
+        }
+    }
+    unreachable!("two lands meet near every rim hex")
+}
+
+fn win_scene() -> Scenario {
+    let (start, first, second) = win_spots();
+    let mut s = Scenario::new(
+        3,
+        vec![SceneSeat::new(God::Trishna, start), seat(God::Zaga, -3, 0)],
+    );
+    s.terrain = vec![
+        (first, Terrain::Settlement),
+        (second, Terrain::Settlement),
+        (Hex::new(-1, 1), Terrain::Forest),
+    ];
+    s.open = vec![Condition::Registry { regions: 2 }];
+    s
+}
+
+fn win_steps() -> Vec<Step> {
+    let (_, first, second) = win_spots();
+    vec![
+        Step::read(
+            "Справа — условия победы. В партии их три открытых, общих для всех, и \
+             одно тайное, только твоё. Кто первым выполнит любое своё — побеждает. \
+             Наведи на условие — оно объяснит себя.",
+        ),
+        Step::read(
+            "Здесь одно условие: «Реестр» — держать поселения в двух краях. Край — \
+             земля одного бога; края видны по цвету клеток.",
+        ),
+        Step::act(
+            "Займи первое поселение.",
+            move |e, _| matches!(e, Event::Claimed { player, hex, .. } if *player == ME && *hex == first),
+            is_move_to(first),
+            "Войди в отмеченное поселение.",
+            move |_, _| Some(Intent::Move { to: first }),
+        )
+        .hexes(&[first]),
+        Step::act(
+            "Теперь второе — в другом краю. Кликни по нему, путь проложится сам.",
+            |e, _| matches!(e, Event::Victory { player, .. } if *player == ME),
+            |_, _, i| matches!(i, Intent::Move { .. } | Intent::Pass),
+            "Иди ко второму поселению.",
+            move |g, p| step_towards(g, p, second),
+        )
+        .hexes(&[second]),
+        Step::read(
+            "Победа! В настоящей партии условия труднее, а тайное засчитывается только \
+             с 8-го раунда — это запасной путь. Обучение пройдено: садись за стол!",
         ),
     ]
 }
@@ -683,10 +1088,29 @@ fn spawn(mut commands: Commands) {
 
 /// Over the battle, the panel moves up to the screen's top edge: the fight
 /// plays in the middle.
-fn place(game: Res<Match>, mut panel: Single<&mut Node, With<LessonPanel>>) {
-    let top = if game.battle.is_some() { 8.0 } else { 96.0 };
+fn place(
+    game: Res<Match>,
+    mut panel: Single<&mut Node, (With<LessonPanel>, Without<crate::gods_ui::DuskPanel>)>,
+    mut dusk: Single<&mut Node, With<crate::gods_ui::DuskPanel>>,
+) {
+    // The fight plays in the middle: up to the top edge. The wish panel
+    // takes the top half: down below it.
+    let top = if game.game.wish_due() == Some(game.human) {
+        492.0
+    } else if game.game.winner().is_some() {
+        // Under the end-of-match panel.
+        524.0
+    } else if game.battle.is_some() {
+        8.0
+    } else {
+        96.0
+    };
     if panel.top != px(top) {
         panel.top = px(top);
+    }
+    // The dusk scene goes below the lesson.
+    if dusk.top != px(316.0) {
+        dusk.top = px(316.0);
     }
 }
 
