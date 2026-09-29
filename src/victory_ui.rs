@@ -124,8 +124,22 @@ fn rebuild_conditions(
         .map(|&c| (c, false))
         .chain(secret.map(|c| (c, true)));
     for (condition, is_secret) in lines {
-        let row = condition_row(&mut commands, &font, &game, condition, is_secret);
+        let row = condition_row(
+            &mut commands,
+            &font,
+            &game,
+            game.human,
+            condition,
+            is_secret,
+        );
         commands.entity(sheet).add_child(row);
+    }
+    // Rivals' secrets learned through a wish: the view carries only those.
+    for p in g.players().filter(|&p| p != game.human) {
+        if let Some(condition) = g.secret(p) {
+            let row = condition_row(&mut commands, &font, &game, p, condition, true);
+            commands.entity(sheet).add_child(row);
+        }
     }
     let hint = commands
         .spawn((
@@ -147,11 +161,13 @@ fn condition_row(
     commands: &mut Commands,
     font: &UiFont,
     m: &Match,
+    owner: necromy_rules::PlayerId,
     condition: Condition,
     secret: bool,
 ) -> Entity {
     let g = &m.game;
-    let checks = g.checks_as(m.human, condition, secret);
+    let rival = owner != m.human;
+    let checks = g.checks_as(owner, condition, secret);
     let done = checks.iter().filter(|c| c.met()).count();
     let row = commands
         .spawn((
@@ -163,7 +179,9 @@ fn condition_row(
                 ..default()
             },
             Frame::Tip,
-            Accent(if secret {
+            Accent(if rival {
+                Color::srgb(0.85, 0.35, 0.3)
+            } else if secret {
                 Color::srgb(0.62, 0.45, 0.85)
             } else {
                 Color::srgb(0.66, 0.47, 0.24)
@@ -171,7 +189,14 @@ fn condition_row(
         ))
         .id();
     let (name, _) = names::condition(condition);
-    let head = if secret {
+    let head = if rival {
+        // A rival's secret a wish told the human (§7.3).
+        format!(
+            "{}: {name} · тайное  {done}/{}",
+            m.name(owner),
+            checks.len()
+        )
+    } else if secret {
         format!("{name} · тайное  {done}/{}", checks.len())
     } else {
         format!("{name}  {done}/{}", checks.len())

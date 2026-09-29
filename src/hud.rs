@@ -187,19 +187,25 @@ fn rebuild_hand(
         let usable = playable.contains(&card) || burning;
         let selected = selection.card == Some(card) || selection.burn.contains(&card);
         let look = CardLook {
+            name: game.game.card_mod(card).and_then(|m| m.name.clone()),
             usable: usable || selected,
             // Gold when chosen; the tutorial's violet on the card it asks for.
             outline: selected.then_some(Color::srgb(1.0, 0.82, 0.3)).or_else(|| {
                 (focus.card == Some(game.game.def(card).name))
                     .then_some(Color::srgb(0.75, 0.55, 1.0))
             }),
-            // A wish changed this copy (§7.3): say how, green for a gift.
+            // A wish changed this copy (§7.3): the god's line for a forged
+            // card, then how it changed, green for a gift.
             extra: game
                 .game
                 .card_mod(card)
-                .map(names::card_mod)
-                .into_iter()
-                .collect(),
+                .map(|m| {
+                    let line = m.flavor.clone().map(|f| (f, Color::srgb(0.85, 0.78, 0.6)));
+                    line.into_iter()
+                        .chain(std::iter::once(names::card_mod(m)))
+                        .collect()
+                })
+                .unwrap_or_default(),
             badge: crate::ring_ui::badge(&game.game, game.human, card),
             cost: Some(game.game.cost_of(game.human, card)),
         };
@@ -253,6 +259,7 @@ fn rebuild_incoming(
             extra.push((format!("цепочка: +{bonus}"), Color::srgb(1.0, 0.82, 0.3)));
         }
         let look = CardLook {
+            name: None,
             usable: true,
             outline: at_me.then_some(red),
             extra,
@@ -279,6 +286,7 @@ fn rebuild_incoming(
     } else if let Some(hit) = game.incoming_result.as_ref() {
         let lines = hit.lines.iter().map(|l| (format!("→ {l}"), red)).collect();
         let look = CardLook {
+            name: None,
             usable: true,
             outline: Some(red),
             extra: lines,

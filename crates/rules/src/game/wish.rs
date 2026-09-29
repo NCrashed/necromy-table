@@ -30,6 +30,9 @@ pub struct Said {
     pub speech: String,
     /// One line on why the grade.
     pub reason: String,
+    /// For a forged card: its name and a line of its own, in the god's
+    /// voice (§7.3). Empty when the wish forges nothing.
+    pub forged: Option<(String, String)>,
 }
 
 /// Prepared wishes: what the Dominant can ask for offline.
@@ -502,6 +505,11 @@ impl Game {
         said: Option<Said>,
         events: &mut Vec<Event>,
     ) {
+        // A forged card's name and line, as the model wrote them, cut to size.
+        let forged = said
+            .as_ref()
+            .and_then(|s| s.forged.clone())
+            .map(|(name, line)| (tidy(&name, FORGED_NAME), tidy(&line, FORGED_LINE)));
         let crude = wish.is_crude();
         // A model judges the words; the rules still hold crude wishes at 0 and
         // make a repeated wish worth less (§7.4, §7.5).
@@ -563,7 +571,7 @@ impl Game {
 
         let power = (grade + 1 + u8::from(wish.price.is_some())).min(4);
         for act in granted {
-            self.grant_act(player, god, act, power, events);
+            self.grant_act(player, god, act, power, forged.as_ref(), events);
         }
 
         // A god in its light stage gives without a twist.
@@ -614,6 +622,7 @@ impl Game {
         god: God,
         act: Act,
         power: u8,
+        forged: Option<&(String, String)>,
         events: &mut Vec<Event>,
     ) {
         let me = self.hex_of(player);
@@ -723,11 +732,21 @@ impl Game {
                 let card = CardId(self.defs.len() as u32);
                 self.defs.push(template);
                 self.hands[player.0 as usize].push(card);
+                // Named by the god when a model spoke for it (§7.3).
+                let (name, flavor) = match forged {
+                    Some((n, l)) => (
+                        Some(n.clone()).filter(|n| !n.is_empty()),
+                        Some(l.clone()).filter(|l| !l.is_empty()),
+                    ),
+                    None => (None, None),
+                };
                 self.mods.insert(
                     card,
                     CardMod {
                         cost: -1,
                         power: boost,
+                        name,
+                        flavor,
                         ..CardMod::default()
                     },
                 );
@@ -1150,4 +1169,18 @@ impl Game {
             self.damage(player, 1, events);
         }
     }
+}
+
+/// Letters a forged card's name may have, and its own line.
+pub const FORGED_NAME: usize = 28;
+pub const FORGED_LINE: usize = 90;
+
+/// A model's words for a card, one line, no quotes, at most `max` letters.
+fn tidy(text: &str, max: usize) -> String {
+    let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    one_line
+        .trim_matches(|c: char| matches!(c, '«' | '»' | '"' | '\'' | '.' | ' '))
+        .chars()
+        .take(max)
+        .collect()
 }

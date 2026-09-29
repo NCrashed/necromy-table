@@ -195,6 +195,7 @@ fn card_tip(
         &game.game,
         def,
         CardLook {
+            name: None,
             usable: true,
             outline: None,
             extra: Vec::new(),

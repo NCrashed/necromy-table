@@ -2551,8 +2551,8 @@ pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, 
 pub use trial::{Boon, TRIAL_ROUNDS, TRIALS_ON_BOARD, Trial, trial_face};
 pub use victory::{Check, CheckKind, Condition, OPEN_COUNT, REFUSAL_THREAT, SECRET_FROM_ROUND};
 pub use wish::{
-    Act, Bet, FORESEE, MAX_ACTS, Price, Said, TRIBUTE_THREAT, Truce, WAGER_STAKE, Wager, Wish,
-    WishKind, forge_template, god_terrain, likes_a_stake, taste_for,
+    Act, Bet, FORESEE, FORGED_LINE, FORGED_NAME, MAX_ACTS, Price, Said, TRIBUTE_THREAT, Truce,
+    WAGER_STAKE, Wager, Wish, WishKind, forge_template, god_terrain, likes_a_stake, taste_for,
 };
 pub use world::{Pantheon, STAGE_THRESHOLD, STAGES, TRISHNA_DRIFT};
 

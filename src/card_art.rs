@@ -359,6 +359,8 @@ fn make_card_art(
 
 /// How a card is drawn where it is shown.
 pub struct CardLook {
+    /// Its own name, for a card a god forged (§7.3); else the definition's.
+    pub name: Option<String>,
     /// Can be played (or burned) right now; otherwise it is dimmed.
     pub usable: bool,
     /// Gold outline: aimed or marked to burn, or the colour of a threat.
@@ -535,7 +537,7 @@ pub fn card_node(
                 ..at(6.0, ry as f32, CARD_W - 12.0, rh as f32)
             },
             children![(
-                Text::new(def.name),
+                Text::new(look.name.clone().unwrap_or_else(|| def.name.to_string())),
                 font.bold(12.0),
                 TextColor(INK.with_alpha(text_alpha)),
                 TextShadow::default(),

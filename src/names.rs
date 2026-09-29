@@ -625,3 +625,14 @@ pub fn trial_price(g: &necromy_rules::Game, god: God) -> &'static str {
         (God::Maya, _) => "весь Дух",
     }
 }
+
+/// A wager's bet said to the one it is on: "ты вступишь в бой".
+pub fn bet_you(bet: necromy_rules::Bet) -> &'static str {
+    use necromy_rules::Bet;
+    match bet {
+        Bet::Fight => "вступишь в бой",
+        Bet::Claim => "займёшь поселение или храм",
+        Bet::Fall => "падёшь",
+        Bet::Hide => "скроешься",
+    }
+}

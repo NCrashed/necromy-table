@@ -214,7 +214,9 @@ pub fn wish(
          - bless: карта в руке просящего дешевеет и усиливается, «благослови, пусть моя карта \
          расцветёт, окрепнет»; если он называет карту, укажи её в card\n\
          - blight: порча на лучшую карту в руке соперника: дороже и слабее; укажи target\n\
-         - forge: новая карта стихии бога в руку просящего, «дай оружие, дар, амулет»\n\
+         - forge: новая карта стихии бога в руку просящего, «дай оружие, дар, амулет»; \
+         придумай ей имя в forged_name (два-четыре слова, в твоём духе, по-русски) и одну \
+         строку в forged_line — что это за вещь, от твоего лица\n\
          - truce: мир с соперником до заката, нарушивший проклят; укажи target\n\
          - swap: просящий и соперник меняются местами; укажи target\n\
          - tribute: каждый соперник отдаёт просящему карту или получает Угрозу, «дань, \
@@ -303,9 +305,11 @@ pub fn wish(
             },
             "grade": { "type": "integer", "minimum": 0, "maximum": 3 },
             "speech": { "type": "string", "maxLength": 300 },
-            "reason": { "type": "string", "maxLength": 200 }
+            "reason": { "type": "string", "maxLength": 200 },
+            "forged_name": { "type": "string", "maxLength": 40 },
+            "forged_line": { "type": "string", "maxLength": 120 }
         },
-        "required": ["acts", "price", "grade", "speech", "reason"]
+        "required": ["acts", "price", "grade", "speech", "reason", "forged_name", "forged_line"]
     });
     (vec![Message::system(system), Message::user(user)], schema)
 }
@@ -392,6 +396,17 @@ pub fn read_wish(
         grade: v["grade"].as_u64().unwrap_or(1).min(3) as u8,
         speech: v["speech"].as_str().unwrap_or("").trim().to_string(),
         reason: v["reason"].as_str().unwrap_or("").trim().to_string(),
+        // Only a forging wish keeps the name the god gave the card.
+        forged: wish
+            .acts
+            .contains(&Act::Forge)
+            .then(|| {
+                (
+                    v["forged_name"].as_str().unwrap_or("").trim().to_string(),
+                    v["forged_line"].as_str().unwrap_or("").trim().to_string(),
+                )
+            })
+            .filter(|(name, _)| !name.is_empty()),
     };
     Ok((wish, said))
 }

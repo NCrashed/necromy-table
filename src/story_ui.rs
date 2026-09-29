@@ -27,6 +27,8 @@ use crate::ui_skin::{Accent, Frame};
 const VOICE: Color = Color::srgb(0.85, 0.80, 0.95);
 const DIM: Color = Color::srgb(0.72, 0.70, 0.64);
 const URGENT: Color = Color::srgb(0.95, 0.55, 0.4);
+/// A deal that already came true.
+const MET: Color = Color::srgb(0.55, 0.9, 0.5);
 /// A god's voice closes by itself after this long, if the human does not.
 const VOICE_SECS: f32 = 30.0;
 
@@ -166,7 +168,8 @@ fn rebuild_lines(
     commands.entity(*panel).despawn_related::<Children>();
     let g = &game.game;
     let lines: Vec<_> = g.lines_of(game.human).collect();
-    if lines.is_empty() {
+    let deals = deals(&game);
+    if lines.is_empty() && deals.is_empty() {
         return;
     }
     let sheet = commands
@@ -203,7 +206,11 @@ fn rebuild_lines(
     );
     let hint = stats::label(&mut commands, &font, "подробно ›", 11.0, false);
     commands.entity(header).add_children(&[scroll, title, hint]);
-    commands.entity(sheet).add_child(header);
+    if !lines.is_empty() {
+        commands.entity(sheet).add_child(header);
+    } else {
+        commands.entity(header).despawn();
+    }
     for line in lines {
         let row = commands
             .spawn((
@@ -242,7 +249,74 @@ fn rebuild_lines(
         commands.entity(row).add_children(&[head, body]);
         commands.entity(sheet).add_child(row);
     }
+    // Truces and wagers the human is in (§7.3), until dusk settles them.
+    if !deals.is_empty() {
+        let title = stats::label(&mut commands, &font, "Сделки до заката", 14.0, true);
+        commands.entity(sheet).add_child(title);
+    }
+    for (god, what, lit) in deals {
+        // Top-aligned: a wrapped line must not push the icon down.
+        let row = commands
+            .spawn(Node {
+                align_items: AlignItems::FlexStart,
+                column_gap: px(6.0),
+                ..default()
+            })
+            .id();
+        let icon = stats::icon_node(&mut commands, art.gods[god.index()].clone(), 18.0, true);
+        let body = text(
+            &mut commands,
+            font.text(11.0),
+            what,
+            if lit { MET } else { DIM },
+            // Beside an 18 px icon within the 250 px sheet.
+            196.0,
+        );
+        commands.entity(row).add_children(&[icon, body]);
+        commands.entity(sheet).add_child(row);
+    }
     commands.entity(*panel).add_child(sheet);
+}
+
+/// The human's truces and wagers, and wagers on them: the god who holds
+/// each, a line, and whether it already came true.
+fn deals(game: &Match) -> Vec<(necromy_rules::God, String, bool)> {
+    let g = &game.game;
+    let me = game.human;
+    let mut out = Vec::new();
+    for t in g.truces() {
+        if t.a == me || t.b == me {
+            let other = if t.a == me { t.b } else { t.a };
+            out.push((
+                t.god,
+                format!("Мир: ты и {} не сражаетесь", game.name(other)),
+                false,
+            ));
+        }
+    }
+    for w in g.wagers() {
+        if w.player == me {
+            let line = format!(
+                "Пари: {} {}{}",
+                game.name(w.target),
+                names::bet(w.bet),
+                if w.happened {
+                    " — уже сбылось"
+                } else {
+                    ""
+                }
+            );
+            out.push((w.god, line, w.happened));
+        } else if w.target == me {
+            let line = format!(
+                "{} ставит, что ты {}",
+                game.name(w.player),
+                names::bet_you(w.bet)
+            );
+            out.push((w.god, line, false));
+        }
+    }
+    out
 }
 
 /// A small button: `marker` says what it does.

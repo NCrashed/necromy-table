@@ -197,6 +197,8 @@ pub struct CardMod {
     pub timing: Option<Timing>,
     /// Its own name: a forged card's.
     pub name: Option<String>,
+    /// A line of its own under the text: a forged card's.
+    pub flavor: Option<String>,
 }
 
 impl CardMod {
@@ -213,6 +215,9 @@ impl CardMod {
         }
         if more.name.is_some() {
             self.name = more.name.clone();
+        }
+        if more.flavor.is_some() {
+            self.flavor = more.flavor.clone();
         }
     }
 }

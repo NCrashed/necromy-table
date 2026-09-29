@@ -3074,3 +3074,35 @@ fn bots_try_trials() {
     }
     assert!(tried > 0, "no bot ever tried a trial");
 }
+
+#[test]
+fn a_forged_card_takes_the_name_the_god_gave_it() {
+    let (mut g, me, _) = duel(3);
+    crown(&mut g, me);
+    let said = crate::game::Said {
+        text: "выкуй мне клинок".into(),
+        grade: 2,
+        speech: "Держи.".into(),
+        reason: "в духе".into(),
+        forged: Some((
+            "«Клинок голодного пира»".into(),
+            "Режет, пока не насытится — а он не насытится никогда, и это очень длинная строка"
+                .into(),
+        )),
+    };
+    g.apply(
+        me,
+        Intent::Wish {
+            god: God::Trishna,
+            wish: Wish::one(Act::Forge),
+            said: Some(said),
+        },
+    )
+    .unwrap();
+    let card = *g.hand(me).last().unwrap();
+    assert_eq!(g.card_name(card), "Клинок голодного пира", "quotes trimmed");
+    let flavor = g.card_mod(card).unwrap().flavor.clone().unwrap();
+    assert!(flavor.chars().count() <= crate::game::FORGED_LINE);
+    // The rules still read it as its template.
+    assert_eq!(g.def(card).name, forge_template(God::Trishna));
+}
