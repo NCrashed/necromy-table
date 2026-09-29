@@ -9,16 +9,22 @@
 //! (a line per thing: kind, variant, x and y as fractions of the window).
 //! Positions are fractions, so the world fits any window.
 //!
-//! Dev aid: `NECROMY_MENU_WORLD=fresh` starts empty and saves nothing,
-//! `=full` fills every kind to its cap (not saved either).
+//! Days and nights turn once there is a sun or a moon (`clock`): the sky
+//! lightens, what does not shine dims at night. Things can be picked up
+//! and moved (`drag`).
+//!
+//! Dev aids: `NECROMY_MENU_WORLD=fresh` starts empty and saves nothing,
+//! `=full` fills every kind to its cap (not saved either);
+//! `NECROMY_MENU_CLOCK=0.25` starts at noon (0.75 midnight).
 
 use std::collections::HashMap;
 
 use bevy::picking::Pickable;
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
+use bevy::window::{CursorIcon, PrimaryWindow, SystemCursorIcon};
 
-use crate::menu_stage::{FLOOR, scale};
+use crate::audio::Sound;
+use crate::menu_stage::{FLOOR, MenuPanel, scale};
 use crate::play::Match;
 
 /// What a god left.
@@ -201,11 +207,29 @@ pub struct MenuWorld {
     next: u64,
     /// Saved to disk as it changes.
     keep: bool,
+    /// The time of day, 0..1 round the clock: the first half is day (the
+    /// sun crosses the sky), the second night (the moon). It runs once
+    /// Ahamar has made either.
+    clock: f32,
 }
 
 impl MenuWorld {
     pub fn has(&self, kind: Kind) -> bool {
         self.things.iter().any(|t| t.kind == kind)
+    }
+
+    /// Days and nights pass once there is a sun or a moon.
+    fn cycling(&self) -> bool {
+        self.has(Kind::Sun) || self.has(Kind::Moon)
+    }
+
+    /// A thing dragged somewhere else.
+    fn set_pos(&mut self, id: u64, x: f32, y: f32) {
+        if let Some(t) = self.things.iter_mut().find(|t| t.id == id) {
+            t.x = x.clamp(0.0, 1.0);
+            t.y = y.clamp(0.0, 1.0);
+        }
+        self.save();
     }
 
     /// Something a god left. Past the kind's cap the oldest goes.
@@ -242,6 +266,8 @@ impl MenuWorld {
             things: Vec::new(),
             next: 0,
             keep: mode.is_none(),
+            // Starts at dusk: the menu's first look.
+            clock: 0.55,
         };
         match mode.as_deref() {
             Some("fresh") => {}
@@ -251,6 +277,10 @@ impl MenuWorld {
                     .and_then(|p| std::fs::read_to_string(p).ok())
                     .unwrap_or_default();
                 for line in text.lines() {
+                    if let Some(c) = line.strip_prefix("clock ") {
+                        world.clock = c.trim().parse().unwrap_or(world.clock);
+                        continue;
+                    }
                     let mut words = line.split_whitespace();
                     let (Some(kind), Some(v), Some(x), Some(y)) =
                         (words.next(), words.next(), words.next(), words.next())
@@ -266,6 +296,13 @@ impl MenuWorld {
                 }
             }
         }
+        // `NECROMY_MENU_CLOCK=0.25`: noon, 0.75 midnight, for screenshots.
+        if let Some(c) = std::env::var("NECROMY_MENU_CLOCK")
+            .ok()
+            .and_then(|c| c.parse().ok())
+        {
+            world.clock = c;
+        }
         world
     }
 
@@ -279,6 +316,8 @@ impl MenuWorld {
                 let y = (k as f32 * 0.414_213).fract();
                 let y = match kind {
                     Kind::Cloud => 0.04 + 0.25 * y,
+                    // On their ground line, where a god leaves them.
+                    kind if kind.grounded() => 0.0,
                     _ => y,
                 };
                 self.push(kind, n, x, y, false);
@@ -294,11 +333,12 @@ impl MenuWorld {
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let text: String = self
+        let mut text: String = self
             .things
             .iter()
             .map(|t| format!("{} {} {:.4} {:.4}\n", t.kind.word(), t.variant, t.x, t.y))
             .collect();
+        text.push_str(&format!("clock {:.4}\n", self.clock));
         let _ = std::fs::write(path, text);
     }
 }
@@ -311,8 +351,11 @@ impl Plugin for MenuWorldPlugin {
             .add_systems(Startup, (load_art, spawn_roots))
             .add_systems(
                 Update,
-                (sync, animate).chain().run_if(not(resource_exists::<Match>)),
+                (sync, drag, sky, animate)
+                    .chain()
+                    .run_if(not(resource_exists::<Match>)),
             )
+            .init_resource::<Drag>()
             .add_systems(Update, clear.run_if(resource_added::<Match>));
     }
 }
@@ -342,21 +385,32 @@ fn spawn_roots(mut commands: Commands) {
 }
 
 #[allow(clippy::type_complexity)]
-fn clear(mut commands: Commands, roots: Query<Entity, Or<(With<Back>, With<Front>)>>) {
+fn clear(
+    mut commands: Commands,
+    roots: Query<Entity, Or<(With<Back>, With<Front>)>>,
+    window: Single<Entity, With<PrimaryWindow>>,
+) {
     for root in &roots {
         commands.entity(root).despawn();
     }
+    commands.entity(*window).insert(CursorIcon::default());
 }
 
 #[derive(Resource)]
 struct WorldArt {
     images: HashMap<&'static str, Handle<Image>>,
     animals: Vec<Handle<Image>>,
+    /// An animal carried by the mouse, wriggling: `animal-<name>-struggle.png`,
+    /// frame 0 still, the rest a loop.
+    struggles: Vec<Option<Handle<Image>>>,
     ground_top: Handle<Image>,
     ground_fill: Handle<Image>,
     firefly: Handle<Image>,
     /// Bhava's tree as it grows, for a fresh `grow-4`.
     growth: [Handle<Image>; 3],
+    /// A tree's leaves in the wind: `tree-<file>.png`, a row of frames the
+    /// size of its still picture, frame 0 the still.
+    rustle: HashMap<&'static str, Handle<Image>>,
 }
 
 fn load_art(mut commands: Commands, assets: Res<AssetServer>, mut images: ResMut<Assets<Image>>) {
@@ -372,10 +426,31 @@ fn load_art(mut commands: Commands, assets: Res<AssetServer>, mut images: ResMut
             .iter()
             .map(|(name, _, _)| assets.load(format!("props/menu/animal-{name}.png")))
             .collect(),
+        struggles: ANIMALS
+            .iter()
+            .map(|(name, _, _)| {
+                let path = format!("props/menu/animal-{name}-struggle.png");
+                std::path::Path::new("assets")
+                    .join(&path)
+                    .exists()
+                    .then(|| assets.load(path))
+            })
+            .collect(),
         ground_top: assets.load("props/menu/ground-top.png"),
         ground_fill: assets.load("props/menu/ground-fill.png"),
         firefly: images.add(firefly()),
         growth: [1, 2, 3].map(|n| assets.load(format!("props/menu/grow-{n}.png"))),
+        rustle: Kind::Tree
+            .files()
+            .iter()
+            .filter_map(|&file| {
+                let path = format!("props/menu/tree-{file}.png");
+                std::path::Path::new("assets")
+                    .join(&path)
+                    .exists()
+                    .then(|| (file, assets.load(path)))
+            })
+            .collect(),
     });
 }
 
@@ -427,6 +502,8 @@ struct Shown {
     frames: usize,
     /// An animal's wandering.
     walk: Option<Wander>,
+    /// Dropped above its ground: where its base is and how fast it falls.
+    fall: Option<(f32, f32)>,
 }
 
 struct Wander {
@@ -522,6 +599,7 @@ fn sync(
                         t: 0.0,
                         east: thing.id % 2 == 0,
                     }),
+                    fall: None,
                 },
                 node,
                 Node {
@@ -568,19 +646,325 @@ fn drift(t: f32, seed: f32) -> Vec2 {
     )
 }
 
-#[allow(clippy::type_complexity)]
+/// Seconds for a whole day and night.
+const DAY_SECS: f32 = 240.0;
+/// Pixels a second squared a dropped thing falls with.
+const GRAVITY: f32 = 3000.0;
+/// Below this speed (pixels a second) a landing thing stays down.
+const SETTLE: f32 = 260.0;
+
+/// A thing's own number in 0..1: its phase in every wander and bob.
+fn seed_of(id: u64) -> f32 {
+    (id as f32 * 0.618_034).fract()
+}
+
+/// The sky's light, 0 at night to 1 at noon, or `None` while nobody has
+/// made the sun or the moon: the menu keeps its first, timeless dusk.
+fn daylight(world: &MenuWorld) -> Option<f32> {
+    world.cycling().then(|| {
+        let c = world.clock.rem_euclid(1.0);
+        if c < 0.5 {
+            (c * std::f32::consts::TAU).sin().max(0.0)
+        } else {
+            0.0
+        }
+    })
+}
+
+/// How far across the sky the sun (the first half of the clock) or the
+/// moon (the second) has come, 0..1, if it is up.
+fn sky_way(kind: Kind, clock: f32) -> Option<f32> {
+    let c = clock.rem_euclid(1.0);
+    match kind {
+        Kind::Sun if c < 0.5 => Some(c * 2.0),
+        Kind::Moon if c >= 0.5 => Some((c - 0.5) * 2.0),
+        _ => None,
+    }
+}
+
+/// The middle of the sun or the moon `u` of the way across: up from behind
+/// the horizon on the left, over the top, down on the right.
+fn sky_point(u: f32, w: f32, h: f32, s: f32, size: Vec2) -> Vec2 {
+    let horizon = h - FLOOR - 20.0 * s + size.y * 0.6;
+    let top = 0.1 * h + size.y / 2.0;
+    let lift = (u * std::f32::consts::PI).sin();
+    Vec2::new((0.06 + 0.88 * u) * w, horizon - (horizon - top) * lift)
+}
+
+/// How much of the day's light there is, 0 at night to 1 by day (1 while
+/// no day turns), eased.
+fn day_of(world: &MenuWorld) -> f32 {
+    daylight(world).map_or(1.0, |l| {
+        let d = (l / 0.45).clamp(0.0, 1.0);
+        d * d * (3.0 - 2.0 * d)
+    })
+}
+
+/// The colour the night lays over what does not shine by itself.
+fn tint_of(world: &MenuWorld) -> Color {
+    Color::srgb(0.55, 0.58, 0.78).mix(&Color::WHITE, day_of(world))
+}
+
+/// The night's colour over the champions walking by: half the world's, so
+/// they still read against it.
+pub fn champion_tint(world: &MenuWorld) -> Color {
+    tint_of(world).mix(&Color::WHITE, 0.5)
+}
+
+/// Things that shine by their own light and keep it at night.
+fn glows(kind: Kind) -> bool {
+    matches!(
+        kind,
+        Kind::Sun | Kind::Moon | Kind::Spirit | Kind::Firefly | Kind::Glowcap
+    )
+}
+
+/// Can be picked up with the mouse.
+fn draggable(kind: Kind) -> bool {
+    !matches!(kind, Kind::Ground | Kind::Firefly)
+}
+
+/// The thing under the mouse being carried, if any.
+#[derive(Resource, Default)]
+struct Drag {
+    id: Option<u64>,
+    /// The cursor's offset from the thing's top left corner.
+    grab: Vec2,
+    /// Where the top left corner goes this frame.
+    at: Vec2,
+}
+
+/// Whether the picture has an opaque pixel under a point of the node.
+fn opaque_at(image: &Image, node: &ImageNode, local: Vec2, k: f32, size: Vec2) -> bool {
+    let Some(data) = image.data.as_ref() else {
+        return false;
+    };
+    let mut t = (local / k).floor();
+    if t.x < 0.0 || t.y < 0.0 || t.x >= size.x || t.y >= size.y {
+        return false;
+    }
+    if node.flip_x {
+        t.x = size.x - 1.0 - t.x;
+    }
+    let origin = node.rect.map_or(Vec2::ZERO, |r| r.min);
+    let (px, py) = ((origin.x + t.x) as usize, (origin.y + t.y) as usize);
+    let width = image.width() as usize;
+    data.get((py * width + px) * 4 + 3).is_some_and(|&a| a > 0)
+}
+
+/// Picks things up and puts them down. Mountains stay where they are put,
+/// what stands on the ground falls back to it, clouds and spirits hang
+/// where they are let go; the sun and the moon only slide along their way
+/// through the sky, and the day turns with them.
+#[allow(clippy::too_many_arguments)]
+fn drag(
+    mut commands: Commands,
+    time: Res<Time>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    window: Single<(Entity, &Window), With<PrimaryWindow>>,
+    buttons: Query<&Interaction>,
+    panel: Query<(&ComputedNode, &UiGlobalTransform), With<MenuPanel>>,
+    images: Res<Assets<Image>>,
+    mut world: ResMut<MenuWorld>,
+    mut carried: ResMut<Drag>,
+    mut shown: Query<(Entity, &mut Shown, &ImageNode, &Node)>,
+    mut cursor_state: Local<u8>,
+    mut sounds: MessageWriter<Sound>,
+) {
+    let (window_entity, window) = *window;
+    let (w, h) = (window.width(), window.height());
+    let s = scale(h);
+    let now = time.elapsed_secs();
+    let cursor = window.cursor_position();
+    let px_of = |v: Val| if let Val::Px(p) = v { p } else { 0.0 };
+
+    // What is under the mouse: the frontmost opaque pixel.
+    let over_menu = buttons.iter().any(|i| *i != Interaction::None)
+        || cursor.is_some_and(|c| {
+            panel.iter().any(|(node, at)| {
+                let centre = at.affine().translation * node.inverse_scale_factor();
+                let size = node.size() * node.inverse_scale_factor();
+                Rect::from_center_size(centre, size).contains(c)
+            })
+        });
+    let under = cursor.filter(|_| !over_menu && carried.id.is_none()).and_then(|c| {
+        shown
+            .iter()
+            .filter(|(_, sh, _, _)| sh.gone.is_none() && draggable(sh.thing.kind))
+            .filter(|(_, sh, image, node)| {
+                let top_left = Vec2::new(px_of(node.left), px_of(node.top));
+                images
+                    .get(&image.image)
+                    .is_some_and(|picture| opaque_at(picture, image, c - top_left, s, sh.size))
+            })
+            .max_by_key(|(_, sh, _, _)| (sh.thing.kind.z(), sh.id))
+            .map(|(e, sh, _, node)| (e, sh.id, Vec2::new(px_of(node.left), px_of(node.top))))
+    });
+
+    if mouse.just_pressed(MouseButton::Left)
+        && let (Some((entity, id, top_left)), Some(c)) = (under, cursor)
+    {
+        carried.id = Some(id);
+        carried.grab = c - top_left;
+        carried.at = top_left;
+        sounds.write(Sound::new("menu-pick"));
+        // An animal minds being picked up.
+        if shown.get(entity).is_ok_and(|(_, sh, _, _)| sh.thing.kind == Kind::Animal) {
+            sounds.write(Sound::new("menu-squeak"));
+        }
+        // Over the menu while carried, so it is never lost behind it.
+        commands.entity(entity).insert(GlobalZIndex(54));
+    }
+
+    if let (Some(id), Some(c)) = (carried.id, cursor) {
+        carried.at = c - carried.grab;
+        let kind = shown
+            .iter()
+            .find(|(_, sh, _, _)| sh.id == id)
+            .map(|(_, sh, _, _)| sh.thing.kind);
+        // The sun and the moon wind the clock as they go.
+        if let Some(kind @ (Kind::Sun | Kind::Moon)) = kind {
+            let u = ((c.x / w - 0.06) / 0.88).clamp(0.0, 1.0);
+            world.clock = if kind == Kind::Sun { u / 2.0 } else { 0.5 + u / 2.0 };
+        }
+    }
+
+    if mouse.just_released(MouseButton::Left)
+        && let Some(id) = carried.id.take()
+    {
+        let at = carried.at;
+        if let Some((entity, mut sh, _, _)) = shown.iter_mut().find(|(_, sh, _, _)| sh.id == id)
+        {
+            commands.entity(entity).remove::<GlobalZIndex>();
+            let size = sh.size * s;
+            let centre = at + size / 2.0;
+            let seed = seed_of(sh.id);
+            let mut thing = sh.thing;
+            match thing.kind {
+                Kind::Sun | Kind::Moon => {}
+                Kind::Mountain => {
+                    // Its base stays where it was let go.
+                    thing.x = centre.x / w;
+                    thing.y = (at.y + size.y - sh.empty * s) / h;
+                    sounds.write(Sound::new("menu-thump").at(0.7));
+                }
+                Kind::Cloud => {
+                    let span = w + size.x;
+                    let speed = (4.0 + 3.0 * seed) * s;
+                    thing.x = ((centre.x + size.x / 2.0 - now * speed) / span).rem_euclid(1.0);
+                    thing.y = (at.y + size.y / 2.0) / h;
+                }
+                Kind::Spirit => {
+                    let d = drift(now * 1.5, seed);
+                    let way = if sh.id % 2 == 0 { 1.0 } else { -1.0 };
+                    let bob = (now * 1.7 + seed * 9.0).sin() * 4.0 * s;
+                    thing.x = (centre.x / w - way * now * 0.012 - d.x * 0.05).rem_euclid(1.0);
+                    thing.y = (((at.y + size.y / 2.0 - bob) / h - 0.15 - 0.15 * d.y) / 0.6)
+                        .clamp(0.0, 1.0);
+                }
+                _ => {
+                    // Down to the ground from where it was let go.
+                    thing.x = (centre.x / w).clamp(0.02, 0.98);
+                    sh.fall = Some((at.y + size.y, 0.0));
+                    if let Some(wander) = sh.walk.as_mut() {
+                        wander.x = thing.x;
+                        wander.to = thing.x;
+                        wander.t = 0.0;
+                        wander.rest_until = now + 1.5;
+                    }
+                }
+            }
+            sh.thing = thing;
+            world.set_pos(id, thing.x, thing.y);
+        }
+    }
+
+    // The hand: open over what can be taken, closed while carrying.
+    let state = if carried.id.is_some() {
+        2
+    } else if under.is_some() {
+        1
+    } else {
+        0
+    };
+    if *cursor_state != state {
+        *cursor_state = state;
+        let icon = match state {
+            2 => SystemCursorIcon::Grabbing,
+            1 => SystemCursorIcon::Grab,
+            _ => SystemCursorIcon::Default,
+        };
+        commands.entity(window_entity).insert(CursorIcon::from(icon));
+    }
+}
+
+/// The day turns (once there is a sun or a moon) and the sky follows it:
+/// night blue-black, a warm dusk, a slate day.
+fn sky(
+    time: Res<Time>,
+    mut world: ResMut<MenuWorld>,
+    carried: Res<Drag>,
+    mut back: Single<&mut BackgroundColor, With<Back>>,
+    mut since_save: Local<f32>,
+) {
+    let dt = time.delta_secs();
+    let winding = carried.id.is_some_and(|id| {
+        world
+            .things
+            .iter()
+            .any(|t| t.id == id && matches!(t.kind, Kind::Sun | Kind::Moon))
+    });
+    if world.cycling() && !winding {
+        world.clock = (world.clock + dt / DAY_SECS).rem_euclid(1.0);
+        *since_save += dt;
+        if *since_save > 20.0 {
+            *since_save = 0.0;
+            world.save();
+        }
+    }
+    let colour = match daylight(&world) {
+        None => GROUND,
+        Some(light) => {
+            let day = Color::srgb(0.22, 0.30, 0.44);
+            let dusk = Color::srgb(0.34, 0.18, 0.24);
+            let d = (light / 0.45).clamp(0.0, 1.0);
+            let base = GROUND.mix(&day, d * d * (3.0 - 2.0 * d));
+            // Warm at sunrise and sunset, while the sun is low.
+            let c = world.clock.rem_euclid(1.0);
+            let low = if c < 0.5 {
+                (1.0 - (light - 0.1).abs() / 0.18).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            base.mix(&dusk, low * 0.55)
+        }
+    };
+    if back.0 != colour {
+        back.0 = colour;
+    }
+}
+
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn animate(
     time: Res<Time>,
     art: Res<WorldArt>,
+    images: Res<Assets<Image>>,
+    world: Res<MenuWorld>,
+    carried: Res<Drag>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut shown: Query<(&mut Shown, &mut ImageNode, &mut Node, Option<&Children>)>,
     mut fills: Query<&mut ImageNode, Without<Shown>>,
+    mut sounds: MessageWriter<Sound>,
 ) {
     let now = time.elapsed_secs();
     let dt = time.delta_secs();
     let (w, h) = (window.width(), window.height());
     let s = scale(h);
     let floor = h - FLOOR;
+    // Night dims and cools what does not shine by itself.
+    let light = daylight(&world);
+    let day = day_of(&world);
+    let tint = tint_of(&world);
     for (mut shown, mut image, mut node, children) in &mut shown {
         let thing = shown.thing;
         let kind = thing.kind;
@@ -598,9 +982,11 @@ fn animate(
         if let Some(gone) = shown.gone {
             alpha = alpha.min(1.0 - (now - gone) / 1.2);
         }
-        let seed = (shown.id as f32 * 0.618_034).fract();
+        let seed = seed_of(shown.id);
         let size = shown.size * k;
-        let (x, mut y);
+        let colour = if glows(kind) { Color::WHITE } else { tint };
+        let carried_here = carried.id == Some(shown.id);
+        let (mut x, mut y);
         match kind {
             Kind::Ground => {
                 // Rises from below the window.
@@ -621,6 +1007,7 @@ fn animate(
                 if image.image_mode != tiled {
                     image.image_mode = tiled;
                 }
+                let want = colour.with_alpha(alpha);
                 for child in children.into_iter().flatten() {
                     if let Ok(mut fill) = fills.get_mut(*child) {
                         let tiled = NodeImageMode::Tiled {
@@ -631,11 +1018,13 @@ fn animate(
                         if fill.image_mode != tiled {
                             fill.image_mode = tiled;
                         }
-                        fill.color.set_alpha(alpha);
+                        if fill.color != want {
+                            fill.color = want;
+                        }
                     }
                 }
-                if (image.color.alpha() - alpha).abs() > 0.004 {
-                    image.color.set_alpha(alpha);
+                if image.color != want {
+                    image.color = want;
                 }
                 continue;
             }
@@ -647,8 +1036,21 @@ fn animate(
                 y = thing.y * h + size.y / 2.0;
             }
             Kind::Sun | Kind::Moon => {
-                x = thing.x * w;
-                y = thing.y * h + size.y / 2.0 + (1.0 - (age / 2.0).clamp(0.0, 1.0)) * 30.0;
+                // Along its way over the sky, by the clock; below the
+                // horizon while it is the other one's turn.
+                match sky_way(kind, world.clock) {
+                    Some(u) => {
+                        let p = sky_point(u, w, h, s, size);
+                        x = p.x;
+                        y = p.y + size.y / 2.0;
+                        alpha *= ((u * std::f32::consts::PI).sin() * 5.0).min(1.0);
+                    }
+                    None => {
+                        x = -size.x;
+                        y = h + size.y;
+                        alpha = 0.0;
+                    }
+                }
             }
             Kind::Spirit => {
                 // Across the whole window (behind the menu now and then),
@@ -667,14 +1069,17 @@ fn animate(
                 x = (thing.x + d.x * 0.12).rem_euclid(1.0) * w;
                 y = (0.2 + 0.7 * thing.y + d.y * 0.1) * h + size.y / 2.0;
                 alpha *= ((now * (1.3 + seed) + seed * 11.0).sin() * 0.5 + 0.5).powi(2);
+                // Faint by day.
+                alpha *= 1.0 - 0.7 * day * f32::from(light.is_some());
             }
             Kind::Animal => {
                 let (_, gait, speed) = ANIMALS[thing.variant];
                 // Frame 0 stands; the rest are the hop or the walk.
                 let moving = shown.frames.saturating_sub(1).max(1);
+                let falling = shown.fall.is_some() || carried_here;
                 let wander = shown.walk.as_mut().expect("an animal wanders");
                 let mut frame = 0usize;
-                if now >= wander.rest_until {
+                if now >= wander.rest_until && !falling {
                     wander.t += dt;
                     let east = wander.to > wander.x;
                     wander.east = east;
@@ -707,7 +1112,24 @@ fn animate(
                 if image.flip_x != flip {
                     image.flip_x = flip;
                 }
-                // The frame, from the row's width (read when shown).
+                // Held up by the mouse, it wriggles and kicks.
+                let struggle = art.struggles[thing.variant]
+                    .as_ref()
+                    .filter(|_| carried_here)
+                    .and_then(|strip| Some((strip, images.get(strip)?)));
+                let sheet = match struggle {
+                    Some((strip, picture)) => {
+                        let loops = ((picture.width() / ANIMAL_CELL) as usize)
+                            .saturating_sub(1)
+                            .max(1);
+                        frame = 1 + (now * 12.0) as usize % loops;
+                        strip.clone()
+                    }
+                    None => art.animals[thing.variant].clone(),
+                };
+                if image.image != sheet {
+                    image.image = sheet;
+                }
                 image.rect = Some(Rect::new(
                     frame as f32 * ANIMAL_CELL as f32,
                     0.0,
@@ -721,24 +1143,77 @@ fn animate(
             }
         }
         if kind.grounded() {
-            // The base on the ground line; a mountain rises into place.
+            // The node's bottom: the art's base on its line, a mountain on
+            // the horizon or where it was put, rising into place when new.
+            let base = if kind == Kind::Mountain && thing.y > 0.0 {
+                thing.y * h
+            } else {
+                floor + kind.sink() * s
+            };
+            let rest = base + shown.empty * k;
             let rise = if kind == Kind::Mountain {
                 let u = (age / 2.5).clamp(0.0, 1.0);
                 (1.0 - u * (2.0 - u)) * size.y
             } else {
                 0.0
             };
-            y = floor + kind.sink() * s + shown.empty * k + rise;
+            y = rest + rise;
+            // A dropped thing falls back down to its ground and bounces:
+            // an animal springs up again, a tree or a stone barely.
+            if let Some((bottom, speed)) = shown.fall {
+                let speed = speed + GRAVITY * dt;
+                let bottom = bottom + speed * dt;
+                if bottom >= rest {
+                    let give = if kind == Kind::Animal { 0.38 } else { 0.18 };
+                    shown.fall = (speed > SETTLE).then_some((rest, -speed * give));
+                    // Every touch of the ground is heard, softer as it
+                    // settles; heavy things thump.
+                    if speed > SETTLE * 0.5 {
+                        let name = match kind {
+                            Kind::Tree | Kind::Rock => "menu-thump",
+                            _ => "menu-thud",
+                        };
+                        sounds.write(Sound::new(name).at((speed / 1600.0).clamp(0.2, 1.0)));
+                    }
+                } else {
+                    shown.fall = Some((bottom, speed));
+                    y = bottom;
+                }
+            }
         }
-        // A fresh tree grows: sprout, sapling, young tree, then in blossom.
-        if kind == Kind::Tree && thing.variant == 0 {
-            let want = if age < 1.05 {
-                art.growth[((age / 0.35) as usize).min(2)].clone()
+        // Trees: a fresh `grow-4` grows from a sprout, then every tree
+        // rustles in the wind.
+        if kind == Kind::Tree {
+            let file = kind.files()[thing.variant];
+            let (want, rect) = if thing.variant == 0 && age < 1.05 {
+                (art.growth[((age / 0.35) as usize).min(2)].clone(), None)
+            } else if let Some(strip) = art.rustle.get(file)
+                && let Some(picture) = images.get(strip)
+            {
+                let cell = shown.size.x;
+                let frames = ((picture.width() as f32 / cell) as usize).max(1);
+                let frame = (now * 5.0 + seed * 17.0) as usize % frames;
+                let r = Rect::new(frame as f32 * cell, 0.0, (frame + 1) as f32 * cell, shown.size.y);
+                (strip.clone(), Some(r))
             } else {
-                art.images["grow-4"].clone()
+                (art.images[file].clone(), None)
             };
             if image.image != want {
                 image.image = want;
+            }
+            if image.rect != rect {
+                image.rect = rect;
+            }
+        }
+        if carried_here {
+            x = carried.at.x + size.x / 2.0;
+            y = carried.at.y + size.y;
+            alpha = alpha.max(0.9);
+            // The sun and the moon keep to their way: drawn as the clock says.
+            if let Some(u) = sky_way(kind, world.clock) {
+                let p = sky_point(u, w, h, s, size);
+                x = p.x;
+                y = p.y + size.y / 2.0;
             }
         }
         let left = px((x - size.x / 2.0).round());
@@ -749,8 +1224,9 @@ fn animate(
             node.width = px(size.x);
             node.height = px(size.y);
         }
-        if (image.color.alpha() - alpha).abs() > 0.004 {
-            image.color.set_alpha(alpha.clamp(0.0, 1.0));
+        let want = colour.with_alpha(alpha.clamp(0.0, 1.0));
+        if image.color != want {
+            image.color = want;
         }
     }
 }

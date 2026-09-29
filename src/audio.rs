@@ -346,6 +346,9 @@ impl Sound {
 fn level(name: &str) -> f32 {
     match name {
         "step" => 0.25,
+        "menu-pick" => 0.4,
+        "menu-squeak" | "menu-thud" => 0.5,
+        "menu-thump" => 0.6,
         "card-draw" | "card-flip" | "die-die" => 0.45,
         "die-table" | "dice-shake" | "swing" | "spirit" | "offer" | "guard-march"
         | "poison-bite" => 0.55,

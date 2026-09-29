@@ -1283,10 +1283,13 @@ fn place(
     images: Res<Assets<Image>>,
     mut feet_rows: Local<HashMap<(AssetId<Image>, usize), usize>>,
     window: Single<&Window, With<PrimaryWindow>>,
+    world: Res<MenuWorld>,
     mut visitors: Query<(&Visitor, &mut ImageNode, &mut Node)>,
 ) {
     let s = scale(window.height());
     let size = CELL as f32 * s;
+    // Night in the menu's world dims them a little too.
+    let tint = crate::menu_world::champion_tint(&world);
     for (v, mut image, mut node) in &mut visitors {
         let (sheet, row, frame) = v.pose;
         let (handle, layout, columns) = match sheet {
@@ -1309,6 +1312,9 @@ fn place(
         });
         if image.texture_atlas != atlas {
             image.texture_atlas = atlas;
+        }
+        if image.color != tint {
+            image.color = tint;
         }
         let left = px((v.feet.x - size / 2.0).round());
         let top = px((v.feet.y - (feet as f32 + 1.0) * s).round());
