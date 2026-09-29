@@ -127,9 +127,9 @@ pub fn taste(kind: necromy_rules::TasteKind) -> &'static str {
     use necromy_rules::TasteKind;
     match kind {
         TasteKind::Balance => "Равновесие: ценится всё понемногу",
-        TasteKind::Land => "Земля: владения стоят вдвое",
-        TasteKind::Stage => "Сцена: земля почти ничего не стоит, характер вдвое",
-        TasteKind::Arena => "Арена: победы стоят вдвое, храмы ничего",
+        TasteKind::Land => "Стол: место за Столом Ахамара стоит втрое",
+        TasteKind::Stage => "Сцена: верность характеру стоит вдвое",
+        TasteKind::Arena => "Арена: победы стоят вдвое",
     }
 }
 
@@ -144,6 +144,32 @@ pub fn style_reason(reason: necromy_rules::StyleReason) -> &'static str {
         StyleReason::Story => "сюжет",
         StyleReason::Trial => "испытание",
         StyleReason::Item => "плату тёмному богу",
+        StyleReason::First => "первенство",
+        StyleReason::Variety => "разнообразие дел",
+    }
+}
+
+/// What was done first at the table (§21.5), as the feed says it: «первым …».
+pub fn novelty(n: necromy_rules::Novelty) -> String {
+    use necromy_rules::Novelty;
+    match n {
+        Novelty::WonBattle => "выигрывает бой".into(),
+        Novelty::FelledGuard => "повергает гвардию".into(),
+        Novelty::LaidToRest => "упокаивает мертвеца".into(),
+        Novelty::SlewBeast => "одолевает зверя".into(),
+        Novelty::PassedTrial => "проходит испытание".into(),
+        Novelty::TookSettlement => "занимает поселение".into(),
+        Novelty::TookTable => "садится за Стол Ахамара".into(),
+        Novelty::Rebuilt => "отстраивает руины".into(),
+        Novelty::Sacrificed => "отдаёт предмет богу".into(),
+        Novelty::Hid => "уходит в тень".into(),
+        Novelty::FinishedLine => "доводит до конца свою историю".into(),
+        Novelty::Wished(kind) => format!("просит «{}»", wish(kind).to_lowercase()),
+        Novelty::Brought(f) => format!("приносит в мир: {}", feature(f).0.to_lowercase()),
+        Novelty::PlayedFor(f) => format!(
+            "играет карту новой механики: {}",
+            feature(f).0.to_lowercase()
+        ),
     }
 }
 
@@ -155,10 +181,10 @@ pub fn terrain(terrain: necromy_rules::Terrain) -> (&'static str, &'static str) 
         Terrain::Forest => ("Лес", "идти дороже"),
         Terrain::Mountain => ("Горы", "идти дороже; защитнику +1 кубик"),
         Terrain::Swamp => ("Топь", "обычный проход"),
-        Terrain::Settlement => ("Поселение", "войди — займёшь; на рассвете даёт Стиль"),
+        Terrain::Settlement => ("Поселение", "войди — займёшь"),
         Terrain::Temple => (
             "Храм",
-            "займи ради Стиля; конец хода здесь — молитва богу края",
+            "конец хода здесь — молитва богу края; здесь рука перебирается без потерь",
         ),
         Terrain::Ruins => ("Руины", "пока без особых свойств"),
         Terrain::Stones => ("Камни силы", "пока без особых свойств"),

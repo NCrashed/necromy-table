@@ -685,6 +685,11 @@ pub enum Event {
         god: God,
         player: Option<PlayerId>,
     },
+    /// `player` did something first at this table (§21.5); Style follows.
+    First {
+        player: PlayerId,
+        novelty: novelty::Novelty,
+    },
     /// `player` let `let_go` cards go and drew `drawn` (`Intent::Cycle`).
     Cycled {
         player: PlayerId,
@@ -1140,6 +1145,10 @@ pub struct Game {
     fog: BTreeMap<(i32, i32), PlayerId>,
     /// Land the wish being granted raised, for its god's twist.
     raised: Vec<Hex>,
+    /// Who did what first at the table (§21.5).
+    firsts: BTreeMap<novelty::Novelty, PlayerId>,
+    /// Per player, battles won so far: each is worth less.
+    won: Vec<u8>,
     log: Vec<Event>,
 }
 
@@ -1263,6 +1272,8 @@ impl Game {
             deferred: Vec::new(),
             fog: BTreeMap::new(),
             raised: Vec::new(),
+            firsts: BTreeMap::new(),
+            won: vec![0; champions_len],
             log: Vec::new(),
         };
 
@@ -2488,6 +2499,11 @@ impl Game {
                 events,
             );
             self.record_deed(caster, style::Deed::Played(element));
+        }
+        if let Some(feature) = def.needs() {
+            self.first(caster, novelty::Novelty::PlayedFor(feature), events);
+        }
+        if let Some(element) = def.element {
             self.lift_curse(caster, element, events);
             // Zaga is the one god whose cards quiet a champion down (§6.5).
             if element == Element::Earth {
@@ -3039,6 +3055,7 @@ mod guard;
 mod laws;
 mod militia;
 mod mobs;
+mod novelty;
 mod poison;
 mod scenario;
 mod stealth;
@@ -3062,6 +3079,7 @@ pub use militia::{
 pub use mobs::{
     MAX_UNDEAD, Mob, MobKind, UNDEAD_AGE, UNDEAD_AGE_DARK, UNDEAD_DICE, UNDEAD_HEALTH, UNDEAD_SIGHT,
 };
+pub use novelty::{FIRST_STYLE, Novelty, VARIETY};
 pub use poison::{Cure, Poison};
 pub use scenario::{Scenario, SceneSeat, SceneWorld};
 pub use stealth::RevealReason;

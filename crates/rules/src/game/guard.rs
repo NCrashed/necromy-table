@@ -242,6 +242,7 @@ impl Game {
         }
         self.guard = None;
         events.push(Event::GuardFell { hex: guard.hex, by });
+        self.first(by, super::Novelty::FelledGuard, events);
         self.record_deed(by, super::style::Deed::Won);
         let style = 2 * i16::from(self.taste.battle);
         self.add_style(by, style, super::StyleReason::Battle, events);

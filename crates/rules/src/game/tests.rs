@@ -1202,22 +1202,9 @@ fn stages_move_in_bot_games() {
 
 // ---- Style, the Crown and Threat (§6) ----
 
-fn to_next_dawn(g: &mut Game) {
-    let dawns = |g: &Game| {
-        g.log()
-            .iter()
-            .filter(|e| matches!(e, Event::Dawn { .. }))
-            .count()
-    };
-    let before = dawns(g);
-    while dawns(g) == before {
-        g.end_turn_and_settle();
-    }
-}
-
 #[test]
-fn entering_a_settlement_claims_it_and_it_pays_at_dawn() {
-    let (mut g, me, foe) = duel(3);
+fn entering_a_settlement_claims_it_but_land_is_no_style() {
+    let (mut g, me, _) = duel(3);
     let spot = Hex::new(1, 0);
     g.board.tile_mut(spot).unwrap().terrain = Terrain::Settlement;
     let events = g.apply(me, Intent::Move { to: spot }).unwrap();
@@ -1227,12 +1214,46 @@ fn entering_a_settlement_claims_it_and_it_pays_at_dawn() {
             .any(|e| matches!(e, Event::Claimed { player, from: None, .. } if *player == me))
     );
     assert_eq!(g.owner(spot), Some(me));
-    // Being placed on the Table claims nothing: only entering does.
-    g.pass_all();
-    let expected = u16::from(g.taste().settlement);
-    to_next_dawn(&mut g);
-    assert!(g.style(me) >= expected);
-    assert_eq!(g.style(foe), 0);
+    // The first to take a settlement earns that, once (§21.5).
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::First {
+            novelty: Novelty::TookSettlement,
+            ..
+        }
+    )));
+    // But it pays nothing at dawn: only the Table does.
+    let style = g.style(me);
+    let mut ev = Vec::new();
+    g.dawn(&mut ev);
+    assert_eq!(g.style(me), style);
+    g.claims.insert((0, 0), me);
+    g.dawn(&mut ev);
+    assert_eq!(g.style(me), style + u16::from(g.taste().table));
+}
+
+/// Everything has been done first already: no first earns Style here.
+fn nothing_new(g: &mut Game) {
+    let all = [
+        Novelty::WonBattle,
+        Novelty::FelledGuard,
+        Novelty::LaidToRest,
+        Novelty::SlewBeast,
+        Novelty::PassedTrial,
+        Novelty::TookSettlement,
+        Novelty::TookTable,
+        Novelty::Rebuilt,
+        Novelty::Sacrificed,
+        Novelty::Hid,
+        Novelty::FinishedLine,
+    ]
+    .into_iter()
+    .chain(WishKind::ALL.map(Novelty::Wished))
+    .chain(Feature::ALL.map(Novelty::Brought))
+    .chain(Feature::ALL.map(Novelty::PlayedFor));
+    for n in all {
+        g.firsts.insert(n, PlayerId(0));
+    }
 }
 
 #[test]
@@ -1286,6 +1307,7 @@ fn battle_winner_takes_style_double_from_the_dominant() {
         g.place(foe, Hex::new(1, 0));
         // The foe has taken their turn: the attack goes ahead at once.
         g.finish(foe);
+        nothing_new(&mut g);
         let mut ev = Vec::new();
         g.add_style(foe, 5, StyleReason::Territory, &mut ev);
         g.dominant = Some(foe);
@@ -1743,6 +1765,7 @@ fn gods_grade_by_nature_and_novelty() {
 #[test]
 fn a_wish_without_style_comes_with_a_curse() {
     let (mut g, me, _) = duel(3);
+    nothing_new(&mut g);
     crown(&mut g, me);
     let style = g.style(me);
     let events = g
@@ -2030,6 +2053,7 @@ fn dusk_tells_lines_to_those_lagging_within_limits() {
 #[test]
 fn a_pilgrimage_ends_at_the_temple() {
     let (mut g, me, _) = duel(3);
+    nothing_new(&mut g);
     let temple = g.board().temple_of(God::Maya);
     line(&mut g, me, LineKind::Pilgrimage, Goal::ReachHex(temple), 0);
     let style = g.style(me);
@@ -3046,6 +3070,7 @@ fn a_trial_stops_the_walker_and_asks_for_a_burn() {
 #[test]
 fn passing_a_trial_takes_it_and_gives_the_boon() {
     let (mut g, me, _) = duel(3);
+    nothing_new(&mut g);
     trial_on(&mut g, Hex::new(1, 0), God::Zaga, Boon::Style);
     // Bodies burn for shields: Zaga's face.
     let cards = burn_all(&mut g, me, "Упокоить");
@@ -4630,4 +4655,41 @@ fn the_hand_goes_through_once_a_turn_one_fewer_but_at_a_temple() {
     g.apply(me, Intent::Cycle { cards: vec![a] }).unwrap();
     assert_eq!(g.hand(me).len(), 1);
     assert_ne!(g.hand(me)[0], a);
+}
+
+#[test]
+fn the_first_at_the_table_earns_style_once() {
+    let (mut g, me, foe) = duel(3);
+    let mut ev = Vec::new();
+    g.first(me, Novelty::WonBattle, &mut ev);
+    assert_eq!(g.style(me), FIRST_STYLE as u16);
+    g.first(foe, Novelty::WonBattle, &mut ev);
+    g.first(me, Novelty::WonBattle, &mut ev);
+    assert_eq!(g.style(foe), 0, "only the first");
+    assert_eq!(g.style(me), FIRST_STYLE as u16, "and only once");
+    assert_eq!(g.firsts().count(), 1);
+}
+
+#[test]
+fn battles_won_again_are_worth_less() {
+    let (mut g, me, _) = duel(3);
+    let worth: Vec<i16> = (0..6).map(|_| g.repeated(me, 2)).collect();
+    assert_eq!(worth, vec![2, 2, 1, 1, 0, 0]);
+}
+
+#[test]
+fn a_day_of_many_deeds_is_worth_more() {
+    let (mut g, me, foe) = duel(3);
+    nothing_new(&mut g);
+    g.record_deed(me, Deed::Prayed);
+    g.record_deed(me, Deed::Played(Element::Fire));
+    g.record_deed(me, Deed::Claimed);
+    // The same deed thrice is still one.
+    for _ in 0..3 {
+        g.record_deed(foe, Deed::Prayed);
+    }
+    let mut ev = Vec::new();
+    g.judge_variety(&mut ev);
+    assert_eq!(g.style(me), 1);
+    assert_eq!(g.style(foe), 0);
 }

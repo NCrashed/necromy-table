@@ -300,6 +300,7 @@ impl Game {
             .expect("checked");
         self.loot.insert(0, item);
         events.push(Event::ItemSacrificed { player, item, god });
+        self.first(player, super::Novelty::Sacrificed, events);
         self.offer(Some(player), god, SACRIFICE, events);
         Ok(())
     }

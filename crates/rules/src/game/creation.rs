@@ -158,6 +158,9 @@ impl Game {
             player,
         });
         self.deal_in(feature, events);
+        if let Some(p) = player {
+            self.first(p, super::Novelty::Brought(feature), events);
+        }
         self.first_of(feature, player, near, events);
         true
     }

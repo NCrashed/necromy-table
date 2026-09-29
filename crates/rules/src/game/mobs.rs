@@ -429,6 +429,12 @@ impl Game {
             .is_some_and(|u| u.is_undead());
         self.mobs.retain(|u| u.id != id);
         events.push(Event::MobFell { id, hex, by });
+        let novelty = if undead {
+            super::Novelty::LaidToRest
+        } else {
+            super::Novelty::SlewBeast
+        };
+        self.first(by, novelty, events);
         self.record_deed(by, Deed::Won);
         if undead {
             self.shift_standing(by, 1, events);

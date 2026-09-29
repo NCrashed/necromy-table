@@ -36,7 +36,7 @@ pub struct Said {
 }
 
 /// Prepared wishes: what the Dominant can ask for offline.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum WishKind {
     /// "Give me strength": health, spirit, a ward.
     Strength,
@@ -628,6 +628,9 @@ impl Game {
 
         for act in &granted {
             self.asked.push((god, act.kind()));
+        }
+        for act in &granted {
+            self.first(player, super::Novelty::Wished(act.kind()), events);
         }
         self.progress[player.0 as usize].refusals = 0;
         events.push(Event::WishGranted {

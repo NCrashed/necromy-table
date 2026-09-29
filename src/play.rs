@@ -1812,6 +1812,12 @@ impl Match {
                     None => format!("В мир приходит новое — {name}: {what}."),
                 }
             }
+            Event::First { player, novelty } => format!(
+                "{} первым за столом {}: +{} Стиля.",
+                self.name(*player),
+                names::novelty(*novelty),
+                necromy_rules::FIRST_STYLE
+            ),
             Event::Cycled {
                 player,
                 let_go,

@@ -205,6 +205,7 @@ impl Game {
                 need,
             });
             self.grant_boon(player, &trial, events);
+            self.first(player, super::Novelty::PassedTrial, events);
             // The god remembers who stood its test.
             self.offer(Some(player), trial.god, 1, events);
             self.story_trial(player, hex, events);

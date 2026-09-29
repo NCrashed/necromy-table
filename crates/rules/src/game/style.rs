@@ -141,6 +141,10 @@ pub enum StyleReason {
     Trial,
     /// A dark god's toll on its item (§20.3).
     Item,
+    /// Something done first at the table (§21.5).
+    First,
+    /// A day of many different deeds.
+    Variety,
 }
 
 /// Threat at which the royal guard comes out (§6.5).
@@ -227,12 +231,15 @@ impl Game {
     ) {
         self.count_overthrow(winner, loser);
         self.record_deed(winner, Deed::Won);
+        self.first(winner, super::Novelty::WonBattle, events);
         let base = i16::from(self.taste.battle);
-        let amount = if self.dominant == Some(loser) {
+        let base = if self.dominant == Some(loser) {
             base * 2
         } else {
             base
         };
+        // Winning again and again is worth less each time (§21.5).
+        let amount = self.repeated(winner, base);
         self.add_style(winner, amount, StyleReason::Battle, events);
         self.add_style(loser, -amount, StyleReason::Battle, events);
     }
@@ -255,11 +262,16 @@ impl Game {
         }
         let from = self.claims.insert((hex.x(), hex.y()), player);
         self.record_deed(player, Deed::Claimed);
+        match self.board.tile(hex).map(|t| t.terrain) {
+            Some(Terrain::Settlement) => self.first(player, super::Novelty::TookSettlement, events),
+            Some(Terrain::Table) => self.first(player, super::Novelty::TookTable, events),
+            _ => {}
+        }
         events.push(Event::Claimed { player, hex, from });
         self.note_bet(player, super::wish::Bet::Claim);
     }
 
-    /// Dawn: land pays Style. The Crown goes at dusk (`dusk.rs`).
+    /// Dawn: the Table pays Style. The Crown goes at dusk (`dusk.rs`).
     pub(super) fn dawn(&mut self, events: &mut Vec<Event>) {
         self.stealth_at_dawn(events);
         self.militia_at_dawn();
@@ -273,9 +285,9 @@ impl Game {
                     || self.hex_of(p).unsigned_distance_to(hex) <= super::CRACK_REACH
             })
             .filter_map(|(hex, p)| {
+                // Land is not Style any more (§21.5): only the Table, the one
+                // seat at Ahamar's game, pays.
                 let w = match self.board.tile(hex)?.terrain {
-                    Terrain::Settlement => self.taste.settlement,
-                    Terrain::Temple => self.taste.temple,
                     Terrain::Table => self.taste.table,
                     _ => 0,
                 };
@@ -304,6 +316,7 @@ impl Game {
 
     /// Dusk: the offline storyteller weighs the day against each character.
     pub(super) fn judge_the_day(&mut self, events: &mut Vec<Event>) {
+        self.judge_variety(events);
         for p in self.players().collect::<Vec<_>>() {
             let character = Character::of(self.champions[p.0 as usize].god);
             let deeds = std::mem::take(&mut self.deeds[p.0 as usize]);

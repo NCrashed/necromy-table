@@ -319,6 +319,7 @@ impl Game {
         self.militia
             .insert((hex.x(), hex.y()), Militia { men: 1, at: None });
         events.push(Event::SettlementRebuilt { player, hex });
+        self.first(player, super::Novelty::Rebuilt, events);
         events.push(Event::TerrainChanged {
             hex,
             terrain: Terrain::Settlement,

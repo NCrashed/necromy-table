@@ -91,6 +91,7 @@ impl Game {
         c.seen_at = c.hex;
         let hex = c.hex;
         events.push(Event::Hid { player, hex });
+        self.first(player, super::Novelty::Hid, events);
         self.note_bet(player, super::wish::Bet::Hide);
     }
 

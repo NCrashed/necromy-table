@@ -188,6 +188,7 @@ impl Game {
         let line = self.lines.remove(i);
         if won {
             events.push(Event::LineDone { line });
+            self.first(line.owner, super::Novelty::FinishedLine, events);
             self.add_style(
                 line.owner,
                 i16::from(line.style),
