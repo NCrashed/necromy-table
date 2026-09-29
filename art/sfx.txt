@@ -91,3 +91,13 @@ menu-squeak	0.5	4	A tiny woodland animal is startled and lets out one short surp
 menu-thud	0.5	4	A small soft object lands on grass and soil: a short muffled thud
 menu-thump	0.6	3	A heavy chunk of stone and earth lands on the ground: a deep short thump with a scatter of pebbles and a rustle of leaves
 guard-hew	1.0	3	An armoured knight hews down a skeleton with one heavy sword blow: a steel swing, a crack of dry bones scattering and a short ghostly hiss
+# Creation mode (§21.8)
+fire-catch	1.2	3	Dry brush catches fire with a sudden whoosh, then crackling flames
+splash	0.8	3	A body wades into a river, a heavy watery splash
+bite	0.5	3	Small sharp teeth snap and bite, a wet quick chomp
+build	1.2	3	Hammer blows on wooden beams, a building being raised, three quick knocks
+fair	1.5	2	A short burst of a busy market crowd cheering, a coin jingle, no words
+wedding	1.5	2	A small bronze bell rings twice, bright and festive
+gate	2.0	2	A deep magical rumble as a stone gate to another world grinds open, dark hum
+hatch	1.2	2	An eggshell cracks and breaks open, followed by a small dragon squeak
+dig	0.8	3	A shovel bites into earth and throws the dirt aside

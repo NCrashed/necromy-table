@@ -839,6 +839,30 @@ fn hear_events(
             Event::Rooted { player } => (Sound::new("root"), by(*player)),
             Event::Poisoned { player, .. } => (Sound::new("poison-laid"), by(*player)),
             Event::PoisonBit { player, .. } => (Sound::new("poison-bite"), by(*player)),
+            // Creation mode (§21.8).
+            Event::FireStarted { hex, .. } => (Sound::new("fire-catch").at(0.6), Heard::At(*hex)),
+            Event::PiranhasBit { player, .. } => (Sound::new("bite"), by(*player)),
+            Event::Moved { player, to, .. }
+                if game
+                    .game
+                    .board()
+                    .tile(*to)
+                    .is_some_and(|t| t.terrain.is_water()) =>
+            {
+                (Sound::new("splash"), by(*player))
+            }
+            Event::Built { hex, .. }
+            | Event::QuarterRaised { hex, .. }
+            | Event::RoadLaid { hex } => (Sound::new("build"), Heard::At(*hex)),
+            Event::FairOpened { hex, .. }
+            | Event::GoodsSold { hex, .. }
+            | Event::Feasted { hex, .. } => (Sound::new("fair"), Heard::At(*hex)),
+            Event::Wedding { a, .. } => (Sound::new("wedding"), Heard::At(*a)),
+            Event::GateOpened { hex, .. } => (Sound::new("gate"), Heard::At(*hex)),
+            Event::DragonHatched { hex, .. } => (Sound::new("hatch"), Heard::At(*hex)),
+            Event::Delved { hex, .. }
+            | Event::Buried { hex, .. }
+            | Event::CircleDrawn { hex, .. } => (Sound::new("dig"), Heard::At(*hex)),
             Event::PoisonFed { player, .. } => (Sound::new("poison-fed"), by(*player)),
             Event::PoisonCured { player, .. } => (Sound::new("poison-cured"), by(*player)),
             // Items (§20.3).

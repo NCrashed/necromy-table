@@ -91,7 +91,7 @@ struct TileArt {
 /// Ground textures in `assets/tiles/`, `<name>-<n>.png`: bare ground under
 /// the terrain's billboard props (`props.rs`), temples and the Table
 /// included. A terrain not listed keeps its flat colour and icon.
-const TILE_ART: [(Terrain, &str, usize); 10] = [
+const TILE_ART: [(Terrain, &str, usize); 16] = [
     (Terrain::Plains, "ground/meadow", 2),
     (Terrain::Forest, "ground/forest", 1),
     (Terrain::Grove, "ground/forest", 1),
@@ -102,6 +102,12 @@ const TILE_ART: [(Terrain, &str, usize); 10] = [
     (Terrain::Table, "ground/paving", 2),
     (Terrain::Ruins, "ground/ruins", 2),
     (Terrain::Stones, "ground/moss", 2),
+    (Terrain::River, "ground/river", 2),
+    (Terrain::Lake, "ground/lake", 2),
+    (Terrain::Ash, "ground/ash", 2),
+    (Terrain::Fields, "ground/fields", 2),
+    (Terrain::Graveyard, "ground/graveyard", 2),
+    (Terrain::Pit, "ground/pit", 2),
 ];
 
 /// Tile images are `TILE_PX` square with the hexagon a little above the
@@ -225,6 +231,13 @@ struct MarkerSprites {
     /// A building's sign (§21.8): tavern, forge, wall, and a shrine per god.
     signs: [Handle<Image>; 5],
     shrines: [Handle<Image>; 5],
+    /// Painted buildings (`assets/props/building-<kind>.png`): tavern,
+    /// forge, wall, pen, arena, shrine; fair tent, way down, ritual circle.
+    /// The drawn signs and marks stand in until they load.
+    building_art: [Handle<Image>; 9],
+    /// Painted small things (`assets/props/item-<kind>.png`): food, an egg, a
+    /// fire, then goods by `God::index`.
+    item_art: [Handle<Image>; 8],
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -355,6 +368,29 @@ fn spawn_board(
         ]
         .map(|c| images.add(pixel_sprite(&SIGN_ROWS, c))),
         shrines: God::ALL.map(|g| images.add(pixel_sprite(&SIGN_ROWS, g.accent()))),
+        building_art: [
+            "tavern",
+            "forge",
+            "wall",
+            "pen",
+            "arena",
+            "shrine",
+            "fair-tent",
+            "way-down",
+            "circle",
+        ]
+        .map(|n| assets.load(format!("props/building-{n}.png"))),
+        item_art: [
+            "food",
+            "egg",
+            "fire",
+            "goods-bhava",
+            "goods-trishna",
+            "goods-zaga",
+            "goods-ahamar",
+            "goods-maya",
+        ]
+        .map(|n| assets.load(format!("props/item-{n}.png"))),
         trial_rings: God::ALL.map(|g| images.add(rune_ring(g.accent()))),
         trial_faces: God::ALL.map(|g| images.add(trial_badge(g))),
     });
@@ -769,7 +805,11 @@ fn sync_markers(
         .map(|(hex, _)| {
             (
                 hex,
-                sprites.fire.clone(),
+                if images.contains(&sprites.item_art[2]) {
+                    sprites.item_art[2].clone()
+                } else {
+                    sprites.fire.clone()
+                },
                 Vec3::new(0.0, 0.0, 0.2),
                 TEXELS,
                 false,
@@ -781,13 +821,46 @@ fn sync_markers(
         .loads()
         .iter()
         .filter_map(|(hex, c)| {
-            let image = match c {
-                necromy_rules::Cargo::Food => sprites.sack.clone(),
-                necromy_rules::Cargo::Goods(g) => sprites.goods[g.index()].clone(),
-                necromy_rules::Cargo::Egg { .. } => sprites.egg.clone(),
+            let (art, stand_in) = match c {
+                necromy_rules::Cargo::Food => (&sprites.item_art[0], &sprites.sack),
+                necromy_rules::Cargo::Egg { .. } => (&sprites.item_art[1], &sprites.egg),
+                necromy_rules::Cargo::Goods(g) => {
+                    (&sprites.item_art[3 + g.index()], &sprites.goods[g.index()])
+                }
                 necromy_rules::Cargo::Body { .. } => return None,
             };
-            Some((*hex, image, Vec3::new(-0.3, 0.0, 0.3), TEXELS, true))
+            // Painted, it stands up; the drawn stand-in lies flat.
+            let loaded = images.contains(art);
+            let image = if loaded {
+                art.clone()
+            } else {
+                stand_in.clone()
+            };
+            Some((*hex, image, Vec3::new(-0.3, 0.0, 0.3), TEXELS, !loaded))
+        })
+        .collect();
+    // The painted picture once it has loaded, else the drawn stand-in.
+    let painted = |i: usize, stand_in: &Handle<Image>| {
+        let art = &sprites.building_art[i];
+        if images.contains(art) {
+            art.clone()
+        } else {
+            stand_in.clone()
+        }
+    };
+    // Ritual circles on the stones (§21.8), once painted.
+    let circles: Vec<_> = game
+        .game
+        .circles()
+        .filter(|_| images.contains(&sprites.building_art[8]))
+        .map(|(hex, _)| {
+            (
+                hex,
+                sprites.building_art[8].clone(),
+                Vec3::new(0.0, 0.0, 0.3),
+                TEXELS,
+                false,
+            )
         })
         .collect();
     let banners: Vec<_> = game
@@ -796,7 +869,7 @@ fn sync_markers(
         .map(|(hex, _)| {
             (
                 hex,
-                sprites.fair.clone(),
+                painted(6, &sprites.fair),
                 Vec3::new(0.0, 0.0, -0.45),
                 TEXELS,
                 false,
@@ -809,10 +882,10 @@ fn sync_markers(
         .map(|(hex, _)| {
             (
                 hex,
-                sprites.delve.clone(),
+                painted(7, &sprites.delve),
                 Vec3::new(0.3, 0.0, -0.3),
                 TEXELS,
-                true,
+                !images.contains(&sprites.building_art[7]),
             )
         })
         .collect();
@@ -821,12 +894,12 @@ fn sync_markers(
         .buildings()
         .map(|(hex, b)| {
             let image = match b {
-                necromy_rules::Building::Tavern => sprites.signs[0].clone(),
-                necromy_rules::Building::Forge => sprites.signs[1].clone(),
-                necromy_rules::Building::Wall => sprites.signs[2].clone(),
-                necromy_rules::Building::Pen => sprites.signs[3].clone(),
-                necromy_rules::Building::Arena => sprites.signs[4].clone(),
-                necromy_rules::Building::Shrine([g, _]) => sprites.shrines[g.index()].clone(),
+                necromy_rules::Building::Tavern => painted(0, &sprites.signs[0]),
+                necromy_rules::Building::Forge => painted(1, &sprites.signs[1]),
+                necromy_rules::Building::Wall => painted(2, &sprites.signs[2]),
+                necromy_rules::Building::Pen => painted(3, &sprites.signs[3]),
+                necromy_rules::Building::Arena => painted(4, &sprites.signs[4]),
+                necromy_rules::Building::Shrine([g, _]) => painted(5, &sprites.shrines[g.index()]),
             };
             (hex, image, Vec3::new(0.45, 0.0, -0.2), TEXELS, false)
         })
@@ -835,6 +908,7 @@ fn sync_markers(
     let wanted: Vec<_> = corpses
         .chain(roads)
         .chain(signs)
+        .chain(circles)
         .chain(fires)
         .chain(sacks)
         .chain(holes)

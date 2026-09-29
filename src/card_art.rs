@@ -54,6 +54,7 @@ pub struct CardArt {
 fn art_file(name: &str) -> Option<&'static str> {
     Some(match name {
         "Побег сквозь камень" => "grow-through-stone",
+        "Дикий энт" => "wild-ent",
         "Цепкий корень" => "grasping-root",
         "Живица" => "resin",
         "Шипы чащи" => "thicket-thorns",
