@@ -4,7 +4,7 @@
 //! show ends.
 
 use bevy::prelude::*;
-use necromy_rules::{Face, GUARD_DICE, Intent, PlayerId, WindowKind};
+use necromy_rules::{Face, GUARD_DICE, Intent, PlayerId, TimeOfDay, WindowKind};
 
 use crate::dice::{DiceShow, Revealed, TRAY_TEXTURE, TrayTextures};
 use crate::fight::{self, STAGE_W, Wounds};
@@ -279,28 +279,65 @@ fn side_column(
         .add_child(tray)
         .id();
 
-    // Faces so far: burned ones framed in orange, then thrown ones as they land.
-    let faces = stats::row(commands);
-    let faces_label = stats::label(commands, font, "грани:", 12.0, false);
-    commands.entity(faces).add_child(faces_label);
-    for (face, burned) in burned
+    // Faces so far, sorted by what they do: strikes, shields, and what
+    // missed (Sun by night, Moon by day, blanks). Burned ones are framed in
+    // orange; thrown ones join as they land.
+    let day = g.time() == TimeOfDay::Day;
+    let group_of = |face: Face| match face {
+        Face::Strike | Face::Element => 0,
+        Face::Sun if day => 0,
+        Face::Moon if !day => 0,
+        Face::Shield => 1,
+        _ => 2,
+    };
+    let faces = commands
+        .spawn(Node {
+            flex_wrap: FlexWrap::Wrap,
+            align_items: AlignItems::Center,
+            column_gap: px(4.0),
+            row_gap: px(2.0),
+            ..default()
+        })
+        .id();
+    let all: Vec<(Face, bool)> = burned
         .iter()
         .map(|f| (*f, true))
         .chain(thrown.iter().map(|f| (*f, false)))
-    {
-        let icon = commands
-            .spawn((
-                ImageNode::new(art.faces[&face].clone()),
-                Node {
-                    width: px(24.0),
-                    height: px(24.0),
-                    border: UiRect::all(px(if burned { 2.0 } else { 0.0 })),
-                    ..default()
-                },
-                BorderColor::all(BURN_FRAME),
-            ))
+        .collect();
+    for (group, name) in [(0, "удары"), (1, "щиты"), (2, "мимо")] {
+        let mine: Vec<(Face, bool)> = all
+            .iter()
+            .copied()
+            .filter(|&(f, _)| group_of(f) == group)
+            .collect();
+        if mine.is_empty() {
+            continue;
+        }
+        let label = stats::label(commands, font, &format!("{name}:"), 12.0, group < 2);
+        commands.entity(faces).add_child(label);
+        for (face, burned) in mine {
+            let icon = commands
+                .spawn((
+                    ImageNode::new(art.faces[&face].clone()),
+                    Node {
+                        width: px(24.0),
+                        height: px(24.0),
+                        border: UiRect::all(px(if burned { 2.0 } else { 0.0 })),
+                        ..default()
+                    },
+                    BorderColor::all(BURN_FRAME),
+                ))
+                .id();
+            commands.entity(faces).add_child(icon);
+        }
+        // A gap before the next group.
+        let gap = commands
+            .spawn(Node {
+                width: px(8.0),
+                ..default()
+            })
             .id();
-        commands.entity(faces).add_child(icon);
+        commands.entity(faces).add_child(gap);
     }
 
     let mut children = vec![header, tray, faces];

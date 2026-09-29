@@ -9,7 +9,7 @@ use crate::rng::Rng;
 
 pub const BOARD_RADIUS: u32 = 7;
 /// Settlements in each god's region.
-pub const SETTLEMENTS_PER_REGION: usize = 3;
+pub const SETTLEMENTS_PER_REGION: usize = 2;
 
 /// Rounds a corpse lies untouched before it sprouts into a grove (Bhava's
 /// offering: docs/design.md §9, cards on bodies).

@@ -105,6 +105,10 @@ pub struct Match {
     pub watching: bool,
     /// Bumped whenever the show on screen changes: the dice trays start over.
     pub show_serial: u32,
+    /// Falls in the fight on screen, told only when its panel closes: who,
+    /// where the body lies, where they wake. Until then the token stands and
+    /// the board shows no body there.
+    pub held_falls: Vec<(PlayerId, Hex, Hex)>,
     /// The last card that hit the human and what it did, shown for a moment
     /// after its Target window closed.
     pub incoming_result: Option<IncomingResult>,
@@ -545,6 +549,7 @@ impl Match {
             on_screen: None,
             watching: false,
             show_serial: 0,
+            held_falls: Vec::new(),
             incoming_result: None,
             incoming_serial: 0,
             offerings: Vec::new(),
@@ -852,9 +857,18 @@ impl Match {
                 }
                 // Seen again: the token goes where they really are.
                 Event::Revealed { player, hex, .. } => self.steps.push((*player, *hex)),
+                // A fall in the fight on screen waits for its dice.
                 Event::ChampionFell {
-                    player, respawn, ..
-                } => self.steps.push((*player, *respawn)),
+                    player,
+                    at,
+                    respawn,
+                } => {
+                    if self.in_show_on_screen(*player) {
+                        self.held_falls.push((*player, *at, *respawn));
+                    } else {
+                        self.steps.push((*player, *respawn));
+                    }
+                }
                 Event::Offered {
                     player,
                     god,
@@ -1002,6 +1016,13 @@ impl Match {
         }
     }
 
+    /// `player` fights in the show on the panels now.
+    fn in_show_on_screen(&self, player: PlayerId) -> bool {
+        self.on_screen
+            .and_then(|id| self.shows.iter().find(|s| s.id == id))
+            .is_some_and(|s| s.who.contains(&player))
+    }
+
     /// The human looks away from a show that is not theirs.
     pub fn close_show(&mut self) {
         self.end_battle_view();
@@ -1111,6 +1132,10 @@ impl Match {
 
     /// The battle panel closes: the fight is told in the feed.
     pub fn end_battle_view(&mut self) {
+        // The fallen go home now that the dice have told it.
+        for (player, _, respawn) in std::mem::take(&mut self.held_falls) {
+            self.steps.push((player, respawn));
+        }
         self.battle = None;
         self.trial = None;
         self.on_screen = None;

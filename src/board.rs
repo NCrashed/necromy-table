@@ -492,26 +492,33 @@ fn sync_markers(
     let turn = rig.table_turn();
     // A corpse rots as it lies, and sprouts before it becomes a grove where
     // a grove can grow; each hex keeps its own body.
-    let corpses = game.game.board().corpses().map(|(hex, corpse)| {
-        let grows = game
-            .game
-            .board()
-            .tile(hex)
-            .is_some_and(|t| t.terrain.can_grow_grove());
-        let stage = match corpse.age {
-            0 | 1 => 0,
-            a if a + 1 >= necromy_rules::board::GROVE_AGE && grows => 2,
-            _ => 1,
-        };
-        let art = &sprites.corpse_art[stage];
-        let painted = (!art.is_empty())
-            .then(|| &art[crate::props::hex_seed(hex, 7) as usize % art.len()])
-            .filter(|h| images.contains(*h));
-        match painted {
-            Some(image) => (hex, image.clone(), CORPSE_PPM),
-            None => (hex, sprites.corpse.clone(), TEXELS),
-        }
-    });
+    // A body the dice on screen have not told of yet stays unseen.
+    let held: Vec<Hex> = game.held_falls.iter().map(|&(_, at, _)| at).collect();
+    let corpses = game
+        .game
+        .board()
+        .corpses()
+        .filter(|(hex, _)| !held.contains(hex))
+        .map(|(hex, corpse)| {
+            let grows = game
+                .game
+                .board()
+                .tile(hex)
+                .is_some_and(|t| t.terrain.can_grow_grove());
+            let stage = match corpse.age {
+                0 | 1 => 0,
+                a if a + 1 >= necromy_rules::board::GROVE_AGE && grows => 2,
+                _ => 1,
+            };
+            let art = &sprites.corpse_art[stage];
+            let painted = (!art.is_empty())
+                .then(|| &art[crate::props::hex_seed(hex, 7) as usize % art.len()])
+                .filter(|h| images.contains(*h));
+            match painted {
+                Some(image) => (hex, image.clone(), CORPSE_PPM),
+                None => (hex, sprites.corpse.clone(), TEXELS),
+            }
+        });
     let traps = game
         .game
         .traps()
@@ -584,6 +591,7 @@ fn sync_markers(
         .ground_items()
         .iter()
         .map(|(hex, _)| *hex)
+        .filter(|hex| !held.contains(hex))
         .filter(|_| images.contains(&sprites.pouch))
         .map(|hex| {
             (
