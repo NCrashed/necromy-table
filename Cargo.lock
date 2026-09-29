@@ -3719,6 +3719,7 @@ version = "0.1.0"
 dependencies = [
  "necromy-oracle",
  "necromy-rules",
+ "postcard",
  "serde",
 ]
 
@@ -3757,6 +3758,7 @@ dependencies = [
  "necromy-net",
  "necromy-oracle",
  "necromy-rules",
+ "postcard",
 ]
 
 [[package]]

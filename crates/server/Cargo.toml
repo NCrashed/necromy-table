@@ -9,3 +9,4 @@ necromy-rules = { path = "../rules" }
 necromy-host = { path = "../host" }
 necromy-net = { path = "../net" }
 necromy-oracle = { path = "../oracle" }
+postcard = { version = "1", features = ["use-std"] }

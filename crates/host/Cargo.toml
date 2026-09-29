@@ -8,3 +8,4 @@ description = "The authoritative table: one match, its bots, its gods' voice, an
 necromy-rules = { path = "../rules" }
 necromy-oracle = { path = "../oracle" }
 serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", features = ["use-std"] }

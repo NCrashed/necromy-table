@@ -289,3 +289,117 @@ fn an_empty_match_waits_and_then_closes() {
     rig.server.step(ABANDON_SECS + 1.0);
     assert_eq!(rig.server.lobby_count(), 0);
 }
+
+/// A fresh directory for a test's saves.
+fn saves(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("necromy-server-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
+}
+
+/// Play until the table has moved on; the round `c` last saw.
+fn play_a_while(rig: &mut Rig, c: &ClientConn, seat: PlayerId) -> u32 {
+    let mut round = 0;
+    for _ in 0..400 {
+        rig.server.step(0.4);
+        while let Some(m) = c.poll() {
+            if let ServerMsg::Table(FromTable::Update { serial, view, .. }) = m {
+                round = view.round();
+                c.send(ClientMsg::Table(ToTable::Shown(serial)));
+                if view.awaiting().contains(&seat) {
+                    let intent = if view.to_answer(seat).is_some() {
+                        Intent::Pass
+                    } else if view.wish_due() == Some(seat) {
+                        Intent::RefuseWish
+                    } else {
+                        Intent::EndTurn
+                    };
+                    c.send(ClientMsg::Table(ToTable::Act(intent)));
+                }
+            }
+        }
+        if round >= 3 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(round >= 2, "the match did not move: round {round}");
+    round
+}
+
+/// Sit back down by ticket; the round of the first view.
+fn back_by_ticket(rig: &mut Rig, code: &str, (seat, ticket): (PlayerId, u64)) -> u32 {
+    let anna = rig.client("Аня");
+    anna.send(ClientMsg::Rejoin {
+        code: code.to_string(),
+        ticket,
+    });
+    let back = rig.until(&anna, |m| match m {
+        ServerMsg::Started { seat, .. } => Some(seat),
+        ServerMsg::Error(e) => panic!("refused: {e}"),
+        _ => None,
+    });
+    assert_eq!(back, seat);
+    rig.until(&anna, |m| match m {
+        ServerMsg::Table(FromTable::Update { view, .. }) => Some(view.round()),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_match_outlives_a_server_restart() {
+    let dir = saves("restart");
+    let mut rig = Rig::new();
+    rig.server.saves = Some(dir.clone());
+    let (clients, seats, code) = seated(&mut rig, &["Аня"]);
+    let round = play_a_while(&mut rig, &clients[0], seats[0].0);
+    // The server goes down with everyone on it, and comes up again.
+    rig.server = Server::new(None, 78);
+    rig.server.saves = Some(dir.clone());
+    drop(clients);
+    assert_eq!(rig.server.lobby_count(), 0);
+    assert_eq!(back_by_ticket(&mut rig, &code, seats[0]), round);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_empty_match_is_put_away_and_taken_up_by_ticket() {
+    let dir = saves("away");
+    let mut rig = Rig::new();
+    rig.server.saves = Some(dir.clone());
+    let (clients, seats, code) = seated(&mut rig, &["Аня"]);
+    let round = play_a_while(&mut rig, &clients[0], seats[0].0);
+    drop(clients);
+    for _ in 0..20 {
+        rig.server.step(0.05);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    rig.server.step(ABANDON_SECS + 1.0);
+    assert_eq!(rig.server.lobby_count(), 0, "put away");
+    // A code taken by a match on disk is not handed out again.
+    assert!(dir.join(&code).is_dir());
+    let back = back_by_ticket(&mut rig, &code, seats[0]);
+    assert!(back >= round);
+    assert_eq!(rig.server.lobby_count(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn old_kept_matches_are_swept() {
+    let dir = saves("sweep");
+    let mut rig = Rig::new();
+    rig.server.saves = Some(dir.clone());
+    let (clients, _, code) = seated(&mut rig, &["Аня"]);
+    rig.server.sweep(Duration::ZERO);
+    assert!(dir.join(&code).is_dir(), "a running match stays");
+    drop(clients);
+    for _ in 0..20 {
+        rig.server.step(0.05);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    rig.server.step(ABANDON_SECS + 1.0);
+    std::thread::sleep(Duration::from_millis(20));
+    rig.server.sweep(Duration::from_millis(1));
+    assert!(!dir.join(&code).exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}

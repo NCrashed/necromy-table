@@ -25,6 +25,7 @@ mod names;
 mod play;
 mod props;
 mod ring_ui;
+mod saves;
 mod settings;
 mod stats;
 mod story_ui;

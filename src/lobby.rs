@@ -101,6 +101,8 @@ pub struct Front {
     alone_god: God,
     /// The tutorial's chapters are listed.
     tutorial: bool,
+    /// The newest single player match on disk and a line about it.
+    saved: Option<(std::path::PathBuf, String)>,
 }
 
 impl Front {
@@ -127,6 +129,7 @@ impl Front {
             alone: std::env::var_os("NECROMY_PLAY").is_some_and(|v| v == "alone"),
             alone_god: crate::play::default_god(),
             tutorial: std::env::var_os("NECROMY_PLAY").is_some_and(|v| v == "tutorial"),
+            saved: crate::saves::latest(),
         }
     }
 
@@ -160,6 +163,20 @@ impl Front {
                     "Сервер {} не отвечает: {err}",
                     necromy_net::with_port(&self.server)
                 ));
+            }
+        }
+    }
+
+    /// Take up the single player match kept on disk (§17.5).
+    fn resume(&mut self, commands: &mut Commands) {
+        let Some((dir, _)) = self.saved.clone() else {
+            return;
+        };
+        match Match::resume(dir) {
+            Ok(m) => commands.insert_resource(m),
+            Err(why) => {
+                self.saved = crate::saves::latest();
+                self.error = Some(format!("Не вышло продолжить: {why}."));
             }
         }
     }
@@ -208,6 +225,8 @@ enum FrontButton {
     Leave,
     /// Sit back down at the match the saved ticket names.
     Return,
+    /// Take up the single player match saved on disk.
+    Continue,
     /// The tutorial's list of chapters.
     Tutorial,
     /// Play tutorial chapter `n` (0-based).
@@ -250,6 +269,7 @@ fn dev_play(mut done: Local<bool>, mut front: ResMut<Front>, mut commands: Comma
             front.dial(ClientMsg::Join { code });
         }
         Ok("local") => commands.insert_resource(Match::local(crate::play::default_god())),
+        Ok("continue") => front.resume(&mut commands),
         Ok("return") => {
             front.go_back();
         }
@@ -436,6 +456,7 @@ fn buttons(
             FrontButton::Return => {
                 front.go_back();
             }
+            FrontButton::Continue => front.resume(&mut commands),
         }
     }
 }
@@ -613,6 +634,17 @@ fn menu(commands: &mut Commands, font: &UiFont, front: &Front, rows: &mut Vec<En
                 "Партия на {} ещё может идти: твоё место держит бот.",
                 t.server
             ),
+            12.0,
+            DIM,
+        ));
+    }
+    if let Some((_, line)) = &front.saved {
+        let resume = button(commands, font, FrontButton::Continue, "Продолжить", true);
+        rows.push(resume);
+        rows.push(text(
+            commands,
+            font,
+            &format!("Одиночная партия: {line}."),
             12.0,
             DIM,
         ));

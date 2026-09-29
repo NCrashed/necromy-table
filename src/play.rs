@@ -67,6 +67,8 @@ pub struct Match {
     /// The match as the human sees it (`Game::view_for`), after the last update.
     pub game: Game,
     link: Link,
+    /// Keeps a single player match on disk as it plays (`saves.rs`).
+    saver: Option<necromy_host::save::Saver>,
     /// The table's last update, and the last one the screen has shown.
     serial: u32,
     shown: u32,
@@ -449,8 +451,31 @@ impl Match {
             // Alone, nobody waits on the human.
             timers: None,
         });
+        let saver = crate::saves::start(&mut table);
         let first = table.drain(human);
-        Match::begin(Link::Local(Box::new(table)), human, autoplay, first)
+        let mut m = Match::begin(Link::Local(Box::new(table)), human, autoplay, first);
+        m.saver = saver;
+        m
+    }
+
+    /// A single player match saved in `dir`, taken up where it stopped.
+    pub fn resume(dir: std::path::PathBuf) -> Result<Self, String> {
+        let saved = necromy_host::save::load(&dir).map_err(|err| err.to_string())?;
+        let human = crate::saves::human_of(&saved.snapshot.seats)
+            .ok_or_else(|| "в сохранении нет места игрока".to_string())?;
+        let mut table = Table::restore(saved, Some(necromy_oracle::addr_from_env()));
+        if let Some(n) = table.replay_stopped() {
+            warn!("{n} journal entries did not replay: the match goes on from before them");
+        }
+        if table.game().winner().is_some() {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err("эта партия уже окончена".into());
+        }
+        let saver = crate::saves::keep(dir, &mut table);
+        let first = table.drain(human);
+        let mut m = Match::begin(Link::Local(Box::new(table)), human, false, first);
+        m.saver = saver;
+        Ok(m)
     }
 
     /// A tutorial chapter: `scene` on a table in this process, the human in
@@ -551,6 +576,7 @@ impl Match {
         let mut m = Match {
             game: (**view).clone(),
             link,
+            saver: None,
             serial: 0,
             shown: 0,
             walk: Vec::new(),
@@ -2439,6 +2465,17 @@ fn drive_table(
         m.link.submit(human, ToTable::Shown(serial));
     }
     m.link.tick(time.delta_secs());
+    if let (Link::Local(table), Some(saver)) = (&mut m.link, m.saver.as_mut()) {
+        if let Err(err) = saver.persist(table) {
+            warn!("the match is no longer saved: {err}");
+            m.saver = None;
+        } else if table.game().winner().is_some()
+            && let Some(saver) = m.saver.take()
+        {
+            // Over: nothing to come back to.
+            let _ = saver.discard();
+        }
+    }
     m.clock_since += time.delta_secs();
     let messages = m.link.drain(human);
     if !messages.is_empty() {

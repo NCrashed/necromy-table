@@ -18,9 +18,11 @@ use necromy_rules::{Event, Game, God, Intent, Phase, PlayerId, RuleError, Setup,
 use serde::{Deserialize, Serialize};
 
 mod clock;
+pub mod save;
 
 use clock::SeatClock;
 pub use clock::{Clock, Decision, Timers};
+use save::{Entry, Saved, Snapshot};
 
 /// Seconds between two bot steps.
 pub const BOT_STEP_SECS: f32 = 0.35;
@@ -42,6 +44,9 @@ pub enum Seat {
     Autoplay {
         wish_by_hand: bool,
     },
+    /// A person who is away: a bot plays the seat, but makes no wish for
+    /// them (§17.5). Creating the world is not a bot's business.
+    Away,
     /// A tutorial's rival: stands still and passes. It keeps its turn open
     /// (so a script can play for it, `act_as`) until something waits on it
     /// or everyone else is done.
@@ -51,7 +56,7 @@ pub enum Seat {
 impl Seat {
     /// A client watches this seat and gets its view.
     pub fn watched(self) -> bool {
-        !matches!(self, Seat::Bot | Seat::Dummy)
+        !matches!(self, Seat::Bot | Seat::Away | Seat::Dummy)
     }
 }
 
@@ -174,6 +179,15 @@ pub struct Table {
     voice: Option<Voice>,
     timers: Option<Timers>,
     clocks: Vec<SeatClock>,
+    /// What happened since the last snapshot, while a `save::Saver` keeps
+    /// the table (`keep_journal`).
+    journal: Option<Vec<Entry>>,
+    /// Dusk fell or the match ended: time for a new snapshot.
+    snapshot_due: bool,
+    /// The snapshot this table was restored from, 0 for a new one.
+    generation: u64,
+    /// Journal entries left unplayed on restore, if the replay broke.
+    replay_stopped: Option<usize>,
 }
 
 impl Table {
@@ -206,6 +220,69 @@ impl Table {
         oracle: Option<String>,
         timers: Option<Timers>,
     ) -> Table {
+        let mut table = Table::build(game, seats, salt, oracle, timers);
+        table.broadcast(&events);
+        table
+    }
+
+    /// A match saved to disk, taken up where it stopped (§17.5): the
+    /// snapshot, then its journal replayed. Seats come back as they were
+    /// saved; a server hands people's seats to `Seat::Away` until they
+    /// return. Wishes a god was reading go to the model again.
+    pub fn restore(saved: Saved, oracle: Option<String>) -> Table {
+        let Snapshot {
+            generation,
+            game,
+            seats,
+            salt,
+            serial,
+            timers,
+            mut asked,
+        } = saved.snapshot;
+        let mut table = Table::build(game, seats, salt, oracle, timers);
+        table.serial = serial;
+        table.generation = generation;
+        let total = saved.journal.len();
+        for (done, entry) in saved.journal.into_iter().enumerate() {
+            match entry {
+                Entry::Act {
+                    seat,
+                    intent,
+                    serial,
+                } => {
+                    if table.game.apply(seat, intent).is_err() {
+                        // The rules no longer agree with their own record:
+                        // keep what did replay rather than lose the match.
+                        table.replay_stopped = Some(total - done);
+                        break;
+                    }
+                    table.serial = serial;
+                }
+                Entry::Seat { seat, kind } => {
+                    if let Some(s) = table.seats.get_mut(seat.0 as usize) {
+                        *s = kind;
+                    }
+                }
+                Entry::Asked { seat, god, text } => asked.push((seat, god, text)),
+                Entry::Heard { seat } => asked.retain(|(s, _, _)| *s != seat),
+            }
+        }
+        table.broadcast(&[]);
+        for (seat, god, text) in asked {
+            if table.game.wish_due() == Some(seat) {
+                table.ask_wish(seat, god, text);
+            }
+        }
+        table
+    }
+
+    fn build(
+        game: Game,
+        seats: Vec<Seat>,
+        salt: u64,
+        oracle: Option<String>,
+        timers: Option<Timers>,
+    ) -> Table {
         assert_eq!(seats.len(), game.champions().len(), "a seat per champion");
         let config = Config {
             seed: game.seed(),
@@ -227,7 +304,7 @@ impl Table {
             }
         });
         let n = config.seats.len();
-        let mut table = Table {
+        Table {
             game,
             seats: config.seats,
             salt: config.salt,
@@ -239,9 +316,70 @@ impl Table {
             voice,
             timers: config.timers,
             clocks: vec![SeatClock::default(); n],
-        };
-        table.broadcast(&events);
-        table
+            journal: None,
+            snapshot_due: false,
+            generation: 0,
+            replay_stopped: None,
+        }
+    }
+
+    // ---- Saving (§17.5, `save.rs`) ----
+
+    /// Keep a journal of everything that changes the table, for a `Saver`.
+    pub fn keep_journal(&mut self) {
+        self.journal.get_or_insert_with(Vec::new);
+    }
+
+    /// The journal entries since the last call.
+    pub fn take_journal(&mut self) -> Vec<Entry> {
+        self.journal
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
+    /// Whether a snapshot is due (dusk fell, the match ended), and forget it.
+    pub fn take_snapshot_due(&mut self) -> bool {
+        std::mem::take(&mut self.snapshot_due)
+    }
+
+    /// The snapshot this table was restored from, 0 for a new match.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// How many journal entries the restore could not replay, if any: the
+    /// rules disagree with their own record, a bug worth a report.
+    pub fn replay_stopped(&self) -> Option<usize> {
+        self.replay_stopped
+    }
+
+    /// The whole table now, as `generation`.
+    pub fn snapshot(&self, generation: u64) -> Snapshot {
+        let asked = self.voice.as_ref().map_or(Vec::new(), |v| {
+            v.pending
+                .iter()
+                .filter_map(|(_, p)| match p {
+                    Purpose::Wish { seat, god, text } => Some((*seat, *god, text.clone())),
+                    _ => None,
+                })
+                .collect()
+        });
+        Snapshot {
+            generation,
+            game: self.game.clone(),
+            seats: self.seats.clone(),
+            salt: self.salt,
+            serial: self.serial,
+            timers: self.timers,
+            asked,
+        }
+    }
+
+    fn record(&mut self, entry: Entry) {
+        if let Some(journal) = self.journal.as_mut() {
+            journal.push(entry);
+        }
     }
 
     /// The whole match. Only the host may read it: clients get views.
@@ -262,6 +400,7 @@ impl Table {
             return;
         }
         self.seats[i] = kind;
+        self.record(Entry::Seat { seat, kind });
         self.outbox[i].clear();
         if kind.watched() {
             let salt = self.next_salt();
@@ -357,8 +496,19 @@ impl Table {
     }
 
     fn act(&mut self, player: PlayerId, intent: Intent) -> Result<(), RuleError> {
+        let kept = self.journal.is_some().then(|| intent.clone());
         let events = self.game.apply(player, intent)?;
         self.broadcast(&events);
+        if let Some(intent) = kept {
+            self.record(Entry::Act {
+                seat: player,
+                intent,
+                serial: self.serial,
+            });
+        }
+        if self.game.winner().is_some() || events.iter().any(|e| matches!(e, Event::Dusk { .. })) {
+            self.snapshot_due = true;
+        }
         self.ask_voices(&events);
         Ok(())
     }
@@ -474,7 +624,7 @@ impl Table {
             .awaiting()
             .into_iter()
             .filter(|&p| match self.seats[p.0 as usize] {
-                Seat::Bot => true,
+                Seat::Bot | Seat::Away => true,
                 Seat::Autoplay { wish_by_hand } => !(wish_by_hand && wish_due == Some(p)),
                 Seat::Human => false,
                 Seat::Dummy => self.dummy_intent(p).is_some(),
@@ -494,6 +644,7 @@ impl Table {
                     Some(intent) => intent,
                     None => continue,
                 },
+                Seat::Away if wish_due == Some(player) => Intent::RefuseWish,
                 _ => bot::choose(&self.game, player),
             };
             if self.act(player, intent).is_err() {
@@ -568,6 +719,11 @@ impl Table {
             return;
         }
         let (messages, schema) = prompt::wish(&self.game, seat, god, &text);
+        self.record(Entry::Asked {
+            seat,
+            god,
+            text: text.clone(),
+        });
         self.job(Purpose::Wish { seat, god, text }, |id| Job {
             id,
             messages,
@@ -653,6 +809,7 @@ impl Table {
         for (purpose, result) in answers {
             match (purpose, result) {
                 (Purpose::Wish { seat, god, text }, result) => {
+                    self.record(Entry::Heard { seat });
                     self.send(seat, FromTable::Oracle(OracleNews::Listening(None)));
                     let heard =
                         result
