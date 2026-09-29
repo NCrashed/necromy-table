@@ -310,6 +310,7 @@ impl Game {
             .tiles()
             .filter(|(h, t)| {
                 t.region.is_some()
+                    && t.terrain.is_land()
                     && !matches!(
                         t.terrain,
                         Terrain::Settlement | Terrain::Temple | Terrain::Table

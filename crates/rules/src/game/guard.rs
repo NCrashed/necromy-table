@@ -250,7 +250,7 @@ impl Game {
 
     /// The closest hex to `from` with nobody on it.
     pub(super) fn nearest_free(&self, from: Hex) -> Option<Hex> {
-        (0..=self.board.radius() * 2)
+        (0..=self.board.extent() * 2)
             .flat_map(|r| from.ring(r).collect::<Vec<_>>())
             .find(|&h| self.board.contains(h) && self.champion_at(h).is_none() && !self.mob_at(h))
     }

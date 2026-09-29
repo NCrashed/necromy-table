@@ -249,7 +249,7 @@ fn steer(
     if pan != Vec3::ZERO {
         rig.following = false;
         // Keep the focus over the board.
-        let reach = (game.game.board().radius() as f32 + 1.0) * HEX_SIZE * 1.75;
+        let reach = (game.game.board().extent() as f32 + 1.0) * HEX_SIZE * 1.75;
         rig.focus = (rig.focus + pan).clamp_length_max(reach);
     }
 }

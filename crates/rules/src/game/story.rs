@@ -367,7 +367,8 @@ impl Game {
                 let spots: Vec<Hex> = (1..=2)
                     .flat_map(|r| Hex::ZERO.ring(r).collect::<Vec<_>>())
                     .filter(|&h| {
-                        self.board.tile(h).is_some_and(|t| t.corpse.is_none())
+                        self.board.contains(h)
+                            && self.board.tile(h).is_some_and(|t| t.corpse.is_none())
                             && self.occupant(h).is_none()
                     })
                     .collect();

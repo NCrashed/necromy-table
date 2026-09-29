@@ -33,6 +33,12 @@ impl Plugin for BoardPlugin {
         .add_systems(crate::InGame, track_hover)
         .add_systems(
             crate::InGame,
+            spawn_new_tiles
+                .before(sync_tiles)
+                .run_if(resource_changed::<Match>),
+        )
+        .add_systems(
+            crate::InGame,
             (sync_tiles, sync_markers, sync_ground)
                 .after(track_hover)
                 .run_if(
@@ -144,6 +150,8 @@ struct GroundMeshes {
     painted: Handle<Mesh>,
     /// From the hex centre to the painted quad's centre.
     shift: Vec3,
+    /// The square an icon is painted on.
+    icon: Handle<Mesh>,
 }
 
 #[derive(Resource)]
@@ -263,87 +271,36 @@ fn spawn_board(
             ))
         })
         .collect();
-    for (hex, tile) in game.game.board().tiles() {
-        let at = board.hex_to_world(hex);
-        let stage = tile.region.map(|g| game.game.stage(g));
-        // The ground: a painted tile where there is one, flat colour on the
-        // hex mesh where there is not. One material per hex, so terrain and
-        // region can recolour it alone.
-        let texture = tile_images.pick(tile.terrain, hex);
-        let ground = materials.add(StandardMaterial {
-            base_color: ground_color(tile, texture.is_some(), stage),
-            base_color_texture: texture.clone(),
-            alpha_mode: AlphaMode::Mask(0.5),
-            // Lit, so night falls on it (`lighting.rs`); matte, no glints on
-            // painted ground.
-            perceptual_roughness: 1.0,
-            reflectance: 0.0,
-            ..default()
-        });
-        let (ground_mesh, ground_shift) = if texture.is_some() {
-            (art_quad.clone(), art_shift)
-        } else {
-            (mesh.clone(), Vec3::ZERO)
-        };
-        let flat = Flat {
-            centre: at,
-            offset: ground_shift,
-            base: Quat::IDENTITY,
-        };
-        commands.spawn((
-            TileArt {
-                hex,
-                terrain: tile.terrain,
-            },
-            Mesh3d(ground_mesh),
-            MeshMaterial3d(ground),
-            flat.transform(Quat::IDENTITY),
-            flat,
-        ));
-        // The highlight, clear until the hex is lit.
-        let highlight = materials.add(StandardMaterial {
-            base_color: Color::NONE,
-            alpha_mode: AlphaMode::Blend,
-            unlit: true,
-            ..default()
-        });
-        commands.spawn((
-            Tile(hex),
-            Mesh3d(mesh.clone()),
-            MeshMaterial3d(highlight),
-            Transform::from_translation(at + Vec3::Y * 0.02),
-            NotShadowCaster,
-            NotShadowReceiver,
-        ));
-        // Every tile gets an icon entity; painted and plain ground hide it.
-        let icon = icons.get(&tile.terrain).or(icons.values().next()).cloned();
-        if let Some(icon) = icon {
-            let flat = Flat {
-                centre: at,
-                offset: Vec3::Y * 0.01,
-                base: Quat::IDENTITY,
-            };
-            commands.spawn((
-                TileIcon(hex),
-                Mesh3d(icon_quad.clone()),
-                MeshMaterial3d(icon),
-                flat.transform(Quat::IDENTITY),
-                flat,
-                if icons.contains_key(&tile.terrain) {
-                    Visibility::Inherited
-                } else {
-                    Visibility::Hidden
-                },
-            ));
-        }
-    }
-    commands.insert_resource(IconMaterials(icons));
-    commands.insert_resource(tile_images);
-    commands.insert_resource(GroundMeshes {
+    let icons = IconMaterials(icons);
+    let ground_meshes = GroundMeshes {
         plain: mesh,
         painted: art_quad,
         shift: art_shift,
-    });
+        icon: icon_quad,
+    };
+    let mut spawned = SpawnedTiles::default();
+    for (hex, tile) in game.game.board().tiles() {
+        let stage = tile.region.map(|g| game.game.stage(g));
+        let parts = TileParts {
+            meshes: &ground_meshes,
+            images: &tile_images,
+            icons: &icons,
+        };
+        spawn_tile(
+            &mut commands,
+            &mut materials,
+            &board,
+            &parts,
+            hex,
+            tile,
+            stage,
+        );
+        spawned.0.insert(hex);
+    }
+    commands.insert_resource(spawned);
+    commands.insert_resource(icons);
+    commands.insert_resource(tile_images);
+    commands.insert_resource(ground_meshes);
     commands.insert_resource(MarkerSprites {
         corpse: images.add(pixel_sprite(&CORPSE_ROWS, [0; 3])),
         corpse_art: ["fresh", "rot", "sprout"].map(|stage| {
@@ -368,6 +325,135 @@ fn spawn_board(
         trial_rings: God::ALL.map(|g| images.add(rune_ring(g.accent()))),
         trial_faces: God::ALL.map(|g| images.add(trial_badge(g))),
     });
+}
+
+/// Hexes whose ground, highlight and icon exist: the board grows at its rim
+/// (§21.1), and every new hex gets them too (`spawn_new_tiles`).
+#[derive(Resource, Default)]
+struct SpawnedTiles(std::collections::HashSet<Hex>);
+
+/// What every hex's entities are made of, shared.
+struct TileParts<'a> {
+    meshes: &'a GroundMeshes,
+    images: &'a TileImages,
+    icons: &'a IconMaterials,
+}
+
+/// A hex's ground, its highlight and its icon.
+fn spawn_tile(
+    commands: &mut Commands,
+    materials: &mut Assets<StandardMaterial>,
+    board: &Board,
+    parts: &TileParts,
+    hex: Hex,
+    tile: &RulesTile,
+    stage: Option<u8>,
+) {
+    let at = board.hex_to_world(hex);
+    // The ground: a painted tile where there is one, flat colour on the
+    // hex mesh where there is not. One material per hex, so terrain and
+    // region can recolour it alone.
+    let texture = parts.images.pick(tile.terrain, hex);
+    let ground = materials.add(StandardMaterial {
+        base_color: ground_color(tile, texture.is_some(), stage),
+        base_color_texture: texture.clone(),
+        alpha_mode: AlphaMode::Mask(0.5),
+        // Lit, so night falls on it (`lighting.rs`); matte, no glints on
+        // painted ground.
+        perceptual_roughness: 1.0,
+        reflectance: 0.0,
+        ..default()
+    });
+    let (ground_mesh, ground_shift) = if texture.is_some() {
+        (parts.meshes.painted.clone(), parts.meshes.shift)
+    } else {
+        (parts.meshes.plain.clone(), Vec3::ZERO)
+    };
+    let flat = Flat {
+        centre: at,
+        offset: ground_shift,
+        base: Quat::IDENTITY,
+    };
+    commands.spawn((
+        TileArt {
+            hex,
+            terrain: tile.terrain,
+        },
+        Mesh3d(ground_mesh),
+        MeshMaterial3d(ground),
+        flat.transform(Quat::IDENTITY),
+        flat,
+    ));
+    // The highlight, clear until the hex is lit.
+    let highlight = materials.add(StandardMaterial {
+        base_color: Color::NONE,
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    });
+    commands.spawn((
+        Tile(hex),
+        Mesh3d(parts.meshes.plain.clone()),
+        MeshMaterial3d(highlight),
+        Transform::from_translation(at + Vec3::Y * 0.02),
+        NotShadowCaster,
+        NotShadowReceiver,
+    ));
+    // Every tile gets an icon entity; painted and plain ground hide it.
+    let icons = &parts.icons.0;
+    let icon = icons.get(&tile.terrain).or(icons.values().next()).cloned();
+    if let Some(icon) = icon {
+        let flat = Flat {
+            centre: at,
+            offset: Vec3::Y * 0.01,
+            base: Quat::IDENTITY,
+        };
+        commands.spawn((
+            TileIcon(hex),
+            Mesh3d(parts.meshes.icon.clone()),
+            MeshMaterial3d(icon),
+            flat.transform(Quat::IDENTITY),
+            flat,
+            if icons.contains_key(&tile.terrain) {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            },
+        ));
+    }
+}
+
+/// Land raised since the match began gets its tiles (§21.1).
+#[allow(clippy::too_many_arguments)]
+fn spawn_new_tiles(
+    mut commands: Commands,
+    game: Res<Match>,
+    board: Res<Board>,
+    meshes: Res<GroundMeshes>,
+    images: Res<TileImages>,
+    icons: Res<IconMaterials>,
+    mut spawned: ResMut<SpawnedTiles>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let parts = TileParts {
+        meshes: &meshes,
+        images: &images,
+        icons: &icons,
+    };
+    for (hex, tile) in game.game.board().tiles() {
+        if spawned.0.insert(hex) {
+            let stage = tile.region.map(|g| game.game.stage(g));
+            spawn_tile(
+                &mut commands,
+                &mut materials,
+                &board,
+                &parts,
+                hex,
+                tile,
+                stage,
+            );
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -454,7 +540,12 @@ fn sync_tiles(
             Lit::No
         };
         if let Some(mut m) = materials.get_mut(&material.0) {
-            let region = game.game.board().tile(tile.0).and_then(|t| t.region);
+            let region = game
+                .game
+                .board()
+                .tile(tile.0)
+                .filter(|t| t.terrain.is_land())
+                .and_then(|t| t.region);
             m.base_color = highlight_color(lit, region, day_night.night);
         }
     }
@@ -723,12 +814,13 @@ fn ground_color(tile: &RulesTile, painted: bool, stage: Option<u8>) -> Color {
             Terrain::Stones => [0.36, 0.54, 0.70],
             Terrain::Grove => [0.30, 0.78, 0.30],
             Terrain::Table => [0.85, 0.66, 0.24],
+            Terrain::Mist => [0.66, 0.68, 0.78],
         }
     };
     let tint = tile
         .region
         .map_or([0.0; 3], |g| g.accent().map(|c| c as f32 / 255.0));
-    let mix = match (tile.region.is_some(), painted) {
+    let mix = match (tile.region.is_some() && tile.terrain.is_land(), painted) {
         (false, _) => 0.0,
         // A painted tile gets its region from the veil (`highlight_color`):
         // multiplying green grass by violet only darkens it.
@@ -915,7 +1007,8 @@ fn pixel_sprite(rows: &[&str], fill: [u8; 3]) -> Image {
     image
 }
 
-const TERRAINS: [Terrain; 10] = [
+const TERRAINS: [Terrain; 11] = [
+    Terrain::Mist,
     Terrain::Plains,
     Terrain::Forest,
     Terrain::Mountain,
@@ -934,13 +1027,13 @@ pub fn cursor_hex(
     camera: &Camera,
     camera_transform: &GlobalTransform,
     board: &Board,
-    radius: u32,
+    rules: &necromy_rules::Board,
 ) -> Option<Hex> {
     let cursor = window.cursor_position()?;
     let ray = camera.viewport_to_world(camera_transform, cursor).ok()?;
     let dist = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y))?;
     let hex = board.world_to_hex(ray.get_point(dist));
-    (hex.ulength() <= radius).then_some(hex)
+    rules.tile(hex).is_some().then_some(hex)
 }
 
 fn track_hover(
@@ -1006,15 +1099,7 @@ fn track_hover(
         let (q, r) = s.split_once(',')?;
         Some(Hex::new(q.trim().parse().ok()?, r.trim().parse().ok()?))
     });
-    let hex = pinned.or_else(|| {
-        cursor_hex(
-            &window,
-            camera,
-            transform,
-            &board,
-            game.game.board().radius(),
-        )
-    });
+    let hex = pinned.or_else(|| cursor_hex(&window, camera, transform, &board, game.game.board()));
     hovered.set_if_neq(Hovered(hex));
 }
 

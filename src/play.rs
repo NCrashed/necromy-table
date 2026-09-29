@@ -2269,8 +2269,8 @@ fn click_board(
         return;
     }
     let (camera, cam_transform) = *camera;
-    let radius = game.game.board().radius();
-    let Some(hex) = board::cursor_hex(&window, camera, cam_transform, &board, radius) else {
+    let Some(hex) = board::cursor_hex(&window, camera, cam_transform, &board, game.game.board())
+    else {
         return;
     };
 

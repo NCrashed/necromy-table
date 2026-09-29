@@ -290,7 +290,7 @@ mod tests {
             panic!("expected an update");
         };
         assert_eq!(&events, sent_events);
-        assert_eq!(view.board().radius(), sent_view.board().radius());
+        assert_eq!(view.board().extent(), sent_view.board().extent());
         assert_eq!(view.hand(PlayerId(2)), sent_view.hand(PlayerId(2)));
         assert_eq!(view.round(), sent_view.round());
     }

@@ -263,6 +263,7 @@ const ALL: [PropKind; 30] = [
 /// its region's god's.
 fn layout(terrain: Terrain, region: Option<God>) -> &'static [&'static [PropKind]] {
     match terrain {
+        Terrain::Mist => &[],
         // Mostly open meadow: a bush or a stone on about a third of it.
         Terrain::Plains => &[&[BUSH, BOULDER, BUSH, BARE, BARE, BARE, BARE, BARE, BARE]],
         Terrain::Forest => &[

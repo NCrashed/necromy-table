@@ -3536,6 +3536,9 @@ fn untended_bodies_rise_where_no_grove_grows() {
     tile.corpse = Some(Corpse {
         age: UNDEAD_AGE_DARK,
     });
+    // Whatever the board drew there, no militia stand on the two.
+    g.militia
+        .retain(|_, m| m.at != Some(rock) && m.at != Some(meadow));
     let mut events = Vec::new();
     g.raise_dead(&mut events);
     assert_eq!(g.mobs().len(), 1, "a meadow body waits for its grove");
@@ -4110,4 +4113,76 @@ fn the_militia_strike_whoever_goes_after_their_friend() {
     // A battle marks its attacker as the defender's pursuer.
     g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
     assert_eq!(g.pursuer(foe), Some(me));
+}
+
+// ---- The world as players make it (§21.1) ----
+
+#[test]
+fn nobody_walks_into_the_mist() {
+    let (mut g, me, _) = duel(4);
+    let ahead = Hex::new(1, 0);
+    let mut events = Vec::new();
+    assert!(g.veil(ahead, &mut events));
+    assert!(matches!(
+        events.as_slice(),
+        [Event::TerrainChanged {
+            terrain: Terrain::Mist,
+            ..
+        }]
+    ));
+    assert_eq!(
+        g.apply(me, Intent::Move { to: ahead }),
+        Err(RuleError::OffBoard)
+    );
+    assert!(!g.reachable(me).contains_key(&ahead));
+    // Nothing is laid there either.
+    for _ in 0..50 {
+        g.spawn_corpse(&mut events);
+    }
+    assert!(g.board().tile(ahead).unwrap().corpse.is_none());
+    // Back out of the mist, the way is open again.
+    assert!(g.unveil(ahead, &mut events));
+    g.apply(me, Intent::Move { to: ahead }).unwrap();
+}
+
+#[test]
+fn the_mist_never_takes_a_champion_or_a_temple() {
+    let (mut g, me, _) = duel(2);
+    let mut events = Vec::new();
+    let at = g.champion(me).unwrap().hex;
+    assert!(!g.veil(at, &mut events));
+    assert!(!g.veil(g.board().temple_of(God::Zaga), &mut events));
+    assert!(!g.veil(Hex::ZERO, &mut events));
+    assert!(events.is_empty());
+}
+
+#[test]
+fn raised_land_can_be_walked_at_once() {
+    let (mut g, me, _) = duel(2);
+    // Put `me` on the rim of the board, facing the void.
+    let rim = g
+        .board()
+        .land()
+        .map(|(h, _)| h)
+        .find(|&h| {
+            h.ulength() == g.board().extent()
+                && g.champion_at(h).is_none()
+                && !g.mob_at(h)
+                && h.all_neighbors()
+                    .iter()
+                    .any(|&n| g.board().tile(n).is_none())
+        })
+        .unwrap();
+    g.place(me, rim);
+    let beyond = rim
+        .all_neighbors()
+        .into_iter()
+        .find(|&n| g.board().tile(n).is_none())
+        .unwrap();
+    let mut events = Vec::new();
+    assert!(g.raise_land(beyond, Terrain::Plains, &mut events));
+    assert!(matches!(events.as_slice(), [Event::LandRaised { .. }]));
+    assert_eq!(g.board().extent(), rim.ulength().max(beyond.ulength()));
+    g.apply(me, Intent::Move { to: beyond }).unwrap();
+    assert_eq!(g.champion(me).unwrap().hex, beyond);
 }

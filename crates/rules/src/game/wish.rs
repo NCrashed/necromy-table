@@ -664,6 +664,7 @@ impl Game {
                     .flat_map(|r| me.ring(r).collect::<Vec<_>>())
                     .filter(|&h| {
                         self.has(super::Feature::Bodies)
+                            && self.board.contains(h)
                             && self.board.tile(h).is_some_and(|t| t.corpse.is_none())
                             && self.occupant(h).is_none()
                     })

@@ -207,7 +207,7 @@ mod tests {
         let (mut g, _) = Game::scenario(&scene());
         let me = PlayerId(0);
         let foe = PlayerId(1);
-        assert_eq!(g.board().radius(), 3);
+        assert_eq!(g.board().extent(), 3);
         assert_eq!(g.champion(me).unwrap().hex, Hex::new(0, 3));
         assert_eq!(g.hand(me).len(), 1);
         assert_eq!(g.def(g.hand(me)[0]).name, "Искра");

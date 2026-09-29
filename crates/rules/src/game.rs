@@ -655,6 +655,11 @@ pub enum Event {
         hex: Hex,
         terrain: Terrain,
     },
+    /// New land rose at the rim of the world (§21.1).
+    LandRaised {
+        hex: Hex,
+        terrain: Terrain,
+    },
     /// Maya took a card from the hand.
     CardDissolved {
         player: PlayerId,
@@ -1420,7 +1425,11 @@ impl Game {
     /// Cost to step from a champion's hex onto `to`, if it is allowed at all.
     pub fn step_cost(&self, player: PlayerId, to: Hex) -> Result<u32, RuleError> {
         let champion = self.champion(player).ok_or(RuleError::UnknownPlayer)?;
-        let tile = self.board.tile(to).ok_or(RuleError::OffBoard)?;
+        let tile = self
+            .board
+            .tile(to)
+            .filter(|t| t.terrain.is_land())
+            .ok_or(RuleError::OffBoard)?;
         if champion.hex.unsigned_distance_to(to) != 1 {
             return Err(RuleError::NotAdjacent);
         }
@@ -1473,7 +1482,7 @@ impl Game {
                 continue;
             }
             for next in at.all_neighbors() {
-                let Some(tile) = self.board.tile(next) else {
+                let Some(tile) = self.board.tile(next).filter(|t| t.terrain.is_land()) else {
                     continue;
                 };
                 // Militia who let one through are a hex to end on, not to pass.
@@ -1574,6 +1583,7 @@ impl Game {
                 .tiles()
                 .filter(|(h, t)| {
                     h.unsigned_distance_to(me) <= range
+                        && t.terrain.is_land()
                         && self.occupant(*h).is_none()
                         && !self.mob_at(*h)
                         && match def.effect {
@@ -2661,7 +2671,7 @@ impl Game {
             tile.corpse = Some(Corpse { age: 0 });
         }
         let home = self.board.start_of(self.champions[player.0 as usize].god);
-        let respawn = (0..=self.board.radius() * 2)
+        let respawn = (0..=self.board.extent() * 2)
             .flat_map(|r| home.ring(r).collect::<Vec<_>>())
             .find(|&h| {
                 self.board.contains(h)
@@ -2875,6 +2885,7 @@ impl Game {
                 // Any ground but where people are: where no grove can grow,
                 // an untended body rises instead (§20.4).
                 t.corpse.is_none()
+                    && t.terrain.is_land()
                     && !t.terrain.crowded()
                     && self.occupant(*h).is_none()
                     && !self.mob_at(*h)
@@ -2891,6 +2902,7 @@ impl Game {
 
 mod battle;
 mod beasts;
+mod creation;
 mod gear;
 mod guard;
 mod laws;

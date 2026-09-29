@@ -141,7 +141,7 @@ impl Canvas {
 pub fn terrain_icon(terrain: Terrain) -> Option<Image> {
     let mut c = Canvas::new();
     match terrain {
-        Terrain::Plains => return None,
+        Terrain::Plains | Terrain::Mist => return None,
         Terrain::Mountain => {
             c.tri(10, 5, 13, 5, GREY, GREY);
             c.tri(6, 2, 13, 6, LIGHT_GREY, GREY);

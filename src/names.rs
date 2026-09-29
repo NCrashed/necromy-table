@@ -164,6 +164,7 @@ pub fn terrain(terrain: necromy_rules::Terrain) -> (&'static str, &'static str) 
         Terrain::Stones => ("Камни силы", "пока без особых свойств"),
         Terrain::Grove => ("Роща", "выросла из нетронутого тела; идти дороже"),
         Terrain::Table => ("Стол Ахамара", "центр; займи — больше всего Стиля"),
+        Terrain::Mist => ("Мгла", "земли здесь нет: не пройти, пока мгла не развеется"),
     }
 }
 
