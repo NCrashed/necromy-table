@@ -212,6 +212,8 @@ struct MarkerSprites {
     road: Handle<Image>,
     /// A fire burning on a hex (§21.8).
     fire: Handle<Image>,
+    /// Food lying on a field, a sack drawn flat.
+    sack: Handle<Image>,
     /// A building's sign (§21.8): tavern, forge, wall, and a shrine per god.
     signs: [Handle<Image>; 3],
     shrines: [Handle<Image>; 5],
@@ -331,6 +333,7 @@ fn spawn_board(
         pouch: assets.load("items/ground-pouch.png"),
         road: images.add(pixel_sprite(&ROAD_ROWS, [0; 3])),
         fire: images.add(pixel_sprite(&FIRE_ROWS, [236, 110, 36])),
+        sack: images.add(pixel_sprite(&SACK_ROWS, [196, 160, 96])),
         signs: [[220, 160, 60], [200, 84, 44], [150, 150, 160]]
             .map(|c| images.add(pixel_sprite(&SIGN_ROWS, c))),
         shrines: God::ALL.map(|g| images.add(pixel_sprite(&SIGN_ROWS, g.accent()))),
@@ -755,6 +758,21 @@ fn sync_markers(
             )
         })
         .collect();
+    let sacks: Vec<_> = game
+        .game
+        .loads()
+        .iter()
+        .filter(|(_, c)| *c == necromy_rules::Cargo::Food)
+        .map(|(hex, _)| {
+            (
+                *hex,
+                sprites.sack.clone(),
+                Vec3::new(-0.3, 0.0, 0.3),
+                TEXELS,
+                true,
+            )
+        })
+        .collect();
     let signs: Vec<_> = game
         .game
         .buildings()
@@ -773,6 +791,7 @@ fn sync_markers(
         .chain(roads)
         .chain(signs)
         .chain(fires)
+        .chain(sacks)
         .chain(traps)
         .chain(flags)
         .chain(trails)
@@ -866,6 +885,7 @@ fn ground_color(tile: &RulesTile, painted: bool, stage: Option<u8>) -> Color {
             Terrain::River => [0.24, 0.52, 0.82],
             Terrain::Lake => [0.12, 0.30, 0.62],
             Terrain::Ash => [0.24, 0.22, 0.22],
+            Terrain::Fields => [0.80, 0.70, 0.30],
         }
     };
     let tint = tile
@@ -956,6 +976,20 @@ const ROAD_ROWS: [&str; 10] = [
     "..#xxoxxoxxoxxoxx#..",
     "...##oxxoxxoxxo##...",
     ".....##########.....",
+];
+
+/// A sack of grain.
+const SACK_ROWS: [&str; 10] = [
+    "...#w#....",
+    "..##w##...",
+    ".#FFFFF#..",
+    "#FFfFFFF#.",
+    "#FfffFFF#.",
+    "#ffffffF#.",
+    "#fffffff#.",
+    "#dffffff#.",
+    ".#dddddd#.",
+    "..######..",
 ];
 
 /// Flames: a light core in the fire's colour, ink round it.

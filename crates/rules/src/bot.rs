@@ -461,6 +461,7 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
             | GreatDeed::River
             | GreatDeed::Roads
             | GreatDeed::GreatFire
+            | GreatDeed::Feast
             | GreatDeed::Amazon => wish(
                 God::Maya,
                 crate::Act::Veil {
@@ -575,6 +576,63 @@ fn deed_goal(game: &Game, player: PlayerId) -> Option<Hex> {
         }
         GreatDeed::Amazon => None,
         GreatDeed::Roads => None,
+        // Sow, carry the harvest home, wait at the hall for guests.
+        GreatDeed::Feast => {
+            let me = game.champion(player)?.hex;
+            let near = |hexes: Vec<Hex>| {
+                hexes
+                    .into_iter()
+                    .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
+            };
+            let own: Vec<Hex> = game
+                .claims()
+                .filter(|&(h, p)| {
+                    p == player
+                        && game
+                            .board()
+                            .tile(h)
+                            .is_some_and(|t| t.terrain == crate::Terrain::Settlement)
+                })
+                .map(|(h, _)| h)
+                .collect();
+            if let Some(hall) = game.feast_hall(player) {
+                return Some(hall);
+            }
+            if game.cargo(player) == Some(crate::Cargo::Food) {
+                return near(own);
+            }
+            if own.is_empty() {
+                return near(
+                    game.board()
+                        .land()
+                        .filter(|(h, t)| {
+                            t.terrain == crate::Terrain::Settlement && game.owner(*h).is_none()
+                        })
+                        .map(|(h, _)| h)
+                        .collect(),
+                );
+            }
+            if game.fields_of(player) < crate::FEAST_FIELDS {
+                return near(
+                    own.iter()
+                        .flat_map(|h| h.all_neighbors())
+                        .filter(|&h| {
+                            game.board()
+                                .tile(h)
+                                .is_some_and(|t| t.terrain == crate::Terrain::Plains)
+                                && game.occupant(h).is_none()
+                        })
+                        .collect(),
+                );
+            }
+            near(
+                game.loads()
+                    .iter()
+                    .filter(|(h, c)| *c == crate::Cargo::Food && game.occupant(*h).is_none())
+                    .map(|(h, _)| *h)
+                    .collect(),
+            )
+        }
         // Woods in a region its fire has not passed yet.
         GreatDeed::GreatFire => {
             let me = game.champion(player)?.hex;
@@ -672,6 +730,32 @@ fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
         })
     {
         return Some(Intent::Douse { hex });
+    }
+    // Its own Feast: a feast when the guests are there, the harvest carried
+    // home, fields sown by its settlements.
+    if game.deed(player) == Some(GreatDeed::Feast) {
+        if game.may_feast(player) && game.guests(player).len() >= crate::FEAST_GUESTS {
+            return Some(Intent::Feast);
+        }
+        let here = game.champion(player)?.hex;
+        if game.cargo(player) == Some(crate::Cargo::Food)
+            && game.owner(here) == Some(player)
+            && game
+                .board()
+                .tile(here)
+                .is_some_and(|t| t.terrain == crate::Terrain::Settlement)
+        {
+            return Some(Intent::Lay);
+        }
+        if game.takeable(player) == Some(crate::Cargo::Food) {
+            return Some(Intent::Take);
+        }
+        if game.may_sow(player)
+            && game.fields_of(player) < crate::FEAST_FIELDS
+            && spirit_now >= crate::SOW_SPIRIT
+        {
+            return Some(Intent::Sow);
+        }
     }
     // Its own Great Fire: set a region alight that its fire has not passed,
     // or keep one burning once four are.

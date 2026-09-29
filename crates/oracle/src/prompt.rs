@@ -176,6 +176,7 @@ pub fn feature_id(f: Feature) -> &'static str {
         Feature::Piranhas => "piranhas",
         Feature::Roads => "roads",
         Feature::Fires => "fires",
+        Feature::Fields => "fields",
     }
 }
 
@@ -204,6 +205,7 @@ fn feature_words(f: Feature) -> &'static str {
         Feature::Piranhas => "пираньи в реках",
         Feature::Roads => "дороги реестра",
         Feature::Fires => "пожары: лес и поселения горят",
+        Feature::Fields => "поля и урожай",
     }
 }
 
@@ -612,6 +614,7 @@ fn line_ask(kind: LineKind) -> &'static str {
         LineKind::Ordeal => "пройти испытание, которое ты поставил рядом с ним",
         LineKind::Bring => "принести в мир то, чего его деянию не хватает",
         LineKind::Thwart => "сорвать чужое Великое деяние, пока не наступил закат",
+        LineKind::Invitation => "прийти на чужой пир",
     }
 }
 

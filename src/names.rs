@@ -146,6 +146,7 @@ pub fn style_reason(reason: necromy_rules::StyleReason) -> &'static str {
         StyleReason::Item => "плату тёмному богу",
         StyleReason::First => "первенство",
         StyleReason::Variety => "разнообразие дел",
+        StyleReason::Feast => "пир",
     }
 }
 
@@ -167,6 +168,8 @@ pub fn novelty(n: necromy_rules::Novelty) -> String {
         Novelty::Paved => "мостит дорогу".into(),
         Novelty::Kindled => "поджигает".into(),
         Novelty::Doused => "тушит пожар".into(),
+        Novelty::Sowed => "засевает поле".into(),
+        Novelty::Feasted => "устраивает пир".into(),
         Novelty::Sacrificed => "отдаёт предмет богу".into(),
         Novelty::Hid => "уходит в тень".into(),
         Novelty::FinishedLine => "доводит до конца свою историю".into(),
@@ -202,6 +205,10 @@ pub fn terrain(terrain: necromy_rules::Terrain) -> (&'static str, &'static str) 
         Terrain::Ash => (
             "Пепелище",
             "здесь прошёл огонь; тело на нём может прорасти рощей",
+        ),
+        Terrain::Fields => (
+            "Поле",
+            "на закате рождает еду; еду носят ношей в своё поселение",
         ),
     }
 }
@@ -282,6 +289,15 @@ pub fn great_deed(d: necromy_rules::GreatDeed) -> (&'static str, String) {
                 necromy_rules::GREAT_FIRE
             ),
         ),
+        GreatDeed::Feast => (
+            "Пир на весь край",
+            format!(
+                "{} поля у твоих поселений и твой пир ({} еды), на который пришли хотя бы {} гостя.",
+                necromy_rules::FEAST_FIELDS,
+                necromy_rules::FEAST_FOOD,
+                necromy_rules::FEAST_GUESTS
+            ),
+        ),
         GreatDeed::Legion => (
             "Легион",
             format!(
@@ -314,6 +330,8 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::TemplesLinked => "храмов на дорогах реестра",
         CheckKind::RegionsBurnt => "краёв прошёл твой огонь",
         CheckKind::FireBurning => "твой огонь ещё горит",
+        CheckKind::FieldsOwned => "полей у твоих поселений",
+        CheckKind::FeastHeld => "пир с гостями",
         CheckKind::RiverLength => "клеток самой длинной реки",
         CheckKind::RiverSource => "исток у гор",
         CheckKind::RiverMouth => "устье на краю мира",
@@ -436,6 +454,10 @@ pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {
             "Дороги",
             "шаг по дороге стоит 1 на любой земле, дорога через реку — мост; на дороге не скрыться",
         ),
+        Feature::Fields => (
+            "Поля",
+            "равнину у своего поселения можно засеять; на закате поле рождает еду, из еды — пир",
+        ),
         Feature::Fires => (
             "Пожары",
             "лес, рощи и поселения горят; огонь перекидывается на соседей и оставляет пепел",
@@ -552,6 +574,7 @@ pub fn line_title(kind: necromy_rules::LineKind) -> &'static str {
         LineKind::Ordeal => "Испытание бога",
         LineKind::Bring => "Недостающее",
         LineKind::Thwart => "Сорвать деяние",
+        LineKind::Invitation => "Приглашение на пир",
     }
 }
 
@@ -568,6 +591,7 @@ pub fn line_voice(kind: necromy_rules::LineKind) -> &'static str {
         LineKind::Ordeal => "Я поставил тебе испытание рядом. Выстоишь — запомню.",
         LineKind::Bring => "Твоему замыслу не хватает того, чего нет в мире. Принеси это.",
         LineKind::Thwart => "Чужое деяние вот-вот свершится. Не дай ему дожить до заката.",
+        LineKind::Invitation => "В поселении готовят пир. Приходи — накормят и почтут.",
     }
 }
 
@@ -969,6 +993,7 @@ pub fn cargo(c: necromy_rules::Cargo) -> &'static str {
     match c {
         Cargo::Body { hero: true } => "тело чемпиона",
         Cargo::Body { hero: false } => "тело",
+        Cargo::Food => "еда",
     }
 }
 

@@ -47,13 +47,16 @@ pub enum GreatDeed {
     Roads,
     /// A fire of yours has passed through four regions, and burns still.
     GreatFire,
+    /// Three fields by your settlements, and a feast of yours with two
+    /// guests or more.
+    Feast,
     /// A whole region of another god gone into the mist, but its temple and
     /// the champions' homes, and fifteen hexes of it at least.
     DissolvedLand,
 }
 
 impl GreatDeed {
-    pub const ALL: [GreatDeed; 11] = [
+    pub const ALL: [GreatDeed; 12] = [
         GreatDeed::WorldTree,
         GreatDeed::Island,
         GreatDeed::DissolvedLand,
@@ -65,6 +68,7 @@ impl GreatDeed {
         GreatDeed::Amazon,
         GreatDeed::Roads,
         GreatDeed::GreatFire,
+        GreatDeed::Feast,
     ];
 
     /// The god whose deed it is: its card's colour, its voice.
@@ -75,7 +79,7 @@ impl GreatDeed {
             | GreatDeed::DissolvedLand
             | GreatDeed::River
             | GreatDeed::FloodedTable => God::Maya,
-            GreatDeed::City | GreatDeed::GreatFire => God::Trishna,
+            GreatDeed::City | GreatDeed::GreatFire | GreatDeed::Feast => God::Trishna,
             GreatDeed::Roads => God::Ahamar,
             GreatDeed::Reconciliation | GreatDeed::Legion => God::Zaga,
         }
@@ -93,6 +97,7 @@ impl GreatDeed {
             GreatDeed::River => &[Feature::Rivers],
             GreatDeed::Roads => &[Feature::Settlements, Feature::Roads],
             GreatDeed::GreatFire => &[Feature::Fires],
+            GreatDeed::Feast => &[Feature::Settlements, Feature::Cargo, Feature::Fields],
             GreatDeed::FloodedTable => &[Feature::Rivers, Feature::Lakes],
             GreatDeed::Amazon => &[Feature::Beasts, Feature::Rivers, Feature::Piranhas],
             GreatDeed::Legion => &[
@@ -138,6 +143,10 @@ pub enum CheckKind {
     RegionsBurnt,
     /// A fire of yours burns still.
     FireBurning,
+    /// Fields beside your settlements.
+    FieldsOwned,
+    /// A feast of yours with guests enough.
+    FeastHeld,
     /// Hexes of the longest river.
     RiverLength,
     /// It rises by the mountains.
@@ -328,6 +337,18 @@ impl Game {
                 ]
             }
             GreatDeed::Roads => vec![check(CheckKind::TemplesLinked, self.temples_linked(), 5)],
+            GreatDeed::Feast => vec![
+                check(
+                    CheckKind::FieldsOwned,
+                    self.fields_of(player),
+                    super::FEAST_FIELDS,
+                ),
+                check(
+                    CheckKind::FeastHeld,
+                    usize::from(self.feasted[player.0 as usize]),
+                    1,
+                ),
+            ],
             GreatDeed::GreatFire => vec![
                 check(
                     CheckKind::RegionsBurnt,

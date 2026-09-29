@@ -554,6 +554,19 @@ fn tooltip(
             "пожар{whose}: войти — обжечься; в ход мира перекинется дальше"
         ));
     }
+    let food = g.food_at(hex);
+    if food > 0 {
+        lines.push(format!(
+            "в запасах еды: {food} (пир — от {})",
+            necromy_rules::FEAST_FOOD
+        ));
+    }
+    if g.loads()
+        .iter()
+        .any(|(h, c)| *h == hex && *c == necromy_rules::Cargo::Food)
+    {
+        lines.push("здесь лежит еда: возьми и отнеси в своё поселение".into());
+    }
     if g.road(hex) {
         lines.push("дорога: шаг по ней стоит 1; здесь не скрыться".into());
     }

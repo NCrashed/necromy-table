@@ -17,6 +17,8 @@ use crate::features::Feature;
 pub enum Cargo {
     /// A body; a champion's still counts as one (a World Tree).
     Body { hero: bool },
+    /// Food from a field, for a settlement's stores.
+    Food,
 }
 
 impl Game {
@@ -103,6 +105,11 @@ impl Game {
                 }
                 _ => self.loads.push((hex, cargo)),
             },
+            Cargo::Food => {
+                if !self.store_food(player, hex, events) {
+                    self.loads.push((hex, cargo));
+                }
+            }
         }
         events.push(Event::CargoLaid { player, cargo, hex });
     }

@@ -30,7 +30,10 @@ pub struct Fire {
 impl Terrain {
     /// What fire takes.
     pub const fn burns(self) -> bool {
-        matches!(self, Terrain::Forest | Terrain::Grove | Terrain::Settlement)
+        matches!(
+            self,
+            Terrain::Forest | Terrain::Grove | Terrain::Settlement | Terrain::Fields
+        )
     }
 }
 

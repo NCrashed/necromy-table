@@ -310,6 +310,29 @@ impl Game {
             Feature::Roads => {
                 self.run_road(near, super::ROAD_RUN, events);
             }
+            Feature::Fields => {
+                let town = self
+                    .board
+                    .land()
+                    .filter(|(_, t)| t.terrain == Terrain::Settlement)
+                    .map(|(h, _)| h)
+                    .min_by_key(|h| (h.unsigned_distance_to(near), h.x(), h.y()));
+                if let Some(town) = town {
+                    let plains: Vec<Hex> = town
+                        .all_neighbors()
+                        .into_iter()
+                        .filter(|&h| {
+                            self.board
+                                .tile(h)
+                                .is_some_and(|t| t.terrain == Terrain::Plains)
+                        })
+                        .take(2)
+                        .collect();
+                    for hex in plains {
+                        self.make_field(hex, events);
+                    }
+                }
+            }
             Feature::Fires => {
                 if let Some(p) = player {
                     self.fire_near(p, near, 1, events);

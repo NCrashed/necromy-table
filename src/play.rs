@@ -1843,6 +1843,12 @@ impl Match {
                 self.name(*player),
                 names::building(*building)
             ),
+            Event::Feasted { player, guests, .. } => {
+                format!("{} устраивает пир: гостей {guests}.", self.name(*player))
+            }
+            Event::FoodStored { player, food, .. } => {
+                format!("{} несёт еду в запасы: теперь {food}.", self.name(*player))
+            }
             Event::Scorched { player, amount, .. } if *amount > 0 => format!(
                 "Огонь обжигает {}: −{amount}.",
                 self.name_accusative(*player)

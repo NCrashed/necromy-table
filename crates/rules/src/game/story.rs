@@ -46,6 +46,8 @@ pub enum LineKind {
     Bring,
     /// Break a rival's deed on its eve (§21.6).
     Thwart,
+    /// Come to a rival's feast (§21.8).
+    Invitation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -288,6 +290,37 @@ impl Game {
                     if let Some(line) = self.lines.last_mut() {
                         line.deadline = self.round + 2;
                     }
+                }
+            }
+        }
+
+        // Food enough for a feast: the others are asked to it (§21.8).
+        let hosts: Vec<(PlayerId, Hex)> = self
+            .players()
+            .filter_map(|p| self.feast_hall(p).map(|h| (p, h)))
+            .collect();
+        for (host, hall) in hosts {
+            let seats: Vec<Hex> = hall
+                .all_neighbors()
+                .into_iter()
+                .filter(|&h| self.board.contains(h))
+                .collect();
+            let guests: Vec<PlayerId> = self.players().filter(|&r| r != host).collect();
+            for (i, r) in guests.into_iter().enumerate() {
+                let asked = self.lines_of(r).any(|l| l.kind == LineKind::Invitation);
+                let Some(&seat) = seats.get(i % seats.len().max(1)) else {
+                    continue;
+                };
+                if !asked && self.lines_of(r).count() < MAX_OPEN {
+                    self.tell(
+                        r,
+                        God::Trishna,
+                        LineKind::Invitation,
+                        Goal::ReachHex(seat),
+                        2,
+                        0,
+                        events,
+                    );
                 }
             }
         }

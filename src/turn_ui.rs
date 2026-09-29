@@ -75,6 +75,9 @@ enum ActionButton {
     Recruit(u32),
     /// A road on the hex underfoot (§21.8).
     Pave,
+    /// Sow the plains underfoot; hold a feast.
+    Sow,
+    Feast,
     /// Set a hex beside you alight, or put a fire out.
     Kindle(hexx::Hex),
     Douse(hexx::Hex),
@@ -525,6 +528,16 @@ fn rebuild_action(
                 format!("Поджечь\n{} Духа", necromy_rules::KINDLE_SPIRIT),
             ));
         }
+        if g.may_feast(human) {
+            let guests = g.guests(human).len();
+            buttons.push((ActionButton::Feast, format!("Пир\nгостей: {guests}")));
+        }
+        if g.may_sow(human) && spirit >= necromy_rules::SOW_SPIRIT {
+            buttons.push((
+                ActionButton::Sow,
+                format!("Засеять\n{} Духа", necromy_rules::SOW_SPIRIT),
+            ));
+        }
         if spirit >= necromy_rules::QUARTER_SPIRIT
             && let Some(&hex) = g.quarters(human).first()
         {
@@ -582,6 +595,8 @@ fn action_buttons(
             ActionButton::Quarter(hex) => Intent::Quarter { hex: *hex },
             ActionButton::Recruit(mob) => Intent::Recruit { mob: *mob },
             ActionButton::Pave => Intent::Pave,
+            ActionButton::Sow => Intent::Sow,
+            ActionButton::Feast => Intent::Feast,
             ActionButton::Kindle(hex) => Intent::Kindle { hex: *hex },
             ActionButton::Douse(hex) => Intent::Douse { hex: *hex },
             ActionButton::Cycle => Intent::Cycle {

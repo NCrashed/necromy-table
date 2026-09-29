@@ -145,6 +145,8 @@ pub enum StyleReason {
     First,
     /// A day of many different deeds.
     Variety,
+    /// A guest at a feast (§21.8).
+    Feast,
 }
 
 /// Threat at which the royal guard comes out (§6.5).

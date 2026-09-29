@@ -44,6 +44,8 @@ pub enum Terrain {
     Lake,
     /// What a fire left (§21.8).
     Ash,
+    /// A field beside a settlement: food at dusk (§21.8).
+    Fields,
 }
 
 impl Terrain {

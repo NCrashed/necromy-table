@@ -61,10 +61,12 @@ pub enum Feature {
     Roads,
     /// Fires: woods, groves and settlements burn to ash.
     Fires,
+    /// Fields beside settlements bear food at dusk.
+    Fields,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 22] = [
+    pub const ALL: [Feature; 23] = [
         Feature::Bodies,
         Feature::Groves,
         Feature::Settlements,
@@ -87,6 +89,7 @@ impl Feature {
         Feature::Piranhas,
         Feature::Roads,
         Feature::Fires,
+        Feature::Fields,
     ];
 
     /// What the world must have before this can come in (§21.2): all of
@@ -103,6 +106,7 @@ impl Feature {
             Feature::Rivers => &[Land(&[Terrain::Mountain, Terrain::Swamp])],
             Feature::Lakes => &[Has(Feature::Rivers)],
             Feature::Roads => &[Has(Feature::Settlements)],
+            Feature::Fields => &[Has(Feature::Settlements), Has(Feature::Cargo)],
             Feature::Fires => &[Land(&[Terrain::Forest, Terrain::Grove])],
             Feature::Piranhas => &[Has(Feature::Beasts), Has(Feature::Rivers)],
             Feature::Groves | Feature::Undead => &[Has(Feature::Bodies)],
@@ -124,9 +128,11 @@ impl Feature {
     /// (§21.2).
     pub const fn domain(self) -> God {
         match self {
-            Feature::Groves | Feature::Beasts | Feature::Companions | Feature::Piranhas => {
-                God::Bhava
-            }
+            Feature::Groves
+            | Feature::Beasts
+            | Feature::Companions
+            | Feature::Piranhas
+            | Feature::Fields => God::Bhava,
             Feature::Settlements
             | Feature::Cargo
             | Feature::Buildings

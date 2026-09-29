@@ -5230,3 +5230,52 @@ fn a_great_fire_is_four_regions_and_a_fire_still_burning() {
     assert!(g.fire(Hex::new(1, 1)).is_none());
     assert!(!g.checks(me, GreatDeed::GreatFire).iter().all(Check::met));
 }
+
+// ---- Fields and the feast (§21.8) ----
+
+#[test]
+fn a_field_is_sown_bears_food_and_the_food_is_stored() {
+    let (mut g, me, _) = duel(4);
+    let town = Hex::new(0, 2);
+    settled(&mut g, me, town);
+    let field = Hex::new(0, 1);
+    set_terrain(&mut g, field, Terrain::Plains);
+    g.place(me, field);
+    g.apply(me, Intent::Sow).unwrap();
+    assert_eq!(g.board().tile(field).unwrap().terrain, Terrain::Fields);
+    assert_eq!(g.fields_of(me), 1);
+    let mut ev = Vec::new();
+    g.harvest(&mut ev);
+    g.harvest(&mut ev);
+    assert_eq!(g.loads().iter().filter(|(h, _)| *h == field).count(), 1);
+    g.apply(me, Intent::Take).unwrap();
+    assert_eq!(g.cargo(me), Some(Cargo::Food));
+    g.place(me, town);
+    g.drop_cargo(me, town, &mut ev);
+    assert_eq!(g.food_at(town), 1);
+}
+
+#[test]
+fn a_feast_with_guests_is_the_last_step_of_the_deed() {
+    let (mut g, me, foe) = duel(2);
+    g.dusks = EARLIEST_EVE;
+    g.chosen[me.0 as usize] = Some(GreatDeed::Feast);
+    let town = Hex::new(0, 0);
+    set_terrain(&mut g, town, Terrain::Settlement);
+    g.claims.insert((0, 0), me);
+    for h in [Hex::new(-1, 0), Hex::new(-1, 1), Hex::new(0, -1)] {
+        set_terrain(&mut g, h, Terrain::Fields);
+    }
+    g.stores.insert((0, 0), FEAST_FOOD);
+    // One guest is not a feast for the deed.
+    g.apply(me, Intent::Feast).unwrap();
+    assert_eq!(g.food_at(town), 0);
+    assert!(!g.feasted[me.0 as usize]);
+    // With two it is.
+    let third = g.players().find(|&p| p != me && p != foe).unwrap();
+    g.place(third, Hex::new(0, 2));
+    g.stores.insert((0, 0), FEAST_FOOD);
+    g.turns[me.0 as usize].move_points = MOVE_POINTS;
+    g.apply(me, Intent::Feast).unwrap();
+    assert!(g.checks(me, GreatDeed::Feast).iter().all(Check::met));
+}

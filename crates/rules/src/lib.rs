@@ -40,6 +40,7 @@ pub use game::{
 pub use game::{BUILD_SPIRIT, Building, CITY, QUARTER_SPIRIT, WALLED_MILITIA};
 pub use game::{COMPANION_DICE, Companion, ENLIST_SPIRIT, RETINUE, TAME_SPIRIT};
 pub use game::{DOUSE_SPIRIT, Fire, GREAT_FIRE, KINDLE_SPIRIT};
+pub use game::{FEAST_FIELDS, FEAST_FOOD, FEAST_GUESTS, GUEST_RANGE, SOW_SPIRIT};
 pub use game::{JUNGLE, JUNGLE_RIVER, RIVER};
 pub use game::{PAVE_SPIRIT, ROAD_RUN};
 pub use gods::{Element, God};

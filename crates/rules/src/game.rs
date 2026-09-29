@@ -188,6 +188,11 @@ pub enum Intent {
     },
     /// On your turn: a road on the hex underfoot (§21.8).
     Pave,
+    /// On your turn: the plains underfoot beside a settlement of yours
+    /// become a field (§21.8).
+    Sow,
+    /// On your turn, in a settlement of yours with food enough: a feast.
+    Feast,
     /// On your turn: set the woods or settlement beside you alight.
     Kindle {
         hex: Hex,
@@ -757,6 +762,22 @@ pub enum Event {
     RoadLaid {
         hex: Hex,
     },
+    /// A field bore food on `hex` (§21.8).
+    FoodGrew {
+        hex: Hex,
+    },
+    /// `player` laid food into the stores on `hex`: `food` there now.
+    FoodStored {
+        player: PlayerId,
+        hex: Hex,
+        food: u8,
+    },
+    /// `player` held a feast on `hex` with `guests` guests.
+    Feasted {
+        player: PlayerId,
+        hex: Hex,
+        guests: u8,
+    },
     /// Fire on `hex`, begun by `by` or spread from theirs (§21.8).
     FireStarted {
         hex: Hex,
@@ -1292,6 +1313,10 @@ pub struct Game {
     buildings: BTreeMap<(i32, i32), buildings::Building>,
     /// Roads of the register (§21.8).
     roads: std::collections::BTreeSet<(i32, i32)>,
+    /// Food in settlements' stores, and who has held a feast with guests
+    /// (§21.8).
+    stores: BTreeMap<(i32, i32), u8>,
+    feasted: Vec<bool>,
     /// Fires burning (§21.8), and per player the regions theirs burnt.
     fires: BTreeMap<(i32, i32), fire::Fire>,
     burnt: Vec<u8>,
@@ -1429,6 +1454,8 @@ impl Game {
             buildings: BTreeMap::new(),
             roads: Default::default(),
             fires: BTreeMap::new(),
+            stores: BTreeMap::new(),
+            feasted: vec![false; champions_len],
             burnt: vec![0; champions_len],
             firsts: BTreeMap::new(),
             won: vec![0; champions_len],
@@ -1954,6 +1981,8 @@ impl Game {
             Intent::Sacrifice { slot } => self.sacrifice(player, slot, events),
             Intent::Rebuild => self.rebuild(player, events),
             Intent::Pave => self.pave(player, events),
+            Intent::Sow => self.sow(player, events),
+            Intent::Feast => self.hold_feast(player, events),
             Intent::Kindle { hex } => self.kindle(player, hex, events),
             Intent::Douse { hex } => self.douse(player, hex, events),
             Intent::Recruit { mob } => self.take_companion(player, mob, events),
@@ -1988,6 +2017,8 @@ impl Game {
             Intent::Sacrifice { slot } => self.check_sacrifice(player, slot).map(|_| ()),
             Intent::Rebuild => self.check_rebuild(player).map(|_| ()),
             Intent::Pave => self.check_pave(player),
+            Intent::Sow => self.check_sow(player),
+            Intent::Feast => self.check_feast(player),
             Intent::Kindle { hex } => self.check_kindle(player, hex),
             Intent::Douse { hex } => self.check_douse(player, hex),
             Intent::Recruit { mob } => self.check_recruit(player, mob).map(|_| ()),
@@ -2118,6 +2149,7 @@ impl Game {
                     return;
                 }
                 self.settle_the_day(events);
+                self.harvest(events);
                 self.judge_the_day(events);
                 self.begin_dusk(events);
                 if self.dusk.is_none() {
@@ -2450,6 +2482,8 @@ impl Game {
             | Intent::Build { .. }
             | Intent::Recruit { .. }
             | Intent::Pave
+            | Intent::Sow
+            | Intent::Feast
             | Intent::Kindle { .. }
             | Intent::Douse { .. }
             | Intent::Quarter { .. }
@@ -3291,6 +3325,7 @@ mod cargo;
 mod companions;
 mod creation;
 mod dusk;
+mod fields;
 mod fire;
 mod gear;
 mod guard;
@@ -3316,6 +3351,7 @@ pub use buildings::{BUILD_SPIRIT, Building, QUARTER_SPIRIT, WALLED_MILITIA};
 pub use cargo::Cargo;
 pub use companions::{COMPANION_DICE, Companion, ENLIST_SPIRIT, RETINUE, TAME_SPIRIT};
 pub use dusk::{DuskStep, Seal, SealedWish};
+pub use fields::{FEAST_FIELDS, FEAST_FOOD, FEAST_GUESTS, GUEST_RANGE, SOW_SPIRIT};
 pub use fire::{DOUSE_SPIRIT, Fire, GREAT_FIRE, KINDLE_SPIRIT};
 pub use gear::{Gain, SACRIFICE};
 pub use guard::{GUARD_DICE, GUARD_HEALTH, GUARD_RELIEF, GUARD_STEPS, Guard};

@@ -40,6 +40,9 @@ pub enum Novelty {
     /// A fire set, a fire put out.
     Kindled,
     Doused,
+    /// A field sown, a feast held.
+    Sowed,
+    Feasted,
     /// A wish of this kind, granted.
     Wished(WishKind),
     /// A mechanic brought into the world.
