@@ -42,6 +42,10 @@ pub enum LineKind {
     Trial,
     /// Pass a trial a god set near the one lagging (§20.2).
     Ordeal,
+    /// Bring into the world a mechanic one's Great Deed needs (§21.6).
+    Bring,
+    /// Break a rival's deed on its eve (§21.6).
+    Thwart,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,6 +64,10 @@ pub enum Goal {
     AvoidBattle,
     /// Pass the trial on this hex.
     PassTrial(Hex),
+    /// The world has this mechanic, whoever brought it.
+    Bring(crate::features::Feature),
+    /// This rival's deed is off its eve.
+    Thwart(PlayerId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +93,8 @@ pub enum WorldStir {
     Overgrowth,
     /// Unrest: everyone is a little louder.
     Unrest,
+    /// The darkest god brings something of its own into the world.
+    Awakening,
 }
 
 impl Game {
@@ -166,6 +176,8 @@ impl Game {
                 Goal::Offer { god, amount, from } => {
                     self.favor(l.owner, god).saturating_sub(from) >= amount
                 }
+                Goal::Bring(feature) => self.has(feature),
+                Goal::Thwart(rival) => !self.on_eve(rival),
                 _ => false,
             })
             .map(|l| l.id)
@@ -192,8 +204,14 @@ impl Game {
             // The god remembers who answered, and gives from the loot (§20.3).
             self.offer(Some(line.owner), line.god, 1, events);
             self.gain_loot(line.owner, events);
+            // And the story's end changes the world (§21.3).
+            self.story_gift(line.owner, line.god, events);
         } else {
             events.push(Event::LineFailed { line });
+            // A story failed: its god makes what it likes, near its owner.
+            if self.wishes_made() {
+                self.god_creates(line.owner, line.god, events);
+            }
             if line.stake > 0 {
                 self.add_style(
                     line.owner,
@@ -253,7 +271,29 @@ impl Game {
             self.opportunity(p, events);
         }
 
-        // A quiet board stirs.
+        // A deed on its eve: every rival is told how to break it (§21.6), by
+        // the god whose element quenches the deed's patron.
+        let eves: Vec<PlayerId> = self.players().filter(|&p| self.on_eve(p)).collect();
+        for p in eves {
+            let Some(deed) = self.deed(p) else {
+                continue;
+            };
+            let teller = God::from_index(deed.patron().index() + 3);
+            let rivals: Vec<PlayerId> = self.players().filter(|&r| r != p).collect();
+            for r in rivals {
+                let told = self.lines_of(r).any(|l| l.goal == Goal::Thwart(p));
+                if !told && self.lines_of(r).count() < MAX_OPEN {
+                    self.tell(r, teller, LineKind::Thwart, Goal::Thwart(p), 3, 0, events);
+                    // Until the dusk the deed would be done at.
+                    if let Some(line) = self.lines.last_mut() {
+                        line.deadline = self.round + 2;
+                    }
+                }
+            }
+        }
+
+        // A board gone still stirs: no fight, nothing made, nobody near a
+        // deed for a while (§21.6).
         if self.round.saturating_sub(self.last_fight) >= CALM_ROUNDS {
             self.last_fight = self.round;
             self.stir(events);
@@ -286,9 +326,27 @@ impl Game {
         events.push(Event::LineTold { line });
     }
 
-    /// An opportunity from the library, told by a god who fits it.
-    fn opportunity(&mut self, p: PlayerId, events: &mut Vec<Event>) {
+    /// An opportunity from the library, told by a god who fits it. What the
+    /// one lagging's deed needs of the world comes first (§21.6).
+    pub(super) fn opportunity(&mut self, p: PlayerId, events: &mut Vec<Event>) {
         let taken: Vec<LineKind> = self.lines_of(p).map(|l| l.kind).collect();
+        let missing = self
+            .deed(p)
+            .and_then(|d| d.needs().iter().copied().find(|&f| self.can_awaken(f)));
+        if let Some(feature) = missing
+            && !taken.contains(&LineKind::Bring)
+        {
+            self.tell(
+                p,
+                feature.domain(),
+                LineKind::Bring,
+                Goal::Bring(feature),
+                3,
+                0,
+                events,
+            );
+            return;
+        }
         let choices: Vec<LineKind> = [
             LineKind::Pilgrimage,
             LineKind::Tithe,
@@ -341,8 +399,27 @@ impl Game {
         self.tell(p, god, kind, goal, style, 0, events);
     }
 
-    /// The world moves by itself when nobody moves it.
+    /// The world moves by itself when nobody moves it. The darkest god makes
+    /// something of its own first, if the world may still take it (§21.6).
     fn stir(&mut self, events: &mut Vec<Event>) {
+        if self.wishes_made() && !self.awakened_tonight() {
+            let darkest = *God::ALL
+                .iter()
+                .max_by_key(|&&g| (self.stage(g), std::cmp::Reverse(g.index())))
+                .expect("five gods");
+            let own = self
+                .awakenable(darkest)
+                .into_iter()
+                .find(|f| f.domain() == darkest);
+            if let Some(feature) = own {
+                events.push(Event::WorldStirred {
+                    stir: WorldStir::Awakening,
+                });
+                let near = self.board.temple_of(darkest);
+                self.awaken(None, darkest, feature, near, events);
+                return;
+            }
+        }
         let stirs: Vec<WorldStir> = [
             WorldStir::RisingDead,
             WorldStir::Overgrowth,
@@ -353,6 +430,7 @@ impl Game {
             WorldStir::RisingDead => self.has(super::Feature::Bodies),
             WorldStir::Overgrowth => self.has(super::Feature::Groves),
             WorldStir::Unrest => true,
+            WorldStir::Awakening => false,
         })
         .collect();
         let stir = *self.rng.pick(&stirs).expect("unrest is always there");
@@ -396,6 +474,52 @@ impl Game {
                     self.add_threat(p, 1, events);
                 }
             }
+            WorldStir::Awakening => {}
+        }
+    }
+}
+
+impl Game {
+    /// A story done: its god gives the world something for its owner
+    /// (§21.3): what their deed needs, if it can come in, else land of its
+    /// own at the rim nearest them.
+    fn story_gift(&mut self, owner: PlayerId, god: God, events: &mut Vec<Event>) {
+        if !self.wishes_made() {
+            return;
+        }
+        let near = self.hex_of(owner);
+        let need = self
+            .deed(owner)
+            .and_then(|d| d.needs().iter().copied().find(|&f| self.can_awaken(f)));
+        if let Some(feature) = need
+            && self.awaken(Some(owner), god, feature, near, events)
+        {
+            return;
+        }
+        self.rise(god, None, near, 2, events);
+    }
+
+    /// Something happened: the board is not still (§21.6). A fight, land
+    /// made or unmade, a new rule, a card at a rival, a tribute, a trial
+    /// passed, a deed on its eve.
+    pub(super) fn note_life(&mut self, events: &[Event]) {
+        let alive = events.iter().any(|e| {
+            matches!(
+                e,
+                Event::LandRaised { .. }
+                    | Event::WorldGrew { .. }
+                    | Event::TerrainChanged { .. }
+                    | Event::DeedEve { .. }
+                    | Event::TributeGiven { .. }
+                    | Event::TrialPassed { .. }
+                    | Event::WindowOpened {
+                        kind: super::WindowKind::Target { .. },
+                        ..
+                    }
+            )
+        });
+        if alive {
+            self.last_fight = self.round;
         }
     }
 }

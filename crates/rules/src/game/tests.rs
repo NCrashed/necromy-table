@@ -4629,3 +4629,69 @@ fn a_champions_body_grows_into_the_grove_of_a_world_tree() {
     };
     assert!(grove.met());
 }
+
+// ---- The storyteller in a world being made (§21.6) ----
+
+#[test]
+fn one_lagging_is_told_to_bring_in_what_their_deed_needs() {
+    let (mut g, me, _) = duel(3);
+    without(
+        &mut g,
+        &[Feature::Settlements, Feature::Militia, Feature::Ruins],
+    );
+    g.chosen[me.0 as usize] = Some(GreatDeed::Island);
+    let mut ev = Vec::new();
+    g.opportunity(me, &mut ev);
+    let line = *g.lines_of(me).next().expect("a line");
+    assert_eq!(line.goal, Goal::Bring(Feature::Settlements));
+    assert_eq!(line.god, God::Trishna);
+    // Whoever brings it in, the line is done.
+    let at = g.champion(me).unwrap().hex;
+    g.awaken(None, God::Trishna, Feature::Settlements, at, &mut ev);
+    g.check_lines(&mut ev);
+    assert!(ev.iter().any(|e| matches!(e, Event::LineDone { .. })));
+}
+
+#[test]
+fn a_deed_on_its_eve_sets_everyone_else_to_break_it() {
+    let (mut g, me, foe) = duel(3);
+    g.chosen[me.0 as usize] = Some(GreatDeed::Island);
+    g.eves[me.0 as usize] = Some(g.dusks);
+    let mut ev = Vec::new();
+    g.storyteller(&mut ev);
+    let line = g
+        .lines_of(foe)
+        .find(|l| l.goal == Goal::Thwart(me))
+        .copied()
+        .expect("told to break it");
+    // By the god whose element quenches the patron's: Maya's water, Zaga's earth.
+    assert_eq!(line.god, God::Zaga);
+    // The eve broken, the line is done.
+    g.eves[me.0 as usize] = None;
+    let mut ev = Vec::new();
+    g.check_lines(&mut ev);
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::LineDone { line } if line.owner == foe))
+    );
+}
+
+#[test]
+fn a_still_board_lets_the_darkest_god_bring_something_in() {
+    let (mut g, _, _) = duel(3);
+    without(&mut g, &[Feature::Undead, Feature::Ruins, Feature::Stealth]);
+    g.pantheon.stages = [0, 0, 0, 0, 2];
+    g.last_fight = 0;
+    g.round = 10;
+    let mut ev = Vec::new();
+    g.storyteller(&mut ev);
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::WorldStirred {
+            stir: WorldStir::Awakening
+        }
+    )));
+    let grown = grew(&ev);
+    assert_eq!(grown.len(), 1);
+    assert_eq!(grown[0].domain(), God::Maya);
+}

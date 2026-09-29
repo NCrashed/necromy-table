@@ -51,7 +51,7 @@ impl Game {
 
     /// Whether wishes are made in this match at all (a scripted scene may
     /// do without them).
-    fn wishes_made(&self) -> bool {
+    pub(super) fn wishes_made(&self) -> bool {
         self.scripted.is_none_or(|s| s.dawn)
     }
 

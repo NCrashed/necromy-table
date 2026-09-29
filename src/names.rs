@@ -428,6 +428,8 @@ pub fn line_title(kind: necromy_rules::LineKind) -> &'static str {
         LineKind::QuietCrown => "Тихий Венец",
         LineKind::Trial => "Испытание Венца",
         LineKind::Ordeal => "Испытание бога",
+        LineKind::Bring => "Недостающее",
+        LineKind::Thwart => "Сорвать деяние",
     }
 }
 
@@ -442,6 +444,8 @@ pub fn line_voice(kind: necromy_rules::LineKind) -> &'static str {
         LineKind::QuietCrown => "Ставка: удержи Венец до срока, не обнажая меча.",
         LineKind::Trial => "Докажи, что Венец твой: выиграй бой до срока.",
         LineKind::Ordeal => "Я поставил тебе испытание рядом. Выстоишь — запомню.",
+        LineKind::Bring => "Твоему замыслу не хватает того, чего нет в мире. Принеси это.",
+        LineKind::Thwart => "Чужое деяние вот-вот свершится. Не дай ему дожить до заката.",
     }
 }
 
@@ -469,6 +473,14 @@ pub fn line_goal(line: &necromy_rules::Line, g: &necromy_rules::Game) -> String 
         Goal::Body => "сыграй карту на тело".into(),
         Goal::AvoidBattle => "не участвуй в боях".into(),
         Goal::PassTrial(_) => "пройди испытание (подсвечено)".into(),
+        Goal::Bring(f) => format!(
+            "пусть в мире будет: {} (желанием или чьим угодно)",
+            feature(f).0.to_lowercase()
+        ),
+        Goal::Thwart(rival) => format!(
+            "сорви деяние {} до заката",
+            g.champion(rival).map_or("?", |c| god_genitive(c.god))
+        ),
     }
 }
 
@@ -489,6 +501,7 @@ pub fn world_stir(stir: necromy_rules::WorldStir) -> &'static str {
         WorldStir::RisingDead => "На столе тихо — и мёртвые поднимаются у центра.",
         WorldStir::Overgrowth => "На столе тихо — и чаща разрастается сама.",
         WorldStir::Unrest => "На столе тихо — и по королевству ползёт тревога: всем +1 Угрозы.",
+        WorldStir::Awakening => "На столе тихо — и самый тёмный бог сам приносит в мир своё.",
     }
 }
 

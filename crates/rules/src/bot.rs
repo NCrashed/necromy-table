@@ -419,12 +419,28 @@ fn wish(game: &Game, player: PlayerId) -> Intent {
 /// the first mechanic the deed needs that the world lacks, else what its
 /// next unmet step asks for.
 fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
-    let deed = game.deed(player)?;
     let wish = |god: God, act: crate::Act| Intent::Wish {
         god,
         wish: crate::Wish::one(act),
         said: None,
     };
+    // A rival's deed on its eve is broken first (§21.10): mist round them
+    // shrinks an island and takes the woods from a tree; new land in the
+    // region they dissolve makes it bigger than the mist.
+    if let Some(rival) = game.players().find(|&r| r != player && game.on_eve(r)) {
+        return Some(match game.deed(rival)? {
+            GreatDeed::DissolvedLand => {
+                wish(game.dissolving(rival).0, crate::Act::Rise { terrain: None })
+            }
+            GreatDeed::Island | GreatDeed::WorldTree => wish(
+                God::Maya,
+                crate::Act::Veil {
+                    target: Some(rival),
+                },
+            ),
+        });
+    }
+    let deed = game.deed(player)?;
     if let Some(&missing) = deed.needs().iter().find(|&&f| !game.has(f))
         && game.can_awaken(missing)
     {

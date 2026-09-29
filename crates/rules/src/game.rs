@@ -1789,6 +1789,7 @@ impl Game {
         }
         self.release_held(&mut events);
         self.end_round_when_done(&mut events);
+        self.note_life(&events);
         self.settle_story(&mut events);
         self.check_victory(&mut events);
         self.log.extend(events.iter().cloned());
