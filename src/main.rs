@@ -21,6 +21,7 @@ mod names;
 mod play;
 mod props;
 mod ring_ui;
+mod settings;
 mod stats;
 mod story_ui;
 mod token;
@@ -91,6 +92,7 @@ fn main() {
             ring_ui::RingUiPlugin,
             audio::SoundPlugin,
         ))
+        .add_plugins(settings::SettingsPlugin)
         .add_plugins(AutoScreenshotPlugin)
         .add_systems(Startup, setup_scene)
         .run();

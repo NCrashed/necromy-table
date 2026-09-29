@@ -287,6 +287,7 @@ fn fade(
     mut commands: Commands,
     mut voices: Query<(Entity, &mut Voice, Option<&mut AudioSink>)>,
     time: Res<Time>,
+    settings: Res<crate::settings::Settings>,
 ) {
     let step = time.delta_secs() / FADE_SECS;
     for (entity, mut voice, sink) in &mut voices {
@@ -298,7 +299,7 @@ fn fade(
         if let Some(mut sink) = sink {
             // Equal-power curve: the crossfade does not dip in the middle.
             let level = (voice.gain * std::f32::consts::FRAC_PI_2).sin();
-            sink.set_volume(Volume::Linear(level * MUSIC_GAIN));
+            sink.set_volume(Volume::Linear(level * MUSIC_GAIN * settings.music_gain()));
         }
         if voice.gain == 0.0 && voice.target == 0.0 {
             commands.entity(entity).despawn();
@@ -416,6 +417,7 @@ fn play_sounds(
     mut sounds: MessageReader<Sound>,
     mut effects: ResMut<Effects>,
     time: Res<Time>,
+    settings: Res<crate::settings::Settings>,
 ) {
     let now = time.elapsed_secs();
     let mut started = 0;
@@ -456,7 +458,10 @@ fn play_sounds(
             AudioPlayer::new(variants[pick].clone()),
             PlaybackSettings::DESPAWN
                 .with_volume(Volume::Linear(
-                    sound.volume.clamp(0.0, 1.5) * level(sound.name) * SFX_GAIN,
+                    sound.volume.clamp(0.0, 1.5)
+                        * level(sound.name)
+                        * SFX_GAIN
+                        * settings.effects_gain(),
                 ))
                 .with_speed(speed),
         ));
@@ -666,6 +671,7 @@ fn play_tones(
     mut tones: MessageReader<Tone>,
     mut blips: ResMut<Assets<Blip>>,
     mut effects: ResMut<Effects>,
+    settings: Res<crate::settings::Settings>,
 ) {
     for tone in tones.read() {
         if effects.muted {
@@ -675,7 +681,8 @@ fn play_tones(
         let blip = blips.add(Blip(tone.render(seed).into()));
         commands.spawn((
             AudioPlayer(blip),
-            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(BLIP_GAIN)),
+            PlaybackSettings::DESPAWN
+                .with_volume(Volume::Linear(BLIP_GAIN * settings.effects_gain())),
         ));
     }
 }

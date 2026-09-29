@@ -674,6 +674,15 @@ fn menu(commands: &mut Commands, font: &UiFont, front: &Front, rows: &mut Vec<En
         11.0,
         DIM,
     ));
+    // Volume and the window; also F10 anywhere.
+    let settings = crate::settings::open_button(commands, font, "Настройки");
+    commands.entity(settings).insert(Node {
+        margin: UiRect::top(px(10.0)),
+        padding: UiRect::axes(px(16.0), px(9.0)),
+        justify_content: JustifyContent::Center,
+        ..default()
+    });
+    rows.push(settings);
 }
 
 /// The tutorial's chapters, the finished ones marked.
