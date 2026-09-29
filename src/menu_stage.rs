@@ -275,7 +275,11 @@ impl Geometry {
                 // Room for a stone or a feast between the champion and the panel.
                 let edge = if east { half } else { self.w - half };
                 let inner = near - dir * 80.0 * s;
-                let inner = if east { inner.max(edge) } else { inner.min(edge) };
+                let inner = if east {
+                    inner.max(edge)
+                } else {
+                    inner.min(edge)
+                };
                 Vec2::new(edge + (inner - edge) * u, floor)
             }
             Mark::Beside { far: false, texels } => Vec2::new(near - dir * texels * s, floor),
@@ -306,7 +310,9 @@ fn geometry(
 #[derive(Clone, Copy, Debug)]
 enum Step {
     /// Walk to a mark, on its ground.
-    Walk { to: Mark },
+    Walk {
+        to: Mark,
+    },
     /// Frames `from..to` of a row of the act sheet (backwards if `from >
     /// to`), then the last one held for `hold` seconds.
     Play {
@@ -316,10 +322,16 @@ enum Step {
         hold: f32,
     },
     /// Stand facing the player.
-    Idle { secs: f32 },
+    Idle {
+        secs: f32,
+    },
     /// Leap to a point: the jump row's frames before `air` in place, `air`
     /// held along the arc, the rest where it lands.
-    Leap { to: Mark, air: usize, secs: f32 },
+    Leap {
+        to: Mark,
+        air: usize,
+        secs: f32,
+    },
     Cue(Cue),
 }
 
@@ -792,7 +804,11 @@ fn walk_on(
                 v.pose = (Sheet::Walk, ROW_IDLE, (v.t * 4.0) as usize % frames);
                 v.t >= secs
             }
-            Step::Leap { to: mark, air, secs } => {
+            Step::Leap {
+                to: mark,
+                air,
+                secs,
+            } => {
                 if v.t <= dt {
                     v.from = v.feet;
                 }
@@ -1125,8 +1141,10 @@ fn cue_effect(
                             flicker: Vec::new(),
                             grow: 0.0,
                         },
-                        ImageNode::new(art.flowers[(visits.roll() * n as f32) as usize % n].clone())
-                            .with_color(Color::WHITE.with_alpha(0.0)),
+                        ImageNode::new(
+                            art.flowers[(visits.roll() * n as f32) as usize % n].clone(),
+                        )
+                        .with_color(Color::WHITE.with_alpha(0.0)),
                         Node {
                             position_type: PositionType::Absolute,
                             left: px((feet.x + dx - small / 2.0).round()),
@@ -1156,7 +1174,14 @@ fn cue_effect(
             if visits.roll() < 0.35 {
                 world.add(Kind::Glowcap, 0, at + (visits.roll() - 0.5) * 0.1, 0.0);
             }
-            let splash = puff(commands, &art.splash, feet - Vec2::Y * 30.0 * s, s, now, 0.9);
+            let splash = puff(
+                commands,
+                &art.splash,
+                feet - Vec2::Y * 30.0 * s,
+                s,
+                now,
+                0.9,
+            );
             commands.entity(root).add_child(splash);
             sounds.write(Sound::new("spirit"));
         }
@@ -1169,7 +1194,14 @@ fn cue_effect(
 }
 
 /// A puff at a point on the ground that fades.
-fn puff(commands: &mut Commands, image: &Handle<Image>, at: Vec2, s: f32, now: f32, life: f32) -> Entity {
+fn puff(
+    commands: &mut Commands,
+    image: &Handle<Image>,
+    at: Vec2,
+    s: f32,
+    now: f32,
+    life: f32,
+) -> Entity {
     let size = 64.0 * s * 0.75;
     commands
         .spawn((

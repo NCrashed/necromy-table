@@ -162,6 +162,7 @@ impl Game {
     /// settlement in a few phases unless a dawn brings a man back in time
     /// or a champion comes to help; two at once are faster.
     pub(super) fn mob_phase(&mut self, events: &mut Vec<Event>) {
+        self.devour_fairs(events);
         // Those that come up to a gate this phase are not reached by its
         // militia until the next.
         let mut arrived: Vec<u32> = Vec::new();
@@ -242,7 +243,7 @@ impl Game {
 
     /// One step towards the nearest living thing it sees: a champion or a
     /// settlement.
-    fn undead_walk(&mut self, id: u32, events: &mut Vec<Event>) {
+    pub(super) fn undead_walk(&mut self, id: u32, events: &mut Vec<Event>) {
         let Some(u) = self.mobs.iter().find(|u| u.id == id).copied() else {
             return;
         };
@@ -253,6 +254,8 @@ impl Game {
                 .filter(|h| h.unsigned_distance_to(u.hex) <= UNDEAD_SIGHT)
                 .min_by_key(|h| (h.unsigned_distance_to(u.hex), h.x(), h.y()))
         };
+        // A fair is heard from twice as far, and comes first (§21.8).
+        let fair = self.fair_in_sight(u.hex, UNDEAD_SIGHT * 2);
         let settlement = nearest(&mut self.militias().map(|(home, _)| home));
         let champion = nearest(
             &mut self
@@ -260,7 +263,7 @@ impl Game {
                 .filter(|&p| !self.is_hidden(p))
                 .map(|p| self.hex_of(p)),
         );
-        let Some(goal) = settlement.or(champion) else {
+        let Some(goal) = fair.or(settlement).or(champion) else {
             return;
         };
         let here = u.hex.unsigned_distance_to(goal);

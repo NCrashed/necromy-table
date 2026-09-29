@@ -5279,3 +5279,60 @@ fn a_feast_with_guests_is_the_last_step_of_the_deed() {
     g.apply(me, Intent::Feast).unwrap();
     assert!(g.checks(me, GreatDeed::Feast).iter().all(Check::met));
 }
+
+// ---- Goods and fairs (§21.8) ----
+
+#[test]
+fn goods_are_sold_at_a_fair_a_kind_once() {
+    let (mut g, me, _) = duel(4);
+    let town = Hex::new(0, 2);
+    settled(&mut g, me, town);
+    let region = g.board().tile(town).unwrap().region.unwrap();
+    let mut ev = Vec::new();
+    g.make_goods(&mut ev);
+    assert!(g.loads().contains(&(town, Cargo::Goods(region))));
+    g.champ_mut(me).spirit_points = 3;
+    g.apply(me, Intent::Fair).unwrap();
+    g.apply(me, Intent::Take).unwrap();
+    let style = g.style(me);
+    let hand = g.hand(me).len();
+    g.apply(me, Intent::Lay).unwrap();
+    assert_eq!(g.fair(town).unwrap().kinds(), 1);
+    assert_eq!(g.style(me), style + 1);
+    assert_eq!(g.hand(me).len(), hand + 1);
+    // The same kind again is not bought: it lies there.
+    g.champ_mut(me).cargo = Some(Cargo::Goods(region));
+    g.drop_cargo(me, town, &mut ev);
+    assert_eq!(g.fair(town).unwrap().kinds(), 1);
+    // Its days out, the fair closes.
+    g.dusks += FAIR_DUSKS;
+    g.close_fairs(&mut ev);
+    assert!(g.fair(town).is_none());
+}
+
+#[test]
+fn the_dead_walk_to_a_fair_and_eat_it() {
+    let (mut g, me, _) = duel(4);
+    g.chosen[me.0 as usize] = Some(GreatDeed::DeadFeast);
+    let town = Hex::new(0, 2);
+    settled(&mut g, me, town);
+    g.place(me, Hex::new(-2, 4));
+    g.fairs.insert(
+        (town.x(), town.y()),
+        Fair {
+            host: me,
+            goods: 0,
+            until: 99,
+        },
+    );
+    g.militia.remove(&(town.x(), town.y()));
+    let id = undead_on(&mut g, Hex::new(0, 5), 2);
+    let mut ev = Vec::new();
+    g.undead_walk(id, &mut ev);
+    let at = g.mobs().iter().find(|m| m.id == id).unwrap().hex;
+    assert!(at.unsigned_distance_to(town) < 3, "it walked to {at:?}");
+    g.mobs.iter_mut().find(|m| m.id == id).unwrap().hex = Hex::new(1, 2);
+    g.devour_fairs(&mut ev);
+    assert!(g.fair(town).is_none());
+    assert_eq!(g.dead_feasts(me), 1);
+}

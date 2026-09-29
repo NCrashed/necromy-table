@@ -147,6 +147,7 @@ pub fn style_reason(reason: necromy_rules::StyleReason) -> &'static str {
         StyleReason::First => "первенство",
         StyleReason::Variety => "разнообразие дел",
         StyleReason::Feast => "пир",
+        StyleReason::Fair => "торг на ярмарке",
     }
 }
 
@@ -170,6 +171,7 @@ pub fn novelty(n: necromy_rules::Novelty) -> String {
         Novelty::Doused => "тушит пожар".into(),
         Novelty::Sowed => "засевает поле".into(),
         Novelty::Feasted => "устраивает пир".into(),
+        Novelty::HeldFair => "открывает ярмарку".into(),
         Novelty::Sacrificed => "отдаёт предмет богу".into(),
         Novelty::Hid => "уходит в тень".into(),
         Novelty::FinishedLine => "доводит до конца свою историю".into(),
@@ -289,6 +291,17 @@ pub fn great_deed(d: necromy_rules::GreatDeed) -> (&'static str, String) {
                 necromy_rules::GREAT_FIRE
             ),
         ),
+        GreatDeed::FairOfFive => (
+            "Ярмарка пяти краёв",
+            "На твоей ярмарке продан товар каждого из пяти краёв: древесина, вино, соль, железо и жемчуг.".into(),
+        ),
+        GreatDeed::DeadFeast => (
+            "Пир для мёртвых",
+            format!(
+                "Мертвецы пришли на твою ярмарку и съели пир — {} раза.",
+                necromy_rules::DEAD_FEASTS
+            ),
+        ),
         GreatDeed::Feast => (
             "Пир на весь край",
             format!(
@@ -332,6 +345,8 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::FireBurning => "твой огонь ещё горит",
         CheckKind::FieldsOwned => "полей у твоих поселений",
         CheckKind::FeastHeld => "пир с гостями",
+        CheckKind::FairGoods => "товаров продано на твоей ярмарке",
+        CheckKind::DeadFeasts => "твоих ярмарок съели мертвецы",
         CheckKind::RiverLength => "клеток самой длинной реки",
         CheckKind::RiverSource => "исток у гор",
         CheckKind::RiverMouth => "устье на краю мира",
@@ -453,6 +468,14 @@ pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {
         Feature::Roads => (
             "Дороги",
             "шаг по дороге стоит 1 на любой земле, дорога через реку — мост; на дороге не скрыться",
+        ),
+        Feature::Goods => (
+            "Товары",
+            "занятые поселения на закате дают товар своего края; товар носят ношей, его отнимают в бою",
+        ),
+        Feature::Fairs => (
+            "Ярмарки",
+            "в своём поселении можно открыть ярмарку: привезённый товар даёт Стиль и карту, а мертвецы идут на шум",
         ),
         Feature::Fields => (
             "Поля",
@@ -994,6 +1017,7 @@ pub fn cargo(c: necromy_rules::Cargo) -> &'static str {
         Cargo::Body { hero: true } => "тело чемпиона",
         Cargo::Body { hero: false } => "тело",
         Cargo::Food => "еда",
+        Cargo::Goods(g) => goods(g),
     }
 }
 
@@ -1017,5 +1041,17 @@ pub fn companion(c: necromy_rules::Companion) -> &'static str {
     match c {
         Companion::Beast => "зверь",
         Companion::Undead => "мертвец",
+    }
+}
+
+/// The goods of a god's land (§21.8).
+pub fn goods(god: necromy_rules::God) -> &'static str {
+    use necromy_rules::God;
+    match god {
+        God::Bhava => "древесина",
+        God::Trishna => "вино",
+        God::Zaga => "соль",
+        God::Ahamar => "железо",
+        God::Maya => "жемчуг",
     }
 }

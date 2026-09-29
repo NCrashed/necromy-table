@@ -193,6 +193,8 @@ pub enum Intent {
     Sow,
     /// On your turn, in a settlement of yours with food enough: a feast.
     Feast,
+    /// On your turn, in a settlement of yours: open a fair.
+    Fair,
     /// On your turn: set the woods or settlement beside you alight.
     Kindle {
         hex: Hex,
@@ -762,6 +764,32 @@ pub enum Event {
     RoadLaid {
         hex: Hex,
     },
+    /// A settlement made its region's goods (§21.8).
+    GoodsMade {
+        hex: Hex,
+        god: God,
+    },
+    /// `player` opened a fair on `hex`.
+    FairOpened {
+        player: PlayerId,
+        hex: Hex,
+    },
+    /// `player` sold goods of `god`'s land at the fair on `hex`: `kinds` sold there now.
+    GoodsSold {
+        player: PlayerId,
+        hex: Hex,
+        god: God,
+        kinds: u8,
+    },
+    /// The fair on `hex` closed, its days out.
+    FairClosed {
+        hex: Hex,
+    },
+    /// The dead came to the fair on `hex` and ate the feast.
+    FairDevoured {
+        hex: Hex,
+        host: PlayerId,
+    },
     /// A field bore food on `hex` (§21.8).
     FoodGrew {
         hex: Hex,
@@ -1313,6 +1341,9 @@ pub struct Game {
     buildings: BTreeMap<(i32, i32), buildings::Building>,
     /// Roads of the register (§21.8).
     roads: std::collections::BTreeSet<(i32, i32)>,
+    /// Fairs open (§21.8), and per player the fairs of theirs the dead ate.
+    fairs: BTreeMap<(i32, i32), trade::Fair>,
+    dead_feasts: Vec<u8>,
     /// Food in settlements' stores, and who has held a feast with guests
     /// (§21.8).
     stores: BTreeMap<(i32, i32), u8>,
@@ -1455,6 +1486,8 @@ impl Game {
             roads: Default::default(),
             fires: BTreeMap::new(),
             stores: BTreeMap::new(),
+            fairs: BTreeMap::new(),
+            dead_feasts: vec![0; champions_len],
             feasted: vec![false; champions_len],
             burnt: vec![0; champions_len],
             firsts: BTreeMap::new(),
@@ -1983,6 +2016,7 @@ impl Game {
             Intent::Pave => self.pave(player, events),
             Intent::Sow => self.sow(player, events),
             Intent::Feast => self.hold_feast(player, events),
+            Intent::Fair => self.open_fair(player, events),
             Intent::Kindle { hex } => self.kindle(player, hex, events),
             Intent::Douse { hex } => self.douse(player, hex, events),
             Intent::Recruit { mob } => self.take_companion(player, mob, events),
@@ -2019,6 +2053,7 @@ impl Game {
             Intent::Pave => self.check_pave(player),
             Intent::Sow => self.check_sow(player),
             Intent::Feast => self.check_feast(player),
+            Intent::Fair => self.check_fair(player),
             Intent::Kindle { hex } => self.check_kindle(player, hex),
             Intent::Douse { hex } => self.check_douse(player, hex),
             Intent::Recruit { mob } => self.check_recruit(player, mob).map(|_| ()),
@@ -2150,6 +2185,8 @@ impl Game {
                 }
                 self.settle_the_day(events);
                 self.harvest(events);
+                self.make_goods(events);
+                self.close_fairs(events);
                 self.judge_the_day(events);
                 self.begin_dusk(events);
                 if self.dusk.is_none() {
@@ -2484,6 +2521,7 @@ impl Game {
             | Intent::Pave
             | Intent::Sow
             | Intent::Feast
+            | Intent::Fair
             | Intent::Kindle { .. }
             | Intent::Douse { .. }
             | Intent::Quarter { .. }
@@ -3339,6 +3377,7 @@ mod scenario;
 mod stealth;
 mod story;
 mod style;
+mod trade;
 mod trial;
 mod victory;
 mod view;
@@ -3370,6 +3409,7 @@ pub use scenario::{Scenario, SceneSeat, SceneWorld};
 pub use stealth::RevealReason;
 pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
+pub use trade::{DEAD_FEASTS, FAIR_DUSKS, FAIR_SPIRIT, Fair};
 pub use trial::{Boon, TRIAL_ROUNDS, TRIALS_ON_BOARD, Trial, trial_face};
 pub use victory::{
     CITY, Check, CheckKind, DISSOLVED, EARLIEST_EVE, GreatDeed, ISLAND, JUNGLE, JUNGLE_RIVER,

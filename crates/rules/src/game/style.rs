@@ -147,6 +147,8 @@ pub enum StyleReason {
     Variety,
     /// A guest at a feast (§21.8).
     Feast,
+    /// Goods sold at a fair.
+    Fair,
 }
 
 /// Threat at which the royal guard comes out (§6.5).

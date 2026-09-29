@@ -462,6 +462,8 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
             | GreatDeed::Roads
             | GreatDeed::GreatFire
             | GreatDeed::Feast
+            | GreatDeed::FairOfFive
+            | GreatDeed::DeadFeast
             | GreatDeed::Amazon => wish(
                 God::Maya,
                 crate::Act::Veil {
@@ -576,6 +578,49 @@ fn deed_goal(game: &Game, player: PlayerId) -> Option<Hex> {
         }
         GreatDeed::Amazon => None,
         GreatDeed::Roads => None,
+        // Its fair: open one at home, then bring the goods it lacks; for the
+        // dead, bide at the fair and let them come.
+        GreatDeed::FairOfFive | GreatDeed::DeadFeast => {
+            let me = game.champion(player)?.hex;
+            let mine = game.fairs().find(|(_, f)| f.host == player);
+            let own_town = game
+                .claims()
+                .filter(|&(h, p)| {
+                    p == player
+                        && game
+                            .board()
+                            .tile(h)
+                            .is_some_and(|t| t.terrain == crate::Terrain::Settlement)
+                })
+                .map(|(h, _)| h)
+                .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()));
+            let Some((fair, f)) = mine else {
+                return own_town.or_else(|| {
+                    game.board()
+                        .land()
+                        .filter(|(h, t)| {
+                            t.terrain == crate::Terrain::Settlement && game.owner(*h).is_none()
+                        })
+                        .map(|(h, _)| h)
+                        .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
+                });
+            };
+            if game.deed(player) == Some(GreatDeed::DeadFeast) {
+                // Near enough the fair to keep the living from it, not in the dead's way.
+                return (me.unsigned_distance_to(fair) > 3).then_some(fair);
+            }
+            if matches!(game.cargo(player), Some(crate::Cargo::Goods(g)) if !f.has(g)) {
+                return Some(fair);
+            }
+            game.loads()
+                .iter()
+                .filter(|(h, c)| {
+                    matches!(c, crate::Cargo::Goods(g) if !f.has(*g))
+                        && game.occupant(*h).is_none_or(|p| p == player)
+                })
+                .map(|(h, _)| *h)
+                .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
+        }
         // Sow, carry the harvest home, wait at the hall for guests.
         GreatDeed::Feast => {
             let me = game.champion(player)?.hex;
@@ -730,6 +775,29 @@ fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
         })
     {
         return Some(Intent::Douse { hex });
+    }
+    // Its fair: open it at home; bring the goods it lacks.
+    if matches!(
+        game.deed(player),
+        Some(GreatDeed::FairOfFive | GreatDeed::DeadFeast)
+    ) {
+        let mine = game.fairs().find(|(_, f)| f.host == player);
+        if mine.is_none() && game.may_open_fair(player) && spirit_now >= crate::FAIR_SPIRIT {
+            return Some(Intent::Fair);
+        }
+        if let Some((fair, f)) = mine {
+            let here = game.champion(player)?.hex;
+            match game.cargo(player) {
+                Some(crate::Cargo::Goods(g)) if here == fair && !f.has(g) => {
+                    return Some(Intent::Lay);
+                }
+                None if matches!(game.takeable(player), Some(crate::Cargo::Goods(g)) if !f.has(g)) =>
+                {
+                    return Some(Intent::Take);
+                }
+                _ => {}
+            }
+        }
     }
     // Its own Feast: a feast when the guests are there, the harvest carried
     // home, fields sown by its settlements.

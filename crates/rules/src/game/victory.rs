@@ -50,13 +50,17 @@ pub enum GreatDeed {
     /// Three fields by your settlements, and a feast of yours with two
     /// guests or more.
     Feast,
+    /// A fair of yours with goods of all five lands sold at it.
+    FairOfFive,
+    /// Three fairs of yours eaten by the dead.
+    DeadFeast,
     /// A whole region of another god gone into the mist, but its temple and
     /// the champions' homes, and fifteen hexes of it at least.
     DissolvedLand,
 }
 
 impl GreatDeed {
-    pub const ALL: [GreatDeed; 12] = [
+    pub const ALL: [GreatDeed; 14] = [
         GreatDeed::WorldTree,
         GreatDeed::Island,
         GreatDeed::DissolvedLand,
@@ -69,6 +73,8 @@ impl GreatDeed {
         GreatDeed::Roads,
         GreatDeed::GreatFire,
         GreatDeed::Feast,
+        GreatDeed::FairOfFive,
+        GreatDeed::DeadFeast,
     ];
 
     /// The god whose deed it is: its card's colour, its voice.
@@ -79,7 +85,11 @@ impl GreatDeed {
             | GreatDeed::DissolvedLand
             | GreatDeed::River
             | GreatDeed::FloodedTable => God::Maya,
-            GreatDeed::City | GreatDeed::GreatFire | GreatDeed::Feast => God::Trishna,
+            GreatDeed::City
+            | GreatDeed::GreatFire
+            | GreatDeed::Feast
+            | GreatDeed::FairOfFive
+            | GreatDeed::DeadFeast => God::Trishna,
             GreatDeed::Roads => God::Ahamar,
             GreatDeed::Reconciliation | GreatDeed::Legion => God::Zaga,
         }
@@ -98,6 +108,20 @@ impl GreatDeed {
             GreatDeed::Roads => &[Feature::Settlements, Feature::Roads],
             GreatDeed::GreatFire => &[Feature::Fires],
             GreatDeed::Feast => &[Feature::Settlements, Feature::Cargo, Feature::Fields],
+            GreatDeed::FairOfFive => &[
+                Feature::Settlements,
+                Feature::Cargo,
+                Feature::Goods,
+                Feature::Fairs,
+            ],
+            GreatDeed::DeadFeast => &[
+                Feature::Settlements,
+                Feature::Cargo,
+                Feature::Goods,
+                Feature::Fairs,
+                Feature::Bodies,
+                Feature::Undead,
+            ],
             GreatDeed::FloodedTable => &[Feature::Rivers, Feature::Lakes],
             GreatDeed::Amazon => &[Feature::Beasts, Feature::Rivers, Feature::Piranhas],
             GreatDeed::Legion => &[
@@ -147,6 +171,10 @@ pub enum CheckKind {
     FieldsOwned,
     /// A feast of yours with guests enough.
     FeastHeld,
+    /// Kinds of goods sold at a fair of yours.
+    FairGoods,
+    /// Fairs of yours the dead have eaten.
+    DeadFeasts,
     /// Hexes of the longest river.
     RiverLength,
     /// It rises by the mountains.
@@ -337,6 +365,20 @@ impl Game {
                 ]
             }
             GreatDeed::Roads => vec![check(CheckKind::TemplesLinked, self.temples_linked(), 5)],
+            GreatDeed::FairOfFive => {
+                let best = self
+                    .fairs()
+                    .filter(|(_, f)| f.host == player)
+                    .map(|(_, f)| f.kinds())
+                    .max()
+                    .unwrap_or(0);
+                vec![check(CheckKind::FairGoods, best, 5)]
+            }
+            GreatDeed::DeadFeast => vec![check(
+                CheckKind::DeadFeasts,
+                self.dead_feasts(player),
+                super::DEAD_FEASTS,
+            )],
             GreatDeed::Feast => vec![
                 check(
                     CheckKind::FieldsOwned,

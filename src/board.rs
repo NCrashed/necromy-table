@@ -214,6 +214,10 @@ struct MarkerSprites {
     fire: Handle<Image>,
     /// Food lying on a field, a sack drawn flat.
     sack: Handle<Image>,
+    /// A fair's banner.
+    fair: Handle<Image>,
+    /// Goods lying on the ground, a sack in its land's colour.
+    goods: [Handle<Image>; 5],
     /// A building's sign (§21.8): tavern, forge, wall, and a shrine per god.
     signs: [Handle<Image>; 3],
     shrines: [Handle<Image>; 5],
@@ -334,6 +338,8 @@ fn spawn_board(
         road: images.add(pixel_sprite(&ROAD_ROWS, [0; 3])),
         fire: images.add(pixel_sprite(&FIRE_ROWS, [236, 110, 36])),
         sack: images.add(pixel_sprite(&SACK_ROWS, [196, 160, 96])),
+        fair: images.add(pixel_sprite(&BANNER_ROWS, [210, 60, 120])),
+        goods: God::ALL.map(|g| images.add(pixel_sprite(&SACK_ROWS, g.accent()))),
         signs: [[220, 160, 60], [200, 84, 44], [150, 150, 160]]
             .map(|c| images.add(pixel_sprite(&SIGN_ROWS, c))),
         shrines: God::ALL.map(|g| images.add(pixel_sprite(&SIGN_ROWS, g.accent()))),
@@ -762,14 +768,25 @@ fn sync_markers(
         .game
         .loads()
         .iter()
-        .filter(|(_, c)| *c == necromy_rules::Cargo::Food)
+        .filter_map(|(hex, c)| {
+            let image = match c {
+                necromy_rules::Cargo::Food => sprites.sack.clone(),
+                necromy_rules::Cargo::Goods(g) => sprites.goods[g.index()].clone(),
+                necromy_rules::Cargo::Body { .. } => return None,
+            };
+            Some((*hex, image, Vec3::new(-0.3, 0.0, 0.3), TEXELS, true))
+        })
+        .collect();
+    let banners: Vec<_> = game
+        .game
+        .fairs()
         .map(|(hex, _)| {
             (
-                *hex,
-                sprites.sack.clone(),
-                Vec3::new(-0.3, 0.0, 0.3),
+                hex,
+                sprites.fair.clone(),
+                Vec3::new(0.0, 0.0, -0.45),
                 TEXELS,
-                true,
+                false,
             )
         })
         .collect();
@@ -792,6 +809,7 @@ fn sync_markers(
         .chain(signs)
         .chain(fires)
         .chain(sacks)
+        .chain(banners)
         .chain(traps)
         .chain(flags)
         .chain(trails)
@@ -976,6 +994,24 @@ const ROAD_ROWS: [&str; 10] = [
     "..#xxoxxoxxoxxoxx#..",
     "...##oxxoxxoxxo##...",
     ".....##########.....",
+];
+
+/// A fair's striped banner on a pole.
+const BANNER_ROWS: [&str; 14] = [
+    "#.........",
+    "#w########",
+    "#w#ffFFff#",
+    "#w#FFffFF#",
+    "#w#ffFFff#",
+    "#w#FFffFF#",
+    "#w#ffFFf#.",
+    "#w#FFff#..",
+    "#w#####...",
+    "#w#.......",
+    "#w#.......",
+    "#w#.......",
+    "#w#.......",
+    "###.......",
 ];
 
 /// A sack of grain.

@@ -333,6 +333,7 @@ impl Game {
                     }
                 }
             }
+            Feature::Goods => self.make_goods(events),
             Feature::Fires => {
                 if let Some(p) = player {
                     self.fire_near(p, near, 1, events);
@@ -351,7 +352,8 @@ impl Game {
             | Feature::City
             | Feature::Companions
             | Feature::Legion
-            | Feature::Piranhas => {}
+            | Feature::Piranhas
+            | Feature::Fairs => {}
         }
     }
 

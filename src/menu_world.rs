@@ -787,19 +787,21 @@ fn drag(
                 Rect::from_center_size(centre, size).contains(c)
             })
         });
-    let under = cursor.filter(|_| !over_menu && carried.id.is_none()).and_then(|c| {
-        shown
-            .iter()
-            .filter(|(_, sh, _, _)| sh.gone.is_none() && draggable(sh.thing.kind))
-            .filter(|(_, sh, image, node)| {
-                let top_left = Vec2::new(px_of(node.left), px_of(node.top));
-                images
-                    .get(&image.image)
-                    .is_some_and(|picture| opaque_at(picture, image, c - top_left, s, sh.size))
-            })
-            .max_by_key(|(_, sh, _, _)| (sh.thing.kind.z(), sh.id))
-            .map(|(e, sh, _, node)| (e, sh.id, Vec2::new(px_of(node.left), px_of(node.top))))
-    });
+    let under = cursor
+        .filter(|_| !over_menu && carried.id.is_none())
+        .and_then(|c| {
+            shown
+                .iter()
+                .filter(|(_, sh, _, _)| sh.gone.is_none() && draggable(sh.thing.kind))
+                .filter(|(_, sh, image, node)| {
+                    let top_left = Vec2::new(px_of(node.left), px_of(node.top));
+                    images
+                        .get(&image.image)
+                        .is_some_and(|picture| opaque_at(picture, image, c - top_left, s, sh.size))
+                })
+                .max_by_key(|(_, sh, _, _)| (sh.thing.kind.z(), sh.id))
+                .map(|(e, sh, _, node)| (e, sh.id, Vec2::new(px_of(node.left), px_of(node.top))))
+        });
 
     if mouse.just_pressed(MouseButton::Left)
         && let (Some((entity, id, top_left)), Some(c)) = (under, cursor)
@@ -809,7 +811,10 @@ fn drag(
         carried.at = top_left;
         sounds.write(Sound::new("menu-pick"));
         // An animal minds being picked up.
-        if shown.get(entity).is_ok_and(|(_, sh, _, _)| sh.thing.kind == Kind::Animal) {
+        if shown
+            .get(entity)
+            .is_ok_and(|(_, sh, _, _)| sh.thing.kind == Kind::Animal)
+        {
             sounds.write(Sound::new("menu-squeak"));
         }
         // Over the menu while carried, so it is never lost behind it.
@@ -825,7 +830,11 @@ fn drag(
         // The sun and the moon wind the clock as they go.
         if let Some(kind @ (Kind::Sun | Kind::Moon)) = kind {
             let u = ((c.x / w - 0.06) / 0.88).clamp(0.0, 1.0);
-            world.clock = if kind == Kind::Sun { u / 2.0 } else { 0.5 + u / 2.0 };
+            world.clock = if kind == Kind::Sun {
+                u / 2.0
+            } else {
+                0.5 + u / 2.0
+            };
         }
     }
 
@@ -833,8 +842,7 @@ fn drag(
         && let Some(id) = carried.id.take()
     {
         let at = carried.at;
-        if let Some((entity, mut sh, _, _)) = shown.iter_mut().find(|(_, sh, _, _)| sh.id == id)
-        {
+        if let Some((entity, mut sh, _, _)) = shown.iter_mut().find(|(_, sh, _, _)| sh.id == id) {
             commands.entity(entity).remove::<GlobalZIndex>();
             let size = sh.size * s;
             let centre = at + size / 2.0;
@@ -894,7 +902,9 @@ fn drag(
             1 => SystemCursorIcon::Grab,
             _ => SystemCursorIcon::Default,
         };
-        commands.entity(window_entity).insert(CursorIcon::from(icon));
+        commands
+            .entity(window_entity)
+            .insert(CursorIcon::from(icon));
     }
 }
 
@@ -1193,7 +1203,12 @@ fn animate(
                 let cell = shown.size.x;
                 let frames = ((picture.width() as f32 / cell) as usize).max(1);
                 let frame = (now * 5.0 + seed * 17.0) as usize % frames;
-                let r = Rect::new(frame as f32 * cell, 0.0, (frame + 1) as f32 * cell, shown.size.y);
+                let r = Rect::new(
+                    frame as f32 * cell,
+                    0.0,
+                    (frame + 1) as f32 * cell,
+                    shown.size.y,
+                );
                 (strip.clone(), Some(r))
             } else {
                 (art.images[file].clone(), None)

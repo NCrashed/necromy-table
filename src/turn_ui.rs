@@ -78,6 +78,8 @@ enum ActionButton {
     /// Sow the plains underfoot; hold a feast.
     Sow,
     Feast,
+    /// Open a fair in the settlement underfoot.
+    Fair,
     /// Set a hex beside you alight, or put a fire out.
     Kindle(hexx::Hex),
     Douse(hexx::Hex),
@@ -528,6 +530,12 @@ fn rebuild_action(
                 format!("Поджечь\n{} Духа", necromy_rules::KINDLE_SPIRIT),
             ));
         }
+        if g.may_open_fair(human) && spirit >= necromy_rules::FAIR_SPIRIT {
+            buttons.push((
+                ActionButton::Fair,
+                format!("Ярмарка\n{} Духа", necromy_rules::FAIR_SPIRIT),
+            ));
+        }
         if g.may_feast(human) {
             let guests = g.guests(human).len();
             buttons.push((ActionButton::Feast, format!("Пир\nгостей: {guests}")));
@@ -597,6 +605,7 @@ fn action_buttons(
             ActionButton::Pave => Intent::Pave,
             ActionButton::Sow => Intent::Sow,
             ActionButton::Feast => Intent::Feast,
+            ActionButton::Fair => Intent::Fair,
             ActionButton::Kindle(hex) => Intent::Kindle { hex: *hex },
             ActionButton::Douse(hex) => Intent::Douse { hex: *hex },
             ActionButton::Cycle => Intent::Cycle {

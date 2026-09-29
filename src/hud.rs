@@ -554,6 +554,22 @@ fn tooltip(
             "пожар{whose}: войти — обжечься; в ход мира перекинется дальше"
         ));
     }
+    if let Some(fair) = g.fair(hex) {
+        let sold: Vec<&str> = necromy_rules::God::ALL
+            .into_iter()
+            .filter(|&god| fair.has(god))
+            .map(names::goods)
+            .collect();
+        lines.push(format!(
+            "ярмарка {}: продано {}; мертвецы идут на шум",
+            game.name_genitive(fair.host),
+            if sold.is_empty() {
+                "ничего".to_string()
+            } else {
+                sold.join(", ")
+            }
+        ));
+    }
     let food = g.food_at(hex);
     if food > 0 {
         lines.push(format!(

@@ -19,6 +19,8 @@ pub enum Cargo {
     Body { hero: bool },
     /// Food from a field, for a settlement's stores.
     Food,
+    /// Goods of a region, for a fair.
+    Goods(crate::gods::God),
 }
 
 impl Game {
@@ -105,6 +107,11 @@ impl Game {
                 }
                 _ => self.loads.push((hex, cargo)),
             },
+            Cargo::Goods(god) => {
+                if !self.sell_goods(player, hex, god, events) {
+                    self.loads.push((hex, cargo));
+                }
+            }
             Cargo::Food => {
                 if !self.store_food(player, hex, events) {
                     self.loads.push((hex, cargo));

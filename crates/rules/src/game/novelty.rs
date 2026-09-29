@@ -43,6 +43,8 @@ pub enum Novelty {
     /// A field sown, a feast held.
     Sowed,
     Feasted,
+    /// A fair opened.
+    HeldFair,
     /// A wish of this kind, granted.
     Wished(WishKind),
     /// A mechanic brought into the world.

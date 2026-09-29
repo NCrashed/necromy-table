@@ -63,10 +63,14 @@ pub enum Feature {
     Fires,
     /// Fields beside settlements bear food at dusk.
     Fields,
+    /// Settlements make their region's goods, carried as burdens.
+    Goods,
+    /// Fairs: goods sold for Style and cards; the dead come to them.
+    Fairs,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 23] = [
+    pub const ALL: [Feature; 25] = [
         Feature::Bodies,
         Feature::Groves,
         Feature::Settlements,
@@ -90,6 +94,8 @@ impl Feature {
         Feature::Roads,
         Feature::Fires,
         Feature::Fields,
+        Feature::Goods,
+        Feature::Fairs,
     ];
 
     /// What the world must have before this can come in (§21.2): all of
@@ -107,6 +113,8 @@ impl Feature {
             Feature::Lakes => &[Has(Feature::Rivers)],
             Feature::Roads => &[Has(Feature::Settlements)],
             Feature::Fields => &[Has(Feature::Settlements), Has(Feature::Cargo)],
+            Feature::Goods => &[Has(Feature::Settlements), Has(Feature::Cargo)],
+            Feature::Fairs => &[Has(Feature::Goods)],
             Feature::Fires => &[Land(&[Terrain::Forest, Terrain::Grove])],
             Feature::Piranhas => &[Has(Feature::Beasts), Has(Feature::Rivers)],
             Feature::Groves | Feature::Undead => &[Has(Feature::Bodies)],
@@ -137,7 +145,9 @@ impl Feature {
             | Feature::Cargo
             | Feature::Buildings
             | Feature::City
-            | Feature::Fires => God::Trishna,
+            | Feature::Fires
+            | Feature::Goods
+            | Feature::Fairs => God::Trishna,
             Feature::Bodies | Feature::Poison | Feature::Trials | Feature::Legion => God::Zaga,
             Feature::Militia | Feature::Loot | Feature::Guard | Feature::Roads => God::Ahamar,
             Feature::Undead
