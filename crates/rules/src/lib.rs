@@ -34,6 +34,7 @@ pub use game::{
     TasteKind, TimeOfDay, Trap, Trial, Truce, UNDEAD_DICE, UNDEAD_HEALTH, VARIETY, VOICE,
     WAGER_STAKE, Wager, Window, WindowKind, Wish, WishKind, WorldStir, trial_face,
 };
+pub use game::{BUILD_SPIRIT, Building, CITY, QUARTER_SPIRIT, WALLED_MILITIA};
 pub use gods::{Element, God};
 pub use hexx::Hex;
 pub use items::{ITEMS, ItemDef, ItemEffect, ItemId, Slot, When};

@@ -1836,6 +1836,17 @@ impl Match {
                 self.name_genitive(*from),
                 names::cargo(*cargo)
             ),
+            Event::Built {
+                player, building, ..
+            } => format!(
+                "{} строит на своём поселении: {}.",
+                self.name(*player),
+                names::building(*building)
+            ),
+            Event::QuarterRaised { player, .. } => format!(
+                "{} поднимает новый квартал своего города.",
+                self.name(*player)
+            ),
             Event::First { player, novelty } => format!(
                 "{} первым за столом {}: +{} Стиля.",
                 self.name(*player),

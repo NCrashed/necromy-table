@@ -30,6 +30,8 @@ pub enum Novelty {
     Hid,
     /// A story line brought to its end.
     FinishedLine,
+    /// A building raised on a settlement.
+    Built,
     /// A wish of this kind, granted.
     Wished(WishKind),
     /// A mechanic brought into the world.

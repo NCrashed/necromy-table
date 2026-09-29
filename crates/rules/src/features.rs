@@ -43,10 +43,14 @@ pub enum Feature {
     Beasts,
     /// A burden on a champion's back: a body, later food, goods (§21.8).
     Cargo,
+    /// A building on a settlement: tavern, forge, shrine, wall.
+    Buildings,
+    /// Settlements side by side are a city; a settlement grows quarters.
+    City,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 13] = [
+    pub const ALL: [Feature; 15] = [
         Feature::Bodies,
         Feature::Groves,
         Feature::Settlements,
@@ -60,6 +64,8 @@ impl Feature {
         Feature::Stealth,
         Feature::Beasts,
         Feature::Cargo,
+        Feature::Buildings,
+        Feature::City,
     ];
 
     /// What the world must have before this can come in (§21.2): all of
@@ -69,12 +75,18 @@ impl Feature {
         match self {
             Feature::Bodies | Feature::Settlements | Feature::Guard => &[],
             Feature::Cargo => &[Has(Feature::Bodies)],
+            Feature::Buildings => &[Has(Feature::Settlements)],
+            Feature::City => &[Has(Feature::Buildings)],
             Feature::Groves | Feature::Undead => &[Has(Feature::Bodies)],
             Feature::Militia => &[Has(Feature::Settlements)],
             Feature::Ruins => &[Has(Feature::Settlements), Has(Feature::Undead)],
             Feature::Poison => &[Land(&[Terrain::Swamp])],
             Feature::Trials => &[Land(&[Terrain::Stones])],
-            Feature::Loot => &[AnyOf(&[Feature::Trials, Feature::Guard])],
+            Feature::Loot => &[AnyOf(&[
+                Feature::Trials,
+                Feature::Guard,
+                Feature::Buildings,
+            ])],
             Feature::Stealth => &[Land(&[Terrain::Forest, Terrain::Swamp, Terrain::Grove])],
             Feature::Beasts => &[Land(&[Terrain::Forest])],
         }
@@ -85,7 +97,9 @@ impl Feature {
     pub const fn domain(self) -> God {
         match self {
             Feature::Groves | Feature::Beasts => God::Bhava,
-            Feature::Settlements | Feature::Cargo => God::Trishna,
+            Feature::Settlements | Feature::Cargo | Feature::Buildings | Feature::City => {
+                God::Trishna
+            }
             Feature::Bodies | Feature::Poison | Feature::Trials => God::Zaga,
             Feature::Militia | Feature::Loot | Feature::Guard => God::Ahamar,
             Feature::Undead | Feature::Ruins | Feature::Stealth => God::Maya,

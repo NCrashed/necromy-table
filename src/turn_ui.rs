@@ -69,6 +69,9 @@ enum ActionButton {
     /// Take the burden underfoot, lay down the one carried (§21.8).
     Take,
     Lay,
+    /// Build on the settlement underfoot, or grow its city (§21.8).
+    Build(necromy_rules::Building),
+    Quarter(hexx::Hex),
 }
 
 fn spawn(mut commands: Commands, font: Res<UiFont>) {
@@ -469,6 +472,27 @@ fn rebuild_action(
         if g.cargo(human).is_some() {
             buttons.push((ActionButton::Lay, "Положить\nношу".to_string()));
         }
+        let spirit = g.champion(human).map_or(0, |c| c.spirit_points);
+        if spirit >= necromy_rules::BUILD_SPIRIT {
+            for b in g.may_build(human) {
+                buttons.push((
+                    ActionButton::Build(b),
+                    format!(
+                        "Построить ({} Духа)\n{}",
+                        necromy_rules::BUILD_SPIRIT,
+                        names::building(b)
+                    ),
+                ));
+            }
+        }
+        if spirit >= necromy_rules::QUARTER_SPIRIT
+            && let Some(&hex) = g.quarters(human).first()
+        {
+            buttons.push((
+                ActionButton::Quarter(hex),
+                format!("Новый квартал\n{} Духа", necromy_rules::QUARTER_SPIRIT),
+            ));
+        }
     }
     for (action, label) in buttons {
         let b = commands
@@ -512,6 +536,10 @@ fn action_buttons(
             ActionButton::Rebuild => Intent::Rebuild,
             ActionButton::Take => Intent::Take,
             ActionButton::Lay => Intent::Lay,
+            ActionButton::Build(building) => Intent::Build {
+                building: *building,
+            },
+            ActionButton::Quarter(hex) => Intent::Quarter { hex: *hex },
             ActionButton::Cycle => Intent::Cycle {
                 cards: selection.sift.take().unwrap_or_default(),
             },

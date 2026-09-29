@@ -1874,6 +1874,7 @@ fn a_quiet_board_stirs() {
 #[test]
 fn bots_live_their_lines() {
     let (mut done, mut told) = (0, 0);
+    let mut kinds: std::collections::BTreeMap<String, (u32, u32)> = Default::default();
     for seed in 0..20 {
         let (mut g, _) = Game::new(Setup {
             seed,
@@ -1888,6 +1889,17 @@ fn bots_live_their_lines() {
             let intent = crate::bot::choose(&g, p);
             g.apply(p, intent).unwrap();
         }
+        for e in g.log() {
+            match e {
+                Event::LineTold { line } => {
+                    kinds.entry(format!("{:?}", line.kind)).or_default().0 += 1
+                }
+                Event::LineDone { line } => {
+                    kinds.entry(format!("{:?}", line.kind)).or_default().1 += 1
+                }
+                _ => {}
+            }
+        }
         told += g
             .log()
             .iter()
@@ -1900,7 +1912,10 @@ fn bots_live_their_lines() {
             .count();
     }
     assert!(told > 20, "only {told} lines told");
-    assert!(done * 5 >= told, "only {done} of {told} lines done");
+    assert!(
+        done * 5 >= told,
+        "only {done} of {told} lines done: {kinds:?}"
+    );
 }
 
 // ---- Stealth (§11.6) ----
@@ -4737,4 +4752,157 @@ fn the_winner_takes_the_losers_burden() {
     g.fall(foe, &mut ev);
     assert!(g.cargo(foe).is_none());
     assert!(g.board().tile(at).unwrap().corpse.is_some() || !g.loads().is_empty());
+}
+
+// ---- Buildings and cities (§21.8) ----
+
+/// `me` holds a settlement on `hex` and stands on it with Spirit to spend.
+fn settled(g: &mut Game, me: PlayerId, hex: Hex) {
+    g.board.tile_mut(hex).unwrap().terrain = Terrain::Settlement;
+    g.claims.insert((hex.x(), hex.y()), me);
+    g.militia.remove(&(hex.x(), hex.y()));
+    g.place(me, hex);
+    g.champ_mut(me).spirit_points = 9;
+    g.champ_mut(me).spirit = 9;
+}
+
+#[test]
+fn a_building_rises_on_a_settlement_of_ones_own() {
+    let (mut g, me, _) = duel(3);
+    let town = Hex::new(0, 2);
+    settled(&mut g, me, town);
+    g.apply(
+        me,
+        Intent::Build {
+            building: Building::Tavern,
+        },
+    )
+    .unwrap();
+    assert_eq!(g.building(town), Some(Building::Tavern));
+    assert_eq!(g.champion(me).unwrap().spirit_points, 9 - BUILD_SPIRIT);
+    assert_eq!(g.move_points(me), 0, "the walk ends");
+    assert_eq!(
+        g.apply(
+            me,
+            Intent::Build {
+                building: Building::Forge
+            }
+        ),
+        Err(RuleError::CannotBuild),
+        "one a settlement"
+    );
+    // At the tavern the hand goes through at no loss.
+    let a = g.give(me, "Бинт");
+    g.apply(me, Intent::Cycle { cards: vec![a] }).unwrap();
+    assert_eq!(g.hand(me).len(), 1);
+}
+
+#[test]
+fn a_shrine_of_two_takes_prayers_for_both() {
+    let (mut g, me, _) = duel(3);
+    // A settlement where two lands meet.
+    let (town, gods) = g
+        .board()
+        .land()
+        .filter(|(h, t)| t.region.is_some() && h.ulength() >= 2 && g.champion_at(*h).is_none())
+        .find_map(|(h, t)| {
+            let own = t.region?;
+            let other = h
+                .all_neighbors()
+                .iter()
+                .filter_map(|&n| g.board().tile(n).and_then(|t| t.region))
+                .find(|&o| o != own)?;
+            Some((h, [own, other]))
+        })
+        .unwrap();
+    settled(&mut g, me, town);
+    let shrine = Building::Shrine(gods);
+    assert!(g.may_build(me).contains(&shrine));
+    g.apply(me, Intent::Build { building: shrine }).unwrap();
+    let before = gods.map(|god| g.favor(me, god));
+    g.apply(me, Intent::EndTurn).unwrap();
+    for (i, god) in gods.into_iter().enumerate() {
+        assert_eq!(g.favor(me, god), before[i] + 1, "{god:?}");
+    }
+}
+
+#[test]
+fn a_wall_keeps_three_men() {
+    let (mut g, me, _) = duel(3);
+    let town = Hex::new(0, 2);
+    settled(&mut g, me, town);
+    g.militia.insert(
+        (town.x(), town.y()),
+        Militia {
+            men: 2,
+            at: Some(town),
+        },
+    );
+    g.apply(
+        me,
+        Intent::Build {
+            building: Building::Wall,
+        },
+    )
+    .unwrap();
+    g.militia_at_dawn();
+    assert_eq!(g.militia(town), Some(WALLED_MILITIA));
+}
+
+#[test]
+fn quarters_grow_a_city_and_the_city_is_a_deed() {
+    let (mut g, me, _) = duel(3);
+    let town = Hex::new(0, 2);
+    settled(&mut g, me, town);
+    let quarters = g.quarters(me);
+    assert!(!quarters.is_empty());
+    g.apply(me, Intent::Quarter { hex: quarters[0] }).unwrap();
+    assert!(g.city_of(town).len() >= 2);
+    assert_eq!(g.owner(quarters[0]), Some(me));
+    // A city of seven, all ours, with a tavern, a forge and a shrine.
+    for h in town.all_neighbors() {
+        if let Some(tile) = g.board.tile_mut(h) {
+            tile.terrain = Terrain::Settlement;
+        }
+        g.claims.insert((h.x(), h.y()), me);
+    }
+    let [a, b, c, ..] = town.all_neighbors();
+    g.buildings.insert((a.x(), a.y()), Building::Tavern);
+    g.buildings.insert((b.x(), b.y()), Building::Forge);
+    g.buildings
+        .insert((c.x(), c.y()), Building::Shrine([God::Zaga, God::Zaga]));
+    g.chosen[me.0 as usize] = Some(GreatDeed::City);
+    let checks = g.checks(me, GreatDeed::City);
+    assert!(checks.iter().all(Check::met), "{checks:?}");
+    // One quarter of another's breaks it.
+    g.claims.insert((a.x(), a.y()), PlayerId(4));
+    assert!(!g.checks(me, GreatDeed::City).iter().all(Check::met));
+}
+
+#[test]
+fn a_reconciled_pair_keeps_the_peace_two_dusks() {
+    let (mut g, me, _) = duel(3);
+    g.chosen[me.0 as usize] = Some(GreatDeed::Reconciliation);
+    // Zaga and Maya: earth quenches water.
+    g.pantheon.stages[God::Zaga.index()] = 0;
+    g.pantheon.stages[God::Maya.index()] = 0;
+    let town = Hex::new(0, 2);
+    settled(&mut g, me, town);
+    g.buildings.insert(
+        (town.x(), town.y()),
+        Building::Shrine([God::Zaga, God::Maya]),
+    );
+    let checks = g.checks(me, GreatDeed::Reconciliation);
+    assert!(
+        checks
+            .iter()
+            .filter(|c| c.kind != CheckKind::Dusks)
+            .all(Check::met)
+    );
+    let mut ev = Vec::new();
+    g.dusk_of_deeds(&mut ev);
+    g.dusk_of_deeds(&mut ev);
+    assert!(g.on_eve(me));
+    g.dusk_of_deeds(&mut ev);
+    assert_eq!(g.winner(), Some((me, GreatDeed::Reconciliation)));
 }

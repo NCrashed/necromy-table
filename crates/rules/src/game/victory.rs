@@ -28,16 +28,24 @@ pub enum GreatDeed {
     /// Land of seven hexes or more cut off from the Table by the mist, with a
     /// settlement of yours on it, and you there.
     Island,
+    /// Seven settlements side by side, all yours, with a tavern, a forge and
+    /// a shrine among them.
+    City,
+    /// Two gods of a quenching pair both in their light, and a shrine of
+    /// both of yours, two dusks running.
+    Reconciliation,
     /// A whole region of another god gone into the mist, but its temple and
     /// the champions' homes, and fifteen hexes of it at least.
     DissolvedLand,
 }
 
 impl GreatDeed {
-    pub const ALL: [GreatDeed; 3] = [
+    pub const ALL: [GreatDeed; 5] = [
         GreatDeed::WorldTree,
         GreatDeed::Island,
         GreatDeed::DissolvedLand,
+        GreatDeed::City,
+        GreatDeed::Reconciliation,
     ];
 
     /// The god whose deed it is: its card's colour, its voice.
@@ -45,6 +53,8 @@ impl GreatDeed {
         match self {
             GreatDeed::WorldTree => God::Bhava,
             GreatDeed::Island | GreatDeed::DissolvedLand => God::Maya,
+            GreatDeed::City => God::Trishna,
+            GreatDeed::Reconciliation => God::Zaga,
         }
     }
 
@@ -55,6 +65,8 @@ impl GreatDeed {
             GreatDeed::WorldTree => &[Feature::Bodies, Feature::Groves, Feature::Beasts],
             GreatDeed::Island => &[Feature::Settlements],
             GreatDeed::DissolvedLand => &[],
+            GreatDeed::City => &[Feature::Settlements, Feature::Buildings, Feature::City],
+            GreatDeed::Reconciliation => &[Feature::Settlements, Feature::Buildings],
         }
     }
 }
@@ -76,6 +88,14 @@ pub enum CheckKind {
     IslandSettled,
     /// Hexes of another god's region gone into the mist.
     RegionInMist,
+    /// Settlements side by side in a city all yours.
+    CitySize,
+    /// Of a tavern, a forge and a shrine, how many stand in it.
+    CityHas,
+    /// Gods of the pair in their light.
+    PairLight,
+    /// A shrine of both, yours.
+    SharedShrine,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,6 +110,9 @@ impl Check {
         self.have >= self.need
     }
 }
+
+/// Settlements side by side a City needs.
+pub const CITY: usize = 7;
 
 /// Hexes an Island needs.
 pub const ISLAND: usize = 7;
@@ -110,6 +133,8 @@ pub struct Progress {
     pub crown_streak: u8,
     /// Dusks in a row their World Tree has stood whole.
     pub tree_dusks: u8,
+    /// Dusks in a row their reconciled pair has kept the peace.
+    pub peace_dusks: u8,
 }
 
 /// Three deeds for each player: of different patrons where it can, and none
@@ -229,6 +254,25 @@ impl Game {
                 // A land worth the name: a small region must grow before it goes.
                 let (gone, all) = self.dissolved_for(player);
                 vec![check(CheckKind::RegionInMist, gone, all.max(DISSOLVED))]
+            }
+            GreatDeed::City => {
+                let (size, has) = self.best_city(player);
+                vec![
+                    check(CheckKind::CitySize, size, CITY),
+                    check(CheckKind::CityHas, has, 3),
+                ]
+            }
+            GreatDeed::Reconciliation => {
+                let (light, shrine) = self.best_peace(player);
+                vec![
+                    check(CheckKind::PairLight, light, 2),
+                    check(CheckKind::SharedShrine, usize::from(shrine), 1),
+                    check(
+                        CheckKind::Dusks,
+                        usize::from(self.progress[player.0 as usize].peace_dusks),
+                        2,
+                    ),
+                ]
             }
         }
     }
@@ -359,8 +403,70 @@ impl Game {
         }
     }
 
-    /// Dusk: a World Tree that stood whole counts another dusk.
+    /// Of `player`'s cities (every quarter theirs), the one furthest on: its
+    /// size, and how many of a tavern, a forge and a shrine stand in it.
+    fn best_city(&self, player: PlayerId) -> (usize, usize) {
+        let mut seen: Vec<Hex> = Vec::new();
+        let mut best = (0, 0);
+        for (hex, owner) in self.claims() {
+            if owner != player || seen.contains(&hex) {
+                continue;
+            }
+            let city = self.city_of(hex);
+            seen.extend(city.iter().copied());
+            if city.is_empty() || city.iter().any(|&h| self.owner(h) != Some(player)) {
+                continue;
+            }
+            let kinds = city.iter().filter_map(|&h| self.building(h));
+            let mut has = [false; 3];
+            for b in kinds {
+                match b {
+                    super::Building::Tavern => has[0] = true,
+                    super::Building::Forge => has[1] = true,
+                    super::Building::Shrine(_) => has[2] = true,
+                    super::Building::Wall => {}
+                }
+            }
+            let found = (city.len(), has.iter().filter(|&&x| x).count());
+            best = best.max(found);
+        }
+        best
+    }
+
+    /// Of the quenching pairs, the one nearest peace for `player`: gods of
+    /// it in their light, and whether they hold a shrine of both.
+    fn best_peace(&self, player: PlayerId) -> (usize, bool) {
+        God::ALL
+            .into_iter()
+            .map(|a| {
+                let b = God::from_index(a.index() + 2);
+                let light = usize::from(self.stage(a) == 0) + usize::from(self.stage(b) == 0);
+                let shrine = self.buildings().any(|(h, building)| {
+                    matches!(building, super::Building::Shrine(gods)
+                        if gods.contains(&a) && gods.contains(&b))
+                        && self.owner(h) == Some(player)
+                });
+                (light, shrine)
+            })
+            .max_by_key(|&(light, shrine)| (light + 2 * usize::from(shrine), shrine))
+            .unwrap_or((0, false))
+    }
+
+    /// Dusk: a World Tree that stood whole counts another dusk; so does a
+    /// pair kept in peace.
     fn count_trees(&mut self) {
+        for p in self.players().collect::<Vec<_>>() {
+            if self.deed(p) != Some(GreatDeed::Reconciliation) {
+                continue;
+            }
+            let holding = self
+                .checks(p, GreatDeed::Reconciliation)
+                .iter()
+                .filter(|c| c.kind != CheckKind::Dusks)
+                .all(Check::met);
+            let dusks = &mut self.progress[p.0 as usize].peace_dusks;
+            *dusks = if holding { dusks.saturating_add(1) } else { 0 };
+        }
         for p in self.players().collect::<Vec<_>>() {
             if self.deed(p) != Some(GreatDeed::WorldTree) {
                 continue;

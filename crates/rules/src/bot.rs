@@ -87,6 +87,9 @@ fn own_turn(game: &Game, player: PlayerId) -> Intent {
     if game.can_rebuild(player) {
         return Intent::Rebuild;
     }
+    if let Some(intent) = deed_work(game, player) {
+        return intent;
+    }
     let cards = game.playable(player);
     // Bodies first: they only work while standing on one.
     if let Some(&card) = cards.iter().find(|&&c| {
@@ -311,6 +314,25 @@ fn walk(game: &Game, player: PlayerId) -> Intent {
             // A pilgrimage or a trial of our own beats any corpse.
             Goal::ReachHex(hex) => Some(hex),
             Goal::PassTrial(hex) if game.trial_for(player, hex).is_some() => Some(hex),
+            // A tithe is prayed for at the god's temple, a turn at a time.
+            Goal::Offer { god, .. } => Some(game.board().temple_of(god)),
+            // New land: a settlement not yet ours.
+            Goal::Claim => game
+                .board()
+                .land()
+                .filter(|(h, t)| {
+                    t.terrain == crate::Terrain::Settlement
+                        && game.owner(*h) != Some(player)
+                        && game.occupant(*h).is_none()
+                })
+                .map(|(h, _)| h)
+                .min_by_key(|h| (h.unsigned_distance_to(me.hex), h.x(), h.y())),
+            Goal::Body => game
+                .board()
+                .corpses()
+                .map(|(hex, _)| hex)
+                .filter(|&hex| game.occupant(hex).is_none_or(|p| p == player))
+                .min_by_key(|&hex| (me.hex.unsigned_distance_to(hex), hex.x(), hex.y())),
             _ => None,
         })
         // Where its deed is made.
@@ -432,7 +454,10 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
             GreatDeed::DissolvedLand => {
                 wish(game.dissolving(rival).0, crate::Act::Rise { terrain: None })
             }
-            GreatDeed::Island | GreatDeed::WorldTree => wish(
+            GreatDeed::Island
+            | GreatDeed::WorldTree
+            | GreatDeed::City
+            | GreatDeed::Reconciliation => wish(
                 God::Maya,
                 crate::Act::Veil {
                     target: Some(rival),
@@ -492,6 +517,14 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
         }
         // Bhava's woods round where it stands.
         (GreatDeed::WorldTree, WoodsAround) => wish(God::Bhava, crate::Act::Land),
+        // A god of the pair out of its light: an offering to the god that
+        // quenches it cools it (§5.1).
+        (GreatDeed::Reconciliation, PairLight) => {
+            let dark = God::ALL
+                .into_iter()
+                .find(|&g| game.stage(g) > 0 && game.stage(God::from_index(g.index() + 2)) == 0)?;
+            wish(God::from_index(dark.index() + 3), crate::Act::Peace)
+        }
         _ => return None,
     })
 }
@@ -503,5 +536,115 @@ fn deed_goal(game: &Game, player: PlayerId) -> Option<Hex> {
         GreatDeed::DissolvedLand => game.left_to_dissolve(player),
         GreatDeed::WorldTree => game.hero_grove(),
         GreatDeed::Island => None,
+        // A settlement of its own to build on, or one to take, but only
+        // with the Spirit to build there, else it would idle on it.
+        GreatDeed::City | GreatDeed::Reconciliation => {
+            let me = game.champion(player)?;
+            let need = match game.deed(player)? {
+                GreatDeed::City => crate::QUARTER_SPIRIT,
+                _ if game.buildings().any(|(h, b)| {
+                    border_pair(game, h).is_some_and(|p| b == crate::Building::Shrine(p))
+                }) =>
+                {
+                    return None;
+                }
+                _ => crate::BUILD_SPIRIT,
+            };
+            if me.spirit_points < need {
+                return None;
+            }
+            let me = me.hex;
+            game.board()
+                .land()
+                // Not where it stands: deed_work found nothing to do there.
+                .filter(|(h, t)| {
+                    *h != me
+                        && t.terrain == crate::Terrain::Settlement
+                        && game.owner(*h).is_none_or(|o| o == player)
+                        && if game.deed(player) == Some(GreatDeed::City) {
+                            game.building(*h).is_none() || room_to_grow(game, *h)
+                        } else {
+                            game.building(*h).is_none() && border_pair(game, *h).is_some()
+                        }
+                })
+                .map(|(h, _)| h)
+                .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
+        }
+    }
+}
+
+/// Free open land next to `hex` for a new quarter.
+fn room_to_grow(game: &Game, hex: Hex) -> bool {
+    hex.all_neighbors().iter().any(|&n| {
+        game.board().tile(n).is_some_and(|t| {
+            matches!(
+                t.terrain,
+                crate::Terrain::Plains
+                    | crate::Terrain::Forest
+                    | crate::Terrain::Grove
+                    | crate::Terrain::Ruins
+            ) && t.corpse.is_none()
+        }) && game.occupant(n).is_none()
+    })
+}
+
+/// The quenching pair whose lands meet at `hex`, if any: its own god first.
+fn border_pair(game: &Game, hex: Hex) -> Option<[God; 2]> {
+    let own = game.board().tile(hex)?.region?;
+    hex.all_neighbors()
+        .iter()
+        .filter_map(|&n| game.board().tile(n).and_then(|t| t.region))
+        .find(|&g| g.index() == (own.index() + 2) % 5 || own.index() == (g.index() + 2) % 5)
+        .map(|g| [own, g])
+}
+
+/// A move on its own turn for the bot's deed, where it stands (§21.10):
+/// a quarter for its city, what the city lacks, a shrine of two.
+fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
+    let deed = game.deed(player)?;
+    let spirit = game.champion(player)?.spirit_points;
+    let here = game.champion(player)?.hex;
+    let can = game.may_build(player);
+    match deed {
+        GreatDeed::City => {
+            let city = game.city_of(here);
+            let has = |f: fn(&crate::Building) -> bool| {
+                city.iter()
+                    .any(|&h| game.building(h).is_some_and(|b| f(&b)))
+            };
+            let want = [
+                (
+                    crate::Building::Tavern,
+                    has(|b| *b == crate::Building::Tavern),
+                ),
+                (
+                    crate::Building::Forge,
+                    has(|b| *b == crate::Building::Forge),
+                ),
+            ];
+            if let Some(&(b, _)) = want.iter().find(|(b, had)| !had && can.contains(b))
+                && spirit >= crate::BUILD_SPIRIT
+            {
+                return Some(Intent::Build { building: b });
+            }
+            if !has(|b| matches!(b, crate::Building::Shrine(_)))
+                && spirit >= crate::BUILD_SPIRIT
+                && let Some(&b) = can.iter().find(|b| matches!(b, crate::Building::Shrine(_)))
+            {
+                return Some(Intent::Build { building: b });
+            }
+            if spirit >= crate::QUARTER_SPIRIT {
+                let hex = *game.quarters(player).first()?;
+                return Some(Intent::Quarter { hex });
+            }
+            None
+        }
+        GreatDeed::Reconciliation => {
+            let [a, b] = border_pair(game, here)?;
+            let building = crate::Building::Shrine([a, b]);
+            (can.contains(&building) && spirit >= crate::BUILD_SPIRIT)
+                .then_some(Intent::Build { building })
+        }
+        _ => None,
     }
 }

@@ -265,6 +265,7 @@ impl Game {
         if !self.has(super::Feature::Ruins) {
             return;
         }
+        self.buildings.remove(&(hex.x(), hex.y()));
         self.militia.remove(&(hex.x(), hex.y()));
         self.claims.remove(&(hex.x(), hex.y()));
         self.ruins.insert((hex.x(), hex.y()));
@@ -331,8 +332,12 @@ impl Game {
 
     /// At dawn a man comes back to every militia.
     pub(super) fn militia_at_dawn(&mut self) {
-        for m in self.militia.values_mut() {
-            m.men = (m.men + 1).min(MILITIA);
+        let homes: Vec<(i32, i32)> = self.militia.keys().copied().collect();
+        for home in homes {
+            let cap = self.militia_cap(home);
+            if let Some(m) = self.militia.get_mut(&home) {
+                m.men = (m.men + 1).min(cap);
+            }
         }
     }
 

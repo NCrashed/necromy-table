@@ -169,6 +169,15 @@ pub enum Intent {
     ChooseDeed {
         deed: victory::GreatDeed,
     },
+    /// On your turn, on a settlement of yours: build on it (§21.8).
+    Build {
+        building: buildings::Building,
+    },
+    /// On your turn, on a settlement of yours: a new quarter of the city on
+    /// the free hex next to it.
+    Quarter {
+        hex: Hex,
+    },
     /// On your turn: take the body (or burden) underfoot on your back (§21.8).
     Take,
     /// On your turn: lay down what you carry where you stand.
@@ -697,6 +706,17 @@ pub enum Event {
         god: God,
         player: Option<PlayerId>,
     },
+    /// `player` built `building` on the settlement on `hex` (§21.8).
+    Built {
+        player: PlayerId,
+        hex: Hex,
+        building: buildings::Building,
+    },
+    /// `player` raised a new quarter of their city on `hex`.
+    QuarterRaised {
+        player: PlayerId,
+        hex: Hex,
+    },
     /// `player` took `cargo` on their back from `hex` (§21.8).
     CargoTaken {
         player: PlayerId,
@@ -1062,6 +1082,8 @@ pub enum RuleError {
     InvalidDeed,
     /// Nothing to take here, or nothing carried to lay down.
     NoCargo,
+    /// Nothing of that can be built here.
+    CannotBuild,
 }
 
 impl std::fmt::Display for RuleError {
@@ -1071,6 +1093,7 @@ impl std::fmt::Display for RuleError {
             RuleError::NotAtTemple => write!(f, "not at a temple"),
             RuleError::NotRuins => write!(f, "not the ruins of a settlement"),
             RuleError::InvalidDeed => write!(f, "not a deed to choose"),
+            RuleError::CannotBuild => write!(f, "that cannot be built here"),
             RuleError::NoCargo => write!(f, "nothing to take or to lay down"),
             RuleError::NoCycle => write!(f, "the hand went through already or holds no such card"),
             RuleError::NothingWorn => write!(f, "nothing worn there"),
@@ -1203,6 +1226,8 @@ pub struct Game {
     raised: Vec<Hex>,
     /// Burdens lying on the ground (§21.8).
     loads: Vec<(Hex, cargo::Cargo)>,
+    /// Buildings on settlements (§21.8).
+    buildings: BTreeMap<(i32, i32), buildings::Building>,
     /// Who did what first at the table (§21.5).
     firsts: BTreeMap<novelty::Novelty, PlayerId>,
     /// Per player, battles won so far: each is worth less.
@@ -1334,6 +1359,7 @@ impl Game {
             fog: BTreeMap::new(),
             raised: Vec::new(),
             loads: Vec::new(),
+            buildings: BTreeMap::new(),
             firsts: BTreeMap::new(),
             won: vec![0; champions_len],
             log: Vec::new(),
@@ -1860,6 +1886,8 @@ impl Game {
             Intent::Sacrifice { slot } => self.sacrifice(player, slot, events),
             Intent::Rebuild => self.rebuild(player, events),
             Intent::Take => self.take(player, events),
+            Intent::Build { building } => self.build(player, building, events),
+            Intent::Quarter { hex } => self.raise_quarter(player, hex, events),
             Intent::Lay => self.lay(player, events),
             Intent::Cycle { cards } => {
                 self.cycle(player, &cards, events);
@@ -1888,6 +1916,8 @@ impl Game {
             Intent::Sacrifice { slot } => self.check_sacrifice(player, slot).map(|_| ()),
             Intent::Rebuild => self.check_rebuild(player).map(|_| ()),
             Intent::Take => self.check_take(player).map(|_| ()),
+            Intent::Build { building } => self.check_build(player, building).map(|_| ()),
+            Intent::Quarter { hex } => self.check_quarter(player, hex),
             Intent::Lay => self.check_lay(player).map(|_| ()),
             Intent::Cycle { ref cards } => self.check_cycle(player, cards),
             _ => Err(RuleError::WrongTiming),
@@ -2150,13 +2180,26 @@ impl Game {
     fn end_turn(&mut self, player: PlayerId, events: &mut Vec<Event>) {
         events.push(Event::TurnEnded { player });
         self.turns[player.0 as usize].phase = Phase::Done;
-        // Ending the turn on a temple is a prayer to its god.
+        // Ending the turn on a temple is a prayer to its god; on a shrine, to
+        // its gods (§21.8).
         let hex = self.hex_of(player);
+        let mut gods: Vec<God> = Vec::new();
         if let Some(tile) = self.board.tile(hex)
             && tile.terrain == Terrain::Temple
             && let Some(god) = tile.region
         {
-            self.offer(Some(player), god, 1, events);
+            gods.push(god);
+        }
+        if let Some([a, b]) = self.shrine_gods(hex) {
+            gods.push(a);
+            if b != a {
+                gods.push(b);
+            }
+        }
+        if !gods.is_empty() {
+            for god in gods {
+                self.offer(Some(player), god, 1, events);
+            }
             self.record_deed(player, style::Deed::Prayed);
             self.cure(player, Cure::Temple, events);
         }
@@ -2195,10 +2238,13 @@ impl Game {
         self.turns[player.0 as usize].cycled = true;
         self.hands[player.0 as usize].retain(|c| !cards.contains(c));
         self.discard.extend_from_slice(cards);
+        // A temple, or a tavern (§21.8), gives back as many as went.
+        let here = self.hex_of(player);
         let at_temple = self
             .board
-            .tile(self.hex_of(player))
-            .is_some_and(|t| t.terrain == Terrain::Temple);
+            .tile(here)
+            .is_some_and(|t| t.terrain == Terrain::Temple)
+            || self.building(here) == Some(buildings::Building::Tavern);
         let draw = cards.len() - usize::from(!at_temple);
         events.push(Event::Cycled {
             player,
@@ -2323,6 +2369,8 @@ impl Game {
             | Intent::Rebuild
             | Intent::Take
             | Intent::Lay
+            | Intent::Build { .. }
+            | Intent::Quarter { .. }
             | Intent::Cycle { .. } => {
                 return Err(RuleError::WindowOpen);
             }
@@ -3074,6 +3122,7 @@ impl Game {
         self.bite_curses(player, events);
         self.bite_poison(player, events);
         self.gear_at_turn_start(player, events);
+        self.buildings_at_turn_start(player, events);
         self.militia_at_turn_start(player, events);
         let champ = &self.champions[player.0 as usize];
         if champ.spirit_points < champ.spirit {
@@ -3151,6 +3200,7 @@ impl Game {
 
 mod battle;
 mod beasts;
+mod buildings;
 mod cargo;
 mod creation;
 mod dusk;
@@ -3172,6 +3222,7 @@ mod wish;
 mod world;
 pub use battle::Score;
 pub use beasts::{BEAST_DICE, BEAST_HEALTH, BEAST_RANGE};
+pub use buildings::{BUILD_SPIRIT, Building, QUARTER_SPIRIT, WALLED_MILITIA};
 pub use cargo::Cargo;
 pub use dusk::{DuskStep, Seal, SealedWish};
 pub use gear::{Gain, SACRIFICE};
@@ -3191,7 +3242,7 @@ pub use stealth::RevealReason;
 pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
 pub use trial::{Boon, TRIAL_ROUNDS, TRIALS_ON_BOARD, Trial, trial_face};
-pub use victory::{Check, CheckKind, DISSOLVED, GreatDeed, ISLAND, OFFERED, REFUSAL_THREAT};
+pub use victory::{CITY, Check, CheckKind, DISSOLVED, GreatDeed, ISLAND, OFFERED, REFUSAL_THREAT};
 pub use wish::{
     Act, Bet, FORESEE, FORGED_LINE, FORGED_NAME, MAX_ACTS, Price, Said, TRIBUTE_THREAT, Truce,
     WAGER_STAKE, Wager, Wish, WishKind, forge_template, god_terrain, likes_a_stake, taste_for,

@@ -546,6 +546,14 @@ fn tooltip(
             names::mob(b.kind, b.id).0.to_lowercase()
         ));
     }
+    // A building on the settlement, and its city (§21.8).
+    if let Some(b) = g.building(hex) {
+        lines.push(format!("постройка: {}", names::building(b)));
+    }
+    let city = g.city_of(hex).len();
+    if city > 1 {
+        lines.push(format!("город в {city} поселений"));
+    }
     // The militia standing here, and what a step onto them would do.
     if let Some(home) = g.militia_at(hex) {
         let men = g.militia(home).unwrap_or(0);

@@ -65,6 +65,7 @@ impl Game {
         self.trials.retain(|t| t.hex != hex);
         self.ground.retain(|(h, _)| *h != hex);
         self.loads.retain(|(h, _)| *h != hex);
+        self.buildings.remove(&key);
         self.claims.remove(&key);
         self.militia.remove(&key);
         self.ruins.remove(&key);
@@ -302,7 +303,9 @@ impl Game {
             | Feature::Guard
             | Feature::Stealth
             | Feature::Beasts
-            | Feature::Cargo => {}
+            | Feature::Cargo
+            | Feature::Buildings
+            | Feature::City => {}
         }
     }
 

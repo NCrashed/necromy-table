@@ -161,6 +161,7 @@ pub fn novelty(n: necromy_rules::Novelty) -> String {
         Novelty::TookSettlement => "занимает поселение".into(),
         Novelty::TookTable => "садится за Стол Ахамара".into(),
         Novelty::Rebuilt => "отстраивает руины".into(),
+        Novelty::Built => "строит на поселении".into(),
         Novelty::Sacrificed => "отдаёт предмет богу".into(),
         Novelty::Hid => "уходит в тень".into(),
         Novelty::FinishedLine => "доводит до конца свою историю".into(),
@@ -230,6 +231,17 @@ pub fn great_deed(d: necromy_rules::GreatDeed) -> (&'static str, String) {
                 necromy_rules::DISSOLVED
             ),
         ),
+        GreatDeed::City => (
+            "Город",
+            format!(
+                "{} поселений бок о бок, все твои, а среди них таверна, кузня и святилище.",
+                necromy_rules::CITY
+            ),
+        ),
+        GreatDeed::Reconciliation => (
+            "Примирение",
+            "Два бога, один из которых гасит другого, оба в свете, и твоё святилище обоих на стыке их земель — два заката подряд.".into(),
+        ),
     }
 }
 
@@ -243,6 +255,10 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::IslandSize => "клеток на отрезанной земле",
         CheckKind::IslandSettled => "твоё поселение на ней",
         CheckKind::RegionInMist => "клеток края во мгле",
+        CheckKind::CitySize => "поселений в твоём городе",
+        CheckKind::CityHas => "таверна, кузня, святилище",
+        CheckKind::PairLight => "боги пары в свете",
+        CheckKind::SharedShrine => "святилище обоих",
     }
 }
 
@@ -321,6 +337,14 @@ pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {
         Feature::Cargo => (
             "Ноша",
             "тело можно взять и нести, на шаг медленнее; победитель забирает ношу побеждённого",
+        ),
+        Feature::Buildings => (
+            "Постройки",
+            "на своём поселении можно построить таверну, кузню, святилище или стену",
+        ),
+        Feature::City => (
+            "Города",
+            "поселение прирастает кварталом; поселения бок о бок — один город",
         ),
     }
 }
@@ -851,5 +875,19 @@ pub fn cargo(c: necromy_rules::Cargo) -> &'static str {
     match c {
         Cargo::Body { hero: true } => "тело чемпиона",
         Cargo::Body { hero: false } => "тело",
+    }
+}
+
+/// A building on a settlement (§21.8), for the feed and the buttons.
+pub fn building(b: necromy_rules::Building) -> String {
+    use necromy_rules::Building;
+    match b {
+        Building::Tavern => "таверна".into(),
+        Building::Forge => "кузня".into(),
+        Building::Wall => "стена".into(),
+        Building::Shrine([a, b]) if a == b => format!("святилище {}", god_genitive(a)),
+        Building::Shrine([a, b]) => {
+            format!("святилище {} и {}", god_genitive(a), god_genitive(b))
+        }
     }
 }
