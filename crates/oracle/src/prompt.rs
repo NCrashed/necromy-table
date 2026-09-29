@@ -181,6 +181,10 @@ pub fn feature_id(f: Feature) -> &'static str {
         Feature::Fairs => "fairs",
         Feature::Rulers => "rulers",
         Feature::Burial => "burial",
+        Feature::Ritual => "ritual",
+        Feature::Monsters => "monsters",
+        Feature::Dragons => "dragons",
+        Feature::Guests => "guests",
     }
 }
 
@@ -214,6 +218,10 @@ fn feature_words(f: Feature) -> &'static str {
         Feature::Fairs => "ярмарки",
         Feature::Rulers => "правители поселений: дары, присяга, браки",
         Feature::Burial => "кладбища и чумные ямы",
+        Feature::Ritual => "ритуальные круги на камнях силы",
+        Feature::Monsters => "чудовища из врат",
+        Feature::Dragons => "драконы из яиц",
+        Feature::Guests => "гости из-за мглы",
     }
 }
 

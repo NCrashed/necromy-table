@@ -38,6 +38,9 @@ pub use game::{
     WAGER_STAKE, Wager, Window, WindowKind, Wish, WishKind, WorldStir, trial_face,
 };
 pub use game::{BUILD_SPIRIT, Building, CITY, QUARTER_SPIRIT, WALLED_MILITIA};
+pub use game::{
+    CIRCLE_SPIRIT, Circle, EGG_WARMTH, MONSTER_DICE, MONSTER_HEALTH, SUMMON_BODIES, Wonders,
+};
 pub use game::{COMPANION_DICE, Companion, ENLIST_SPIRIT, RETINUE, TAME_SPIRIT};
 pub use game::{CONSECRATE_SPIRIT, NECROPOLIS, NECROPOLIS_BODIES, PIT_BODIES, Pit};
 pub use game::{CROWN_VASSALS, FEUDING, MATCH_REGARD, OATH_REGARD, Ruler, UNION_LANDS};

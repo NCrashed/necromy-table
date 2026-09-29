@@ -468,6 +468,9 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
             | GreatDeed::FallenEmpire
             | GreatDeed::Necropolis
             | GreatDeed::PlaguePit
+            | GreatDeed::Summoning
+            | GreatDeed::Dragon
+            | GreatDeed::Guest
             | GreatDeed::Amazon => wish(
                 God::Maya,
                 crate::Act::Veil {
@@ -582,6 +585,107 @@ fn deed_goal(game: &Game, player: PlayerId) -> Option<Hex> {
         }
         GreatDeed::Amazon => None,
         GreatDeed::Roads => None,
+        // Stones for a circle, bodies to feed it, then its monster.
+        GreatDeed::Summoning => {
+            let me = game.champion(player)?.hex;
+            let nearest = |hexes: Vec<Hex>| {
+                hexes
+                    .into_iter()
+                    .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
+            };
+            if let Some(m) = game.mobs().iter().find(|m| {
+                matches!(m.kind, crate::MobKind::Monster { summoner, .. } if summoner == Some(player))
+            }) {
+                return Some(m.hex);
+            }
+            match game.circles().find(|(_, c)| c.owner == player) {
+                Some((circle, _))
+                    if matches!(game.cargo(player), Some(crate::Cargo::Body { .. })) =>
+                {
+                    Some(circle)
+                }
+                Some(_) => nearest(game.board().corpses().map(|(h, _)| h).collect()),
+                None => nearest(
+                    game.board()
+                        .land()
+                        .filter(|(h, t)| {
+                            t.terrain == crate::Terrain::Stones && game.circle(*h).is_none()
+                        })
+                        .map(|(h, _)| h)
+                        .collect(),
+                ),
+            }
+        }
+        // A mountain trial for the egg, woods to lay it in, beside it to set
+        // them alight.
+        GreatDeed::Dragon => {
+            let me = game.champion(player)?.hex;
+            let nearest = |hexes: Vec<Hex>| {
+                hexes
+                    .into_iter()
+                    .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
+            };
+            let woods = || {
+                game.board()
+                    .land()
+                    .filter(|(h, t)| t.terrain.burns() && game.occupant(*h).is_none() && *h != me)
+                    .map(|(h, _)| h)
+                    .collect::<Vec<_>>()
+            };
+            if matches!(game.cargo(player), Some(crate::Cargo::Egg { .. })) {
+                return nearest(woods());
+            }
+            if let Some((egg, _)) = game
+                .loads()
+                .iter()
+                .find(|(_, c)| matches!(c, crate::Cargo::Egg { by, .. } if *by == Some(player)))
+            {
+                let burnable = game.board().tile(*egg).is_some_and(|t| t.terrain.burns());
+                return if burnable {
+                    (me.unsigned_distance_to(*egg) != 1)
+                        .then(|| {
+                            egg.all_neighbors()
+                                .into_iter()
+                                .find(|&h| game.board().contains(h) && game.occupant(h).is_none())
+                        })
+                        .flatten()
+                } else {
+                    Some(*egg)
+                };
+            }
+            nearest(
+                game.trials()
+                    .iter()
+                    .filter(|t| {
+                        game.trial_for(player, t.hex).is_some()
+                            && game
+                                .board()
+                                .tile(t.hex)
+                                .is_some_and(|x| x.terrain == crate::Terrain::Mountain)
+                    })
+                    .map(|t| t.hex)
+                    .collect(),
+            )
+        }
+        // The stranger, then the Table.
+        GreatDeed::Guest => {
+            if game.companions(player).contains(&crate::Companion::Guest) {
+                return Some(Hex::ZERO);
+            }
+            let me = game.champion(player)?.hex;
+            game.mobs()
+                .iter()
+                .find(|m| matches!(m.kind, crate::MobKind::Guest))
+                .and_then(|m| {
+                    m.hex
+                        .all_neighbors()
+                        .into_iter()
+                        .filter(|&h| {
+                            game.board().contains(h) && game.occupant(h).is_none_or(|p| p == player)
+                        })
+                        .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
+                })
+        }
         // Ground to consecrate by the graveyard, bodies to bring to it or the
         // pit, the dead to clear from Zaga's land.
         GreatDeed::Necropolis | GreatDeed::PlaguePit => {
@@ -866,6 +970,50 @@ fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
     {
         return Some(Intent::Douse { hex });
     }
+    // Its circle: draw it, feed it.
+    if game.deed(player) == Some(GreatDeed::Summoning) {
+        let here = game.champion(player)?.hex;
+        let carrying = matches!(game.cargo(player), Some(crate::Cargo::Body { .. }));
+        let mine = game
+            .circles()
+            .find(|(_, c)| c.owner == player)
+            .map(|(h, _)| h);
+        if mine.is_none() && game.may_draw_circle(player) && spirit_now >= crate::CIRCLE_SPIRIT {
+            return Some(Intent::DrawCircle);
+        }
+        if carrying && mine == Some(here) {
+            return Some(Intent::Lay);
+        }
+        if mine.is_some()
+            && !carrying
+            && matches!(game.takeable(player), Some(crate::Cargo::Body { .. }))
+        {
+            return Some(Intent::Take);
+        }
+    }
+    // Its egg: laid in the woods, the woods set alight, taken on when burnt.
+    if game.deed(player) == Some(GreatDeed::Dragon) {
+        let here = game.champion(player)?.hex;
+        let burns = |h: Hex| game.board().tile(h).is_some_and(|t| t.terrain.burns());
+        if matches!(game.cargo(player), Some(crate::Cargo::Egg { .. })) && burns(here) {
+            return Some(Intent::Lay);
+        }
+        if let Some((egg, _)) = game
+            .loads()
+            .iter()
+            .find(|(_, c)| matches!(c, crate::Cargo::Egg { by, .. } if *by == Some(player)))
+        {
+            if *egg == here && !burns(here) && game.cargo(player).is_none() {
+                return Some(Intent::Take);
+            }
+            if game.kindleable(player).contains(egg)
+                && game.fire(*egg).is_none()
+                && spirit_now >= crate::KINDLE_SPIRIT
+            {
+                return Some(Intent::Kindle { hex: *egg });
+            }
+        }
+    }
     // Its graveyard or its pit: consecrate, dig, bury, settle.
     if matches!(
         game.deed(player),
@@ -1033,10 +1181,10 @@ fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
     if let Some(mob) = game.recruitable(player).into_iter().find(|&id| {
         game.mobs().iter().any(|m| {
             m.id == id
-                && if m.is_undead() {
-                    game.deed(player) == Some(GreatDeed::Legion)
-                } else {
-                    spare
+                && match m.kind {
+                    crate::MobKind::Undead => game.deed(player) == Some(GreatDeed::Legion),
+                    crate::MobKind::Guest => game.deed(player) == Some(GreatDeed::Guest),
+                    _ => spare,
                 }
         })
     }) {

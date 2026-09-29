@@ -337,6 +337,7 @@ impl Game {
             }
             Feature::Goods => self.make_goods(events),
             Feature::Rulers => self.seat_rulers(),
+            Feature::Guests => self.guest_at_dusk(events),
             Feature::Fires => {
                 if let Some(p) = player {
                     self.fire_near(p, near, 1, events);
@@ -357,7 +358,10 @@ impl Game {
             | Feature::Legion
             | Feature::Piranhas
             | Feature::Fairs
-            | Feature::Burial => {}
+            | Feature::Burial
+            | Feature::Ritual
+            | Feature::Monsters
+            | Feature::Dragons => {}
         }
     }
 

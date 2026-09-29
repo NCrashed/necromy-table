@@ -71,10 +71,18 @@ pub enum Feature {
     Rulers,
     /// Graveyards and plague pits: the buried never rise.
     Burial,
+    /// Circles on the stones fed with bodies open gates.
+    Ritual,
+    /// Monsters walk out of the gates.
+    Monsters,
+    /// Dragons: eggs from mountain trials, hatched in fire.
+    Dragons,
+    /// Strangers from beyond the mist.
+    Guests,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 27] = [
+    pub const ALL: [Feature; 31] = [
         Feature::Bodies,
         Feature::Groves,
         Feature::Settlements,
@@ -102,6 +110,10 @@ impl Feature {
         Feature::Fairs,
         Feature::Rulers,
         Feature::Burial,
+        Feature::Ritual,
+        Feature::Monsters,
+        Feature::Dragons,
+        Feature::Guests,
     ];
 
     /// What the world must have before this can come in (§21.2): all of
@@ -123,6 +135,15 @@ impl Feature {
             Feature::Fairs => &[Has(Feature::Goods)],
             Feature::Rulers => &[Has(Feature::Settlements)],
             Feature::Burial => &[Has(Feature::Bodies), Has(Feature::Cargo)],
+            Feature::Ritual => &[Land(&[Terrain::Stones]), Has(Feature::Bodies)],
+            Feature::Monsters => &[Has(Feature::Ritual)],
+            Feature::Dragons => &[
+                Has(Feature::Trials),
+                Has(Feature::Fires),
+                Has(Feature::Companions),
+                Has(Feature::Cargo),
+            ],
+            Feature::Guests => &[Has(Feature::Companions)],
             Feature::Fires => &[Land(&[Terrain::Forest, Terrain::Grove])],
             Feature::Piranhas => &[Has(Feature::Beasts), Has(Feature::Rivers)],
             Feature::Groves | Feature::Undead => &[Has(Feature::Bodies)],
@@ -160,17 +181,21 @@ impl Feature {
             | Feature::Poison
             | Feature::Trials
             | Feature::Legion
-            | Feature::Burial => God::Zaga,
+            | Feature::Burial
+            | Feature::Dragons => God::Zaga,
             Feature::Militia
             | Feature::Loot
             | Feature::Guard
             | Feature::Roads
-            | Feature::Rulers => God::Ahamar,
+            | Feature::Rulers
+            | Feature::Ritual => God::Ahamar,
             Feature::Undead
             | Feature::Ruins
             | Feature::Stealth
             | Feature::Rivers
-            | Feature::Lakes => God::Maya,
+            | Feature::Lakes
+            | Feature::Monsters
+            | Feature::Guests => God::Maya,
         }
     }
 }

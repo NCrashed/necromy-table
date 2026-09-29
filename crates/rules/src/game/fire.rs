@@ -210,6 +210,7 @@ impl Game {
 
     /// World phase: every fire burns its hex out and catches beside it.
     pub(super) fn fire_phase(&mut self, events: &mut Vec<Event>) {
+        self.warm_eggs(events);
         let burning: Vec<(Hex, Fire)> = self.fires().collect();
         let mut caught: Vec<(Hex, Fire)> = Vec::new();
         for &(hex, fire) in &burning {

@@ -42,7 +42,7 @@ impl Game {
     pub fn beast_land(mob: &Mob, hex: Hex) -> bool {
         match mob.kind {
             MobKind::Beast { lair } => lair.unsigned_distance_to(hex) <= BEAST_RANGE,
-            MobKind::Undead => false,
+            _ => false,
         }
     }
 

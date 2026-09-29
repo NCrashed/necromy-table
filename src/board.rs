@@ -216,6 +216,8 @@ struct MarkerSprites {
     sack: Handle<Image>,
     /// A fair's banner.
     fair: Handle<Image>,
+    /// A dragon's egg, drawn flat.
+    egg: Handle<Image>,
     /// Goods lying on the ground, a sack in its land's colour.
     goods: [Handle<Image>; 5],
     /// A building's sign (§21.8): tavern, forge, wall, and a shrine per god.
@@ -339,6 +341,7 @@ fn spawn_board(
         fire: images.add(pixel_sprite(&FIRE_ROWS, [236, 110, 36])),
         sack: images.add(pixel_sprite(&SACK_ROWS, [196, 160, 96])),
         fair: images.add(pixel_sprite(&BANNER_ROWS, [210, 60, 120])),
+        egg: images.add(pixel_sprite(&EGG_ROWS, [170, 60, 50])),
         goods: God::ALL.map(|g| images.add(pixel_sprite(&SACK_ROWS, g.accent()))),
         signs: [[220, 160, 60], [200, 84, 44], [150, 150, 160]]
             .map(|c| images.add(pixel_sprite(&SIGN_ROWS, c))),
@@ -772,6 +775,7 @@ fn sync_markers(
             let image = match c {
                 necromy_rules::Cargo::Food => sprites.sack.clone(),
                 necromy_rules::Cargo::Goods(g) => sprites.goods[g.index()].clone(),
+                necromy_rules::Cargo::Egg { .. } => sprites.egg.clone(),
                 necromy_rules::Cargo::Body { .. } => return None,
             };
             Some((*hex, image, Vec3::new(-0.3, 0.0, 0.3), TEXELS, true))
@@ -996,6 +1000,20 @@ const ROAD_ROWS: [&str; 10] = [
     "..#xxoxxoxxoxxoxx#..",
     "...##oxxoxxoxxo##...",
     ".....##########.....",
+];
+
+/// A speckled egg.
+const EGG_ROWS: [&str; 10] = [
+    "...####...",
+    "..#FFff#..",
+    ".#FfFfff#.",
+    ".#fffFff#.",
+    "#fFfffffF#",
+    "#fffFfdff#",
+    "#ffdffffd#",
+    ".#ffffdf#.",
+    ".#ddffdd#.",
+    "..######..",
 ];
 
 /// A fair's striped banner on a pole.

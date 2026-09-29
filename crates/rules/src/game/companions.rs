@@ -20,6 +20,10 @@ pub enum Companion {
     Beast,
     /// An undead of the legion.
     Undead,
+    /// A dragon hatched from an egg: worth two.
+    Dragon,
+    /// The stranger from beyond the mist.
+    Guest,
 }
 
 /// Most companions one champion leads.
@@ -39,7 +43,12 @@ impl Game {
 
     /// Dice the companions add to `player`'s battles.
     pub(super) fn companion_dice(&self, player: PlayerId) -> u8 {
-        (self.companions(player).len() as u8).min(COMPANION_DICE)
+        let worth: u8 = self
+            .companions(player)
+            .iter()
+            .map(|&c| if c == Companion::Dragon { 2 } else { 1 })
+            .sum();
+        worth.min(COMPANION_DICE)
     }
 
     /// What `mob` would become following `player`, and its price, if it
@@ -53,6 +62,7 @@ impl Game {
             MobKind::Beast { .. } if self.has(Feature::Companions) => {
                 Some((Companion::Beast, TAME_SPIRIT))
             }
+            MobKind::Guest if self.has(Feature::Guests) => Some((Companion::Guest, 0)),
             MobKind::Undead if self.has(Feature::Legion) => {
                 Some((Companion::Undead, ENLIST_SPIRIT))
             }
@@ -108,8 +118,8 @@ impl Game {
         events.push(Event::MobLeft { id });
         events.push(Event::CompanionJoined { player, companion });
         let novelty = match companion {
-            Companion::Beast => super::Novelty::Tamed,
             Companion::Undead => super::Novelty::Enlisted,
+            _ => super::Novelty::Tamed,
         };
         self.first(player, novelty, events);
         Ok(())

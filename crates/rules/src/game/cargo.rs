@@ -21,6 +21,8 @@ pub enum Cargo {
     Food,
     /// Goods of a region, for a fair.
     Goods(crate::gods::God),
+    /// A dragon's egg, warmed in `warmth` fires, last laid down by `by`.
+    Egg { warmth: u8, by: Option<PlayerId> },
 }
 
 impl Game {
@@ -101,7 +103,15 @@ impl Game {
             return;
         };
         match cargo {
-            Cargo::Body { .. } if self.bury(player, hex, events) => {}
+            Cargo::Body { .. }
+                if self.feed_circle(player, hex, events) || self.bury(player, hex, events) => {}
+            Cargo::Egg { warmth, .. } => self.loads.push((
+                hex,
+                Cargo::Egg {
+                    warmth,
+                    by: Some(player),
+                },
+            )),
             Cargo::Body { hero } => match self.board.tile_mut(hex) {
                 Some(tile) if tile.corpse.is_none() && tile.terrain.is_land() => {
                     tile.corpse = Some(Corpse { age: 0, hero });

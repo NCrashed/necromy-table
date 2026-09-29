@@ -50,6 +50,8 @@ pub enum Novelty {
     /// Ground consecrated, a body buried.
     Consecrated,
     Buried,
+    /// A monster felled.
+    SlewMonster,
     /// A wish of this kind, granted.
     Wished(WishKind),
     /// A mechanic brought into the world.

@@ -175,6 +175,7 @@ pub fn novelty(n: necromy_rules::Novelty) -> String {
         Novelty::Gifted => "одаривает правителя".into(),
         Novelty::Consecrated => "освящает кладбище".into(),
         Novelty::Buried => "хоронит тело".into(),
+        Novelty::SlewMonster => "сражает чудовище".into(),
         Novelty::Sacrificed => "отдаёт предмет богу".into(),
         Novelty::Hid => "уходит в тень".into(),
         Novelty::FinishedLine => "доводит до конца свою историю".into(),
@@ -302,6 +303,24 @@ pub fn great_deed(d: necromy_rules::GreatDeed) -> (&'static str, String) {
                 necromy_rules::GREAT_FIRE
             ),
         ),
+        GreatDeed::Summoning => (
+            "Призыв",
+            format!(
+                "Круг на камнях силы, напоенный {} телами, открывает врата; твой удар добивает чудовище.",
+                necromy_rules::SUMMON_BODIES
+            ),
+        ),
+        GreatDeed::Dragon => (
+            "Дракон",
+            format!(
+                "Добудь яйцо в испытании в горах и высиживай его в огне {} раза: вылупившийся дракон — твой спутник.",
+                necromy_rules::EGG_WARMTH
+            ),
+        ),
+        GreatDeed::Guest => (
+            "Гость из иного мира",
+            "Из-за мглы выходит чужак; проведи его живым к Столу Ахамара.".into(),
+        ),
         GreatDeed::Necropolis => (
             "Некрополь",
             format!(
@@ -393,6 +412,9 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::NecropolisBodies => "погребено на нём",
         CheckKind::ZagaQuiet => "в краю Заги нет мертвецов",
         CheckKind::PitSettled => "твоя яма упокоена или поднята",
+        CheckKind::Summoned => "твоё чудовище пало от твоей руки",
+        CheckKind::DragonFollows => "за тобой идёт дракон",
+        CheckKind::GuestHome => "гость доведён до Стола",
         CheckKind::Crowned => "коронация на Столе",
         CheckKind::Feuding => "бывших вассалов в распре",
         CheckKind::RiverLength => "клеток самой длинной реки",
@@ -516,6 +538,22 @@ pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {
         Feature::Roads => (
             "Дороги",
             "шаг по дороге стоит 1 на любой земле, дорога через реку — мост; на дороге не скрыться",
+        ),
+        Feature::Ritual => (
+            "Ритуал",
+            "на камнях силы чертят круг и кормят его телами; сытый круг открывает врата",
+        ),
+        Feature::Monsters => (
+            "Чудовища",
+            "из врат выходит чудовище: сильное, идёт к живым; павшее даёт Стиль и добычу",
+        ),
+        Feature::Dragons => (
+            "Драконы",
+            "испытание в горах может дать яйцо; в огне оно греется и вылупляется драконом",
+        ),
+        Feature::Guests => (
+            "Гости",
+            "из-за мглы выходит чужак: его можно повести за собой к Столу",
         ),
         Feature::Burial => (
             "Погребение",
@@ -1063,6 +1101,8 @@ pub fn mob(kind: necromy_rules::MobKind, id: u32) -> (&'static str, &'static str
     match kind {
         necromy_rules::MobKind::Undead => ("Неупокоенный", "неупокоенного"),
         necromy_rules::MobKind::Beast { .. } => BEASTS[id as usize % BEASTS.len()],
+        necromy_rules::MobKind::Monster { .. } => ("Чудовище", "чудовище"),
+        necromy_rules::MobKind::Guest => ("Гость из-за мглы", "гостя из-за мглы"),
     }
 }
 
@@ -1074,6 +1114,7 @@ pub fn cargo(c: necromy_rules::Cargo) -> &'static str {
         Cargo::Body { hero: false } => "тело",
         Cargo::Food => "еда",
         Cargo::Goods(g) => goods(g),
+        Cargo::Egg { .. } => "драконье яйцо",
     }
 }
 
@@ -1097,6 +1138,8 @@ pub fn companion(c: necromy_rules::Companion) -> &'static str {
     match c {
         Companion::Beast => "зверь",
         Companion::Undead => "мертвец",
+        Companion::Dragon => "дракон",
+        Companion::Guest => "гость",
     }
 }
 

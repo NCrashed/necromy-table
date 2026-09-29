@@ -80,6 +80,8 @@ enum ActionButton {
     Feast,
     /// Open a fair in the settlement underfoot.
     Fair,
+    /// A circle on the stones underfoot.
+    DrawCircle,
     /// Burial: a graveyard, a pit, a pit settled.
     Consecrate,
     DigPit,
@@ -539,6 +541,12 @@ fn rebuild_action(
                 format!("Поджечь\n{} Духа", necromy_rules::KINDLE_SPIRIT),
             ));
         }
+        if g.may_draw_circle(human) && spirit >= necromy_rules::CIRCLE_SPIRIT {
+            buttons.push((
+                ActionButton::DrawCircle,
+                format!("Начертить круг\n{} Духа", necromy_rules::CIRCLE_SPIRIT),
+            ));
+        }
         if g.may_settle_pit(human) {
             buttons.push((ActionButton::SettlePit(false), "Упокоить\nяму".to_string()));
             buttons.push((
@@ -648,6 +656,7 @@ fn action_buttons(
             ActionButton::Sow => Intent::Sow,
             ActionButton::Feast => Intent::Feast,
             ActionButton::Fair => Intent::Fair,
+            ActionButton::DrawCircle => Intent::DrawCircle,
             ActionButton::Consecrate => Intent::Consecrate,
             ActionButton::DigPit => Intent::DigPit,
             ActionButton::SettlePit(raise) => Intent::SettlePit { raise: *raise },

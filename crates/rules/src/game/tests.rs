@@ -726,6 +726,8 @@ fn bots_play_in_worlds_lacking_mechanics() {
                 Event::MobAppeared { mob } => match mob.kind {
                     MobKind::Undead => !g.has(Feature::Undead),
                     MobKind::Beast { .. } => !g.has(Feature::Beasts),
+                    MobKind::Monster { .. } => !g.has(Feature::Monsters),
+                    MobKind::Guest => !g.has(Feature::Guests),
                 },
                 Event::Poisoned { .. } => !g.has(Feature::Poison),
                 Event::TrialSet { .. } => !g.has(Feature::Trials),
@@ -5495,4 +5497,85 @@ fn a_full_pit_is_laid_to_rest_or_raised() {
     assert!(g.settled_pit(me));
     assert!(g.checks(me, GreatDeed::PlaguePit).iter().all(Check::met));
     assert!(g.mobs().iter().filter(|m| m.is_undead()).count() >= 3);
+}
+
+// ---- Rituals, monsters, dragons, the guest (§21.8) ----
+
+#[test]
+fn a_fed_circle_opens_its_gate_and_its_monster_is_the_summoning() {
+    let (mut g, me, _) = duel(4);
+    g.chosen[me.0 as usize] = Some(GreatDeed::Summoning);
+    let stones = Hex::new(0, 2);
+    set_terrain(&mut g, stones, Terrain::Stones);
+    g.place(me, stones);
+    g.champ_mut(me).spirit_points = 3;
+    g.apply(me, Intent::DrawCircle).unwrap();
+    let mut ev = Vec::new();
+    for _ in 0..SUMMON_BODIES {
+        g.champ_mut(me).cargo = Some(Cargo::Body { hero: false });
+        g.drop_cargo(me, stones, &mut ev);
+    }
+    g.open_gates(&mut ev);
+    let monster = g.mobs().iter().find(|m| m.is_monster()).unwrap().id;
+    assert!(g.circle(stones).is_none());
+    g.hurt_mob(monster, me, MONSTER_HEALTH, &mut ev);
+    assert!(g.summoned(me));
+    assert!(g.checks(me, GreatDeed::Summoning).iter().all(Check::met));
+}
+
+#[test]
+fn an_egg_warms_in_three_fires_and_hatches_a_dragon() {
+    let (mut g, me, _) = duel(4);
+    let woods = Hex::new(0, 3);
+    let mut ev = Vec::new();
+    for _ in 0..EGG_WARMTH {
+        set_terrain(&mut g, woods, Terrain::Forest);
+        g.loads.retain(|(h, _)| *h != woods);
+        let warmth = g
+            .champion(me)
+            .and_then(|c| match c.cargo {
+                Some(Cargo::Egg { warmth, .. }) => Some(warmth),
+                _ => None,
+            })
+            .unwrap_or(0);
+        g.champ_mut(me).cargo = Some(Cargo::Egg { warmth, by: None });
+        g.drop_cargo(me, woods, &mut ev);
+        g.set_fire(woods, Some(me), &mut ev);
+        g.fire_phase(&mut ev);
+        if let Some(&(_, egg)) = g.loads().iter().find(|(h, _)| *h == woods) {
+            g.champ_mut(me).cargo = Some(egg);
+        }
+    }
+    assert!(g.companions(me).contains(&Companion::Dragon));
+    g.chosen[me.0 as usize] = Some(GreatDeed::Dragon);
+    assert!(g.checks(me, GreatDeed::Dragon).iter().all(Check::met));
+}
+
+#[test]
+fn the_guest_is_led_to_the_table() {
+    let (mut g, me, _) = duel(4);
+    g.mobs.clear();
+    let mut ev = Vec::new();
+    g.guest_at_dusk(&mut ev);
+    let guest = g
+        .mobs()
+        .iter()
+        .find(|m| matches!(m.kind, MobKind::Guest))
+        .copied()
+        .unwrap();
+    let beside = guest
+        .hex
+        .all_neighbors()
+        .into_iter()
+        .find(|&h| g.board().contains(h) && g.champion_at(h).is_none())
+        .unwrap();
+    g.place(me, beside);
+    g.apply(me, Intent::Recruit { mob: guest.id }).unwrap();
+    assert!(g.companions(me).contains(&Companion::Guest));
+    g.place(me, Hex::new(1, 0));
+    g.turns[me.0 as usize].move_points = MOVE_POINTS;
+    g.apply(me, Intent::Move { to: Hex::ZERO }).unwrap();
+    assert!(g.guest_home(me));
+    g.chosen[me.0 as usize] = Some(GreatDeed::Guest);
+    assert!(g.checks(me, GreatDeed::Guest).iter().all(Check::met));
 }

@@ -57,6 +57,14 @@ pub enum MobKind {
     Undead,
     /// A beast of Bhava's forests, keeping to the land about its lair.
     Beast { lair: Hex },
+    /// Out of a ritual's gate (§21.8): strong, of an element, walking to
+    /// the living; `summoner` fed the circle.
+    Monster {
+        summoner: Option<PlayerId>,
+        element: Element,
+    },
+    /// A stranger from beyond the mist, to be led to the Table.
+    Guest,
 }
 
 impl MobKind {
@@ -69,6 +77,8 @@ impl MobKind {
         match self {
             Self::Undead => UNDEAD_HEALTH,
             Self::Beast { .. } => super::beasts::BEAST_HEALTH,
+            Self::Monster { .. } => super::ritual::MONSTER_HEALTH,
+            Self::Guest => 2,
         }
     }
 
@@ -77,6 +87,8 @@ impl MobKind {
         match self {
             Self::Undead => UNDEAD_DICE,
             Self::Beast { .. } => super::beasts::BEAST_DICE,
+            Self::Monster { .. } => super::ritual::MONSTER_DICE,
+            Self::Guest => 1,
         }
     }
 }
@@ -88,6 +100,10 @@ impl Mob {
 
     pub const fn is_beast(&self) -> bool {
         matches!(self.kind, MobKind::Beast { .. })
+    }
+
+    pub const fn is_monster(&self) -> bool {
+        matches!(self.kind, MobKind::Monster { .. })
     }
 }
 
@@ -214,6 +230,7 @@ impl Game {
             arrived.push(id);
         }
         self.beast_phase(events);
+        self.monster_phase(events);
 
         let posts: Vec<(Hex, Hex)> = self
             .militias()
@@ -325,6 +342,7 @@ impl Game {
     fn mob_element(&self, id: u32) -> Element {
         match self.mobs.iter().find(|m| m.id == id).map(|m| m.kind) {
             Some(MobKind::Beast { .. }) => Element::Wood,
+            Some(MobKind::Monster { element, .. }) => element,
             _ => Element::Water,
         }
     }
@@ -422,7 +440,7 @@ impl Game {
     /// A mob takes `amount`; at nothing left it falls. An undead laid to
     /// rest raises its feller in the militia's eyes and carries loot one
     /// time in three; a beast carries it half the time.
-    fn hurt_mob(&mut self, id: u32, by: PlayerId, amount: u8, events: &mut Vec<Event>) {
+    pub(super) fn hurt_mob(&mut self, id: u32, by: PlayerId, amount: u8, events: &mut Vec<Event>) {
         let Some(u) = self.mobs.iter_mut().find(|u| u.id == id) else {
             return;
         };
@@ -432,13 +450,15 @@ impl Game {
         if hp > 0 {
             return;
         }
-        let undead = self
-            .mobs
-            .iter()
-            .find(|u| u.id == id)
-            .is_some_and(|u| u.is_undead());
+        let kind = self.mobs.iter().find(|u| u.id == id).map(|u| u.kind);
+        let undead = matches!(kind, Some(MobKind::Undead));
         self.mobs.retain(|u| u.id != id);
         events.push(Event::MobFell { id, hex, by });
+        // A monster felled: Style and loot, and a summoner who struck the
+        // last blow has done the Summoning (§21.8).
+        if let Some(MobKind::Monster { summoner, .. }) = kind {
+            self.monster_slain(by, summoner, events);
+        }
         let novelty = if undead {
             super::Novelty::LaidToRest
         } else {

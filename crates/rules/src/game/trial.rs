@@ -209,6 +209,7 @@ impl Game {
             // The god remembers who stood its test.
             self.offer(Some(player), trial.god, 1, events);
             self.story_trial(player, hex, events);
+            self.egg_from_trial(player, hex, events);
         } else {
             events.push(Event::TrialFailed {
                 player,

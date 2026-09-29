@@ -59,6 +59,12 @@ pub enum GreatDeed {
     Necropolis,
     /// A plague pit of yours filled with five bodies and settled.
     PlaguePit,
+    /// A monster out of your circle's gate, felled by your hand.
+    Summoning,
+    /// A dragon hatched and following you.
+    Dragon,
+    /// The stranger from beyond the mist led to the Table alive.
+    Guest,
     /// Marriages of your making binding three lands into one house.
     TripleUnion,
     /// Crowned over three vassals, then their oaths broken and three of
@@ -70,7 +76,7 @@ pub enum GreatDeed {
 }
 
 impl GreatDeed {
-    pub const ALL: [GreatDeed; 18] = [
+    pub const ALL: [GreatDeed; 21] = [
         GreatDeed::WorldTree,
         GreatDeed::Island,
         GreatDeed::DissolvedLand,
@@ -89,6 +95,9 @@ impl GreatDeed {
         GreatDeed::FallenEmpire,
         GreatDeed::Necropolis,
         GreatDeed::PlaguePit,
+        GreatDeed::Summoning,
+        GreatDeed::Dragon,
+        GreatDeed::Guest,
     ];
 
     /// The god whose deed it is: its card's colour, its voice.
@@ -98,17 +107,19 @@ impl GreatDeed {
             GreatDeed::Island
             | GreatDeed::DissolvedLand
             | GreatDeed::River
-            | GreatDeed::FloodedTable => God::Maya,
+            | GreatDeed::FloodedTable
+            | GreatDeed::Guest => God::Maya,
             GreatDeed::City
             | GreatDeed::GreatFire
             | GreatDeed::Feast
             | GreatDeed::FairOfFive
             | GreatDeed::DeadFeast => God::Trishna,
-            GreatDeed::Roads | GreatDeed::FallenEmpire => God::Ahamar,
+            GreatDeed::Roads | GreatDeed::FallenEmpire | GreatDeed::Summoning => God::Ahamar,
             GreatDeed::Reconciliation
             | GreatDeed::Legion
             | GreatDeed::Necropolis
-            | GreatDeed::PlaguePit => God::Zaga,
+            | GreatDeed::PlaguePit
+            | GreatDeed::Dragon => God::Zaga,
         }
     }
 
@@ -131,6 +142,20 @@ impl GreatDeed {
                 Feature::Burial,
             ],
             GreatDeed::PlaguePit => &[Feature::Bodies, Feature::Cargo, Feature::Burial],
+            GreatDeed::Summoning => &[
+                Feature::Bodies,
+                Feature::Cargo,
+                Feature::Ritual,
+                Feature::Monsters,
+            ],
+            GreatDeed::Dragon => &[
+                Feature::Trials,
+                Feature::Fires,
+                Feature::Cargo,
+                Feature::Companions,
+                Feature::Dragons,
+            ],
+            GreatDeed::Guest => &[Feature::Companions, Feature::Guests],
             GreatDeed::TripleUnion | GreatDeed::FallenEmpire => {
                 &[Feature::Settlements, Feature::Rulers]
             }
@@ -210,6 +235,12 @@ pub enum CheckKind {
     ZagaQuiet,
     /// A plague pit of yours settled.
     PitSettled,
+    /// Your own monster felled by you.
+    Summoned,
+    /// A dragon follows you.
+    DragonFollows,
+    /// The guest led home.
+    GuestHome,
     /// Lands bound by your marriages.
     UnionLands,
     /// You have been crowned.
@@ -418,6 +449,21 @@ impl Game {
                     check(CheckKind::ZagaQuiet, usize::from(self.zaga_land_quiet()), 1),
                 ]
             }
+            GreatDeed::Summoning => vec![check(
+                CheckKind::Summoned,
+                usize::from(self.summoned(player)),
+                1,
+            )],
+            GreatDeed::Dragon => vec![check(
+                CheckKind::DragonFollows,
+                usize::from(self.companions(player).contains(&super::Companion::Dragon)),
+                1,
+            )],
+            GreatDeed::Guest => vec![check(
+                CheckKind::GuestHome,
+                usize::from(self.guest_home(player)),
+                1,
+            )],
             GreatDeed::PlaguePit => vec![check(
                 CheckKind::PitSettled,
                 usize::from(self.settled_pit(player)),

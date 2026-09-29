@@ -554,6 +554,14 @@ fn tooltip(
             "пожар{whose}: войти — обжечься; в ход мира перекинется дальше"
         ));
     }
+    if let Some(c) = g.circle(hex) {
+        lines.push(format!(
+            "круг {}: напоен телами {}/{}",
+            game.name_genitive(c.owner),
+            c.bodies,
+            necromy_rules::SUMMON_BODIES
+        ));
+    }
     if g.graves(hex) > 0 {
         lines.push(format!("погребено: {}", g.graves(hex)));
     }

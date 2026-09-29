@@ -195,6 +195,8 @@ pub enum Intent {
     Feast,
     /// On your turn, in a settlement of yours: open a fair.
     Fair,
+    /// On your turn: a circle on the stones underfoot (§21.8).
+    DrawCircle,
     /// On your turn: the ground underfoot becomes a graveyard (§21.8).
     Consecrate,
     /// On your turn: a plague pit underfoot.
@@ -784,6 +786,46 @@ pub enum Event {
     /// A road on `hex` (§21.8).
     RoadLaid {
         hex: Hex,
+    },
+    /// `player` drew a circle on `hex` (§21.8).
+    CircleDrawn {
+        player: PlayerId,
+        hex: Hex,
+    },
+    /// `player` fed the circle on `hex` a body: `bodies` now.
+    CircleFed {
+        player: PlayerId,
+        hex: Hex,
+        bodies: u8,
+    },
+    /// The gate of the circle on `hex` opened.
+    GateOpened {
+        hex: Hex,
+        summoner: PlayerId,
+    },
+    /// A monster fell to `by`: `own` if they summoned it.
+    MonsterSlain {
+        by: PlayerId,
+        own: bool,
+    },
+    /// `player` found a dragon's egg on `hex`.
+    EggFound {
+        player: PlayerId,
+        hex: Hex,
+    },
+    /// The egg on `hex` warmed in a fire.
+    EggWarmed {
+        hex: Hex,
+        warmth: u8,
+    },
+    /// A dragon hatched on `hex`, following `player`.
+    DragonHatched {
+        hex: Hex,
+        player: Option<PlayerId>,
+    },
+    /// `player` led the guest to the Table.
+    GuestHome {
+        player: PlayerId,
     },
     /// `player` buried a body on `hex` (§21.8).
     Buried {
@@ -1415,6 +1457,9 @@ pub struct Game {
     buildings: BTreeMap<(i32, i32), buildings::Building>,
     /// Roads of the register (§21.8).
     roads: std::collections::BTreeSet<(i32, i32)>,
+    /// Circles on the stones and wonders done (§21.8).
+    circles: BTreeMap<(i32, i32), ritual::Circle>,
+    wonders: Vec<ritual::Wonders>,
     /// Bodies buried in graveyards, plague pits, and who settled a pit
     /// (§21.8).
     graves: BTreeMap<(i32, i32), u8>,
@@ -1571,6 +1616,8 @@ impl Game {
             stores: BTreeMap::new(),
             fairs: BTreeMap::new(),
             rulers: BTreeMap::new(),
+            circles: BTreeMap::new(),
+            wonders: vec![ritual::Wonders::default(); champions_len],
             graves: BTreeMap::new(),
             pits: BTreeMap::new(),
             plague_done: vec![false; champions_len],
@@ -2106,6 +2153,7 @@ impl Game {
             Intent::Sow => self.sow(player, events),
             Intent::Feast => self.hold_feast(player, events),
             Intent::Fair => self.open_fair(player, events),
+            Intent::DrawCircle => self.draw_circle(player, events),
             Intent::Consecrate => self.consecrate(player, events),
             Intent::DigPit => self.dig_pit(player, events),
             Intent::SettlePit { raise } => self.settle_pit(player, raise, events),
@@ -2150,6 +2198,7 @@ impl Game {
             Intent::Sow => self.check_sow(player),
             Intent::Feast => self.check_feast(player),
             Intent::Fair => self.check_fair(player),
+            Intent::DrawCircle => self.check_circle(player),
             Intent::Consecrate | Intent::DigPit => self.check_consecrate(player),
             Intent::SettlePit { .. } => self.check_settle_pit(player),
             Intent::Gift { hex } => self.check_gift(player, hex),
@@ -2290,6 +2339,8 @@ impl Game {
                 self.make_goods(events);
                 self.close_fairs(events);
                 self.weddings(events);
+                self.open_gates(events);
+                self.guest_at_dusk(events);
                 self.judge_the_day(events);
                 self.begin_dusk(events);
                 if self.dusk.is_none() {
@@ -2386,6 +2437,7 @@ impl Game {
         });
         self.piranhas(player, to, events);
         self.scorch(player, to, events);
+        self.guest_arrives(player, to, events);
         self.spring_traps(player, to, events);
 
         // The champion may have fallen to a trap and woken at home.
@@ -2626,6 +2678,7 @@ impl Game {
             | Intent::Sow
             | Intent::Feast
             | Intent::Fair
+            | Intent::DrawCircle
             | Intent::Consecrate
             | Intent::DigPit
             | Intent::SettlePit { .. }
@@ -3488,6 +3541,7 @@ mod militia;
 mod mobs;
 mod novelty;
 mod poison;
+mod ritual;
 mod roads;
 mod rulers;
 mod scenario;
@@ -3522,6 +3576,9 @@ pub use mobs::{
 };
 pub use novelty::{FIRST_STYLE, Novelty, VARIETY};
 pub use poison::{Cure, Poison};
+pub use ritual::{
+    CIRCLE_SPIRIT, Circle, EGG_WARMTH, MONSTER_DICE, MONSTER_HEALTH, SUMMON_BODIES, Wonders,
+};
 pub use roads::{PAVE_SPIRIT, ROAD_RUN};
 pub use rulers::{CROWN_VASSALS, FEUDING, MATCH_REGARD, OATH_REGARD, Ruler, UNION_LANDS};
 pub use scenario::{Scenario, SceneSeat, SceneWorld};

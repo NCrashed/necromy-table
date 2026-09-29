@@ -87,6 +87,10 @@ impl StatArt {
         let set = match kind {
             necromy_rules::MobKind::Undead => &self.undead,
             necromy_rules::MobKind::Beast { .. } => &self.beasts,
+            // Stand-ins until they have pictures of their own.
+            necromy_rules::MobKind::Monster { .. } => &self.beasts,
+            necromy_rules::MobKind::Guest if !self.militia.is_empty() => &self.militia,
+            necromy_rules::MobKind::Guest => &self.undead,
         };
         set[id as usize % set.len()].clone()
     }
