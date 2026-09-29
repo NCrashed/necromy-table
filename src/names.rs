@@ -303,6 +303,10 @@ pub fn great_deed(d: necromy_rules::GreatDeed) -> (&'static str, String) {
                 necromy_rules::GREAT_FIRE
             ),
         ),
+        GreatDeed::WalkingForest => (
+            "Шагающий лес",
+            "Разбуди рощу картой «Дикий энт»: каждую ночь она шагает к Столу Ахамара и, дойдя, укореняется у него.".into(),
+        ),
         GreatDeed::Ark => (
             "Ковчег",
             format!(
@@ -422,6 +426,7 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::Summoned => "твоё чудовище пало от твоей руки",
         CheckKind::DragonFollows => "за тобой идёт дракон",
         CheckKind::GuestHome => "гость доведён до Стола",
+        CheckKind::GroveRooted => "твоя роща укоренилась у Стола",
         CheckKind::PenElements => "стихий зверей в твоём загоне",
         CheckKind::PenByShrine => "твоё святилище рядом",
         CheckKind::Crowned => "коронация на Столе",
@@ -547,6 +552,10 @@ pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {
         Feature::Roads => (
             "Дороги",
             "шаг по дороге стоит 1 на любой земле, дорога через реку — мост; на дороге не скрыться",
+        ),
+        Feature::WalkingGroves => (
+            "Бродячие рощи",
+            "карта «Дикий энт» будит рощу: каждую ночь она шагает к Столу, оставляя лес",
         ),
         Feature::Wilds => (
             "Звери стихий",

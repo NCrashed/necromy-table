@@ -608,6 +608,12 @@ fn tooltip(
             }
         ));
     }
+    if let Some((_, p)) = g.walkers().find(|(h, _)| *h == hex) {
+        lines.push(format!(
+            "бродячая роща ({}): каждую ночь шагает к Столу",
+            game.name(p)
+        ));
+    }
     let food = g.food_at(hex);
     if food > 0 {
         lines.push(format!(

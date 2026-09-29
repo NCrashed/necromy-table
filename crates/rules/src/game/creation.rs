@@ -189,7 +189,7 @@ impl Game {
 
     /// Cards of a mechanic just come in go into the deck (§21.2): a few of
     /// its own and whatever answers they need, two copies each.
-    fn deal_in(&mut self, feature: Feature, events: &mut Vec<Event>) {
+    pub(super) fn deal_in(&mut self, feature: Feature, events: &mut Vec<Event>) {
         let allowed: Vec<crate::cards::DefId> = (0..crate::cards::POOL.len() as u16)
             .map(crate::cards::DefId)
             .filter(|d| d.def().needs().is_none_or(|f| self.has(f)))
@@ -363,7 +363,8 @@ impl Game {
             | Feature::Monsters
             | Feature::Dragons
             | Feature::Wilds
-            | Feature::Pens => {}
+            | Feature::Pens
+            | Feature::WalkingGroves => {}
         }
     }
 

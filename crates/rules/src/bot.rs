@@ -472,6 +472,7 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
             | GreatDeed::Dragon
             | GreatDeed::Guest
             | GreatDeed::Ark
+            | GreatDeed::WalkingForest
             | GreatDeed::Amazon => wish(
                 God::Maya,
                 crate::Act::Veil {
@@ -548,6 +549,15 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
         (GreatDeed::Amazon, JungleRiver) => wish(God::Maya, crate::Act::River),
         // Bhava's woods round where it stands.
         (GreatDeed::WorldTree, WoodsAround) => wish(God::Bhava, crate::Act::Land),
+        // Groves round it to wake.
+        (GreatDeed::WalkingForest, GroveRooted)
+            if !game
+                .board()
+                .land()
+                .any(|(_, t)| t.terrain == crate::Terrain::Grove) =>
+        {
+            wish(God::Bhava, crate::Act::Land)
+        }
         // A god of the pair out of its light: an offering to the god that
         // quenches it cools it (§5.1).
         (GreatDeed::Reconciliation, PairLight) => {
@@ -667,6 +677,18 @@ fn deed_goal(game: &Game, player: PlayerId) -> Option<Hex> {
                     .map(|t| t.hex)
                     .collect(),
             )
+        }
+        // A grove to wake, while none of its own walks.
+        GreatDeed::WalkingForest => {
+            if game.walkers().any(|(_, p)| p == player) {
+                return None;
+            }
+            let me = game.champion(player)?.hex;
+            game.board()
+                .land()
+                .filter(|(h, t)| t.terrain == crate::Terrain::Grove && *h != me)
+                .map(|(h, _)| h)
+                .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
         }
         // Home to build the pen, beasts of the elements it lacks, the pen to
         // tether them in.
@@ -1009,6 +1031,24 @@ fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
         })
     {
         return Some(Intent::Douse { hex });
+    }
+    // Its walking grove: «Дикий энт» on the grove nearest the Table.
+    if game.deed(player) == Some(GreatDeed::WalkingForest) {
+        for card in game.playable(player) {
+            if game.def(card).effect != Effect::Ent {
+                continue;
+            }
+            if let Some(target) = game
+                .targets(player, card)
+                .into_iter()
+                .min_by_key(|t| match t {
+                    Target::Hex(h) => (h.ulength(), h.x(), h.y()),
+                    _ => (u32::MAX, 0, 0),
+                })
+            {
+                return Some(Intent::Play { card, target });
+            }
+        }
     }
     // Its Ark: a pen at home, a shrine near it, beasts tethered.
     if game.deed(player) == Some(GreatDeed::Ark) {

@@ -795,6 +795,21 @@ pub enum Event {
     RoadLaid {
         hex: Hex,
     },
+    /// `player` woke the grove on `hex` (§21.8).
+    GroveWoke {
+        player: PlayerId,
+        hex: Hex,
+    },
+    /// A walking grove stepped.
+    GroveWalked {
+        from: Hex,
+        to: Hex,
+    },
+    /// `player`'s walking grove put down roots by the Table.
+    GroveRooted {
+        player: PlayerId,
+        hex: Hex,
+    },
     /// `player` tethered a beast of `element` in the pen on `hex` (§21.8).
     Tethered {
         player: PlayerId,
@@ -1477,6 +1492,9 @@ pub struct Game {
     buildings: BTreeMap<(i32, i32), buildings::Building>,
     /// Roads of the register (§21.8).
     roads: std::collections::BTreeSet<(i32, i32)>,
+    /// Walking groves and who woke them; who rooted one by the Table (§21.8).
+    walkers: BTreeMap<(i32, i32), PlayerId>,
+    rooted: Vec<bool>,
     /// Tethered beasts in pens, by element (§21.8).
     pens: BTreeMap<(i32, i32), u8>,
     /// Circles on the stones and wonders done (§21.8).
@@ -1638,6 +1656,8 @@ impl Game {
             stores: BTreeMap::new(),
             fairs: BTreeMap::new(),
             rulers: BTreeMap::new(),
+            walkers: BTreeMap::new(),
+            rooted: vec![false; champions_len],
             pens: BTreeMap::new(),
             circles: BTreeMap::new(),
             wonders: vec![ritual::Wonders::default(); champions_len],
@@ -2043,6 +2063,7 @@ impl Game {
                             Effect::Grow => {
                                 t.terrain.can_grow_grove() && t.terrain != Terrain::Grove
                             }
+                            Effect::Ent => t.terrain == Terrain::Grove,
                             Effect::Trap(_) => !self.traps.iter().any(|tr| tr.hex == *h),
                             _ => true,
                         }
@@ -3072,6 +3093,11 @@ impl Game {
                     self.grow(hex, events);
                 }
             }
+            Effect::Ent => {
+                if let Target::Hex(hex) = target {
+                    self.wake_grove(caster, hex, events);
+                }
+            }
             Effect::Blink => {
                 // Fog drops the caster onto someone hiding there: the step
                 // fails and the one in hiding is seen.
@@ -3515,6 +3541,9 @@ impl Game {
             }
             self.mob_phase(events);
         }
+        if self.scripted.is_none() && self.time == TimeOfDay::Night {
+            self.walk_groves(events);
+        }
         if self.scripted.is_none() && self.has(Feature::Rulers) {
             self.seat_rulers();
             self.feud_phase(events);
@@ -3582,6 +3611,7 @@ mod trade;
 mod trial;
 mod victory;
 mod view;
+mod walking;
 mod water;
 mod wish;
 mod world;

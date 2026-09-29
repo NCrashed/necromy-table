@@ -1132,6 +1132,10 @@ fn feast_reads_trishnas_stage() {
     g.pantheon.stages[God::Trishna.index()] = 2;
     g.champ_mut(me).spirit_points = 0;
     g.champ_mut(me).spirit = 4;
+    let lying: Vec<Hex> = g.board().corpses().map(|(h, _)| h).collect();
+    for hex in lying {
+        g.board.tile_mut(hex).unwrap().corpse = None;
+    }
     for hex in [Hex::ZERO, Hex::new(0, 1)] {
         g.board.tile_mut(hex).unwrap().corpse = Some(Corpse::fresh());
     }
@@ -5621,4 +5625,61 @@ fn beasts_of_every_element_tethered_by_a_shrine_are_the_ark() {
             .contains(&Companion::Beast(crate::gods::Element::Fire))
     );
     assert!(!g.checks(me, GreatDeed::Ark).iter().all(Check::met));
+}
+
+// ---- Walking groves (§21.8) ----
+
+#[test]
+fn a_woken_grove_walks_to_the_table_and_roots() {
+    let (mut g, me, foe) = duel(4);
+    g.place(foe, Hex::new(-5, 1));
+    g.chosen[me.0 as usize] = Some(GreatDeed::WalkingForest);
+    for q in 1..=4 {
+        set_terrain(&mut g, Hex::new(q, 0), Terrain::Plains);
+    }
+    let grove = Hex::new(4, 0);
+    set_terrain(&mut g, grove, Terrain::Grove);
+    let mut ev = Vec::new();
+    g.wake_grove(me, grove, &mut ev);
+    for _ in 0..3 {
+        g.walk_groves(&mut ev);
+    }
+    assert_eq!(
+        g.board().tile(Hex::new(1, 0)).unwrap().terrain,
+        Terrain::Grove
+    );
+    assert_eq!(
+        g.board().tile(Hex::new(3, 0)).unwrap().terrain,
+        Terrain::Forest
+    );
+    assert!(g.rooted(me));
+    assert!(
+        g.checks(me, GreatDeed::WalkingForest)
+            .iter()
+            .all(Check::met)
+    );
+}
+
+#[test]
+fn choosing_the_walking_forest_brings_the_ent_into_the_deck() {
+    let (mut g, me, _) = duel(4);
+    assert!(
+        !g.slice
+            .iter()
+            .any(|d| d.def().effect == crate::cards::Effect::Ent)
+    );
+    g.offers[me.0 as usize] = vec![GreatDeed::WalkingForest];
+    g.chosen[me.0 as usize] = None;
+    g.apply(
+        me,
+        Intent::ChooseDeed {
+            deed: GreatDeed::WalkingForest,
+        },
+    )
+    .unwrap();
+    assert!(
+        g.slice
+            .iter()
+            .any(|d| d.def().effect == crate::cards::Effect::Ent)
+    );
 }

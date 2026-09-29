@@ -82,6 +82,8 @@ pub enum Effect {
     Trap(TrapEffect),
     /// The hex becomes a grove.
     Grow,
+    /// The grove wakes and walks (§21.8).
+    Ent,
     /// The caster steps to the target hex without walking.
     Blink,
     /// The pending card fizzles, unless its element quenches this card's.
@@ -113,6 +115,7 @@ impl Effect {
             Effect::Ward
                 | Effect::Root
                 | Effect::Grow
+                | Effect::Ent
                 | Effect::Blink
                 | Effect::Hide
                 | Effect::Cancel
@@ -177,6 +180,7 @@ impl CardDef {
             Effect::Poison(_) | Effect::Trap(TrapEffect::Poison(_)) => Some(Feature::Poison),
             Effect::Hide => Some(Feature::Stealth),
             Effect::Grow => Some(Feature::Groves),
+            Effect::Ent => Some(Feature::WalkingGroves),
             _ => None,
         }
     }
@@ -370,6 +374,9 @@ pub const POOL: &[CardDef] = &[
     // Neutral
     card("Короткий путь", "+1 очко движения в этот ход.", None, Trick, Own, 0, Caster, Haste(1)),
     card("Бинт", "Вылечись на 1.", None, Trick, Instant, 0, Caster, Heal(1)),
+    // Brought in by their mechanics (§21.8); kept last so the slices of
+    // matches that never meet them stay as they were.
+    card("Дикий энт", "Роща рядом оживает: каждую ночь она шагает к Столу.", Some(Wood), Rite, Own, 2, EmptyHex { range: 1 }, Ent),
 ];
 
 /// Distinct cards in a match and copies of each.
@@ -380,7 +387,7 @@ pub const COPIES: u32 = 2;
 /// every poison in it has an answer (§2, §20.1): a harmful card, or a heal,
 /// of the one element that quenches it.
 pub fn match_slice(rng: &mut Rng) -> Vec<DefId> {
-    slice_of(rng, SLICE_SIZE, |_| true)
+    slice_of(rng, SLICE_SIZE, |d| d.effect != Effect::Ent)
 }
 
 /// `size` cards of those `allowed`, then the answers they need.

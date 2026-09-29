@@ -67,6 +67,8 @@ pub enum GreatDeed {
     Guest,
     /// A pen of yours by a shrine of yours with a beast of every element.
     Ark,
+    /// A grove you woke walked to the Table and put down roots there.
+    WalkingForest,
     /// Marriages of your making binding three lands into one house.
     TripleUnion,
     /// Crowned over three vassals, then their oaths broken and three of
@@ -78,7 +80,7 @@ pub enum GreatDeed {
 }
 
 impl GreatDeed {
-    pub const ALL: [GreatDeed; 22] = [
+    pub const ALL: [GreatDeed; 23] = [
         GreatDeed::WorldTree,
         GreatDeed::Island,
         GreatDeed::DissolvedLand,
@@ -101,14 +103,17 @@ impl GreatDeed {
         GreatDeed::Dragon,
         GreatDeed::Guest,
         GreatDeed::Ark,
+        GreatDeed::WalkingForest,
     ];
 
     /// The god whose deed it is: its card's colour, its voice.
     pub const fn patron(self) -> God {
         match self {
-            GreatDeed::WorldTree | GreatDeed::Amazon | GreatDeed::TripleUnion | GreatDeed::Ark => {
-                God::Bhava
-            }
+            GreatDeed::WorldTree
+            | GreatDeed::Amazon
+            | GreatDeed::TripleUnion
+            | GreatDeed::Ark
+            | GreatDeed::WalkingForest => God::Bhava,
             GreatDeed::Island
             | GreatDeed::DissolvedLand
             | GreatDeed::River
@@ -161,6 +166,7 @@ impl GreatDeed {
                 Feature::Dragons,
             ],
             GreatDeed::Guest => &[Feature::Companions, Feature::Guests],
+            GreatDeed::WalkingForest => &[Feature::Bodies, Feature::Groves, Feature::WalkingGroves],
             GreatDeed::Ark => &[
                 Feature::Beasts,
                 Feature::Companions,
@@ -254,6 +260,8 @@ pub enum CheckKind {
     DragonFollows,
     /// The guest led home.
     GuestHome,
+    /// A grove of yours rooted by the Table.
+    GroveRooted,
     /// Elements of the beasts in a pen of yours.
     PenElements,
     /// A shrine of yours in its city.
@@ -403,6 +411,16 @@ impl Game {
         }
         self.chosen[player.0 as usize] = Some(deed);
         events.push(Event::DeedChosen { player, deed });
+        // The walking grove needs its card in the deck (§21.8).
+        if deed == GreatDeed::WalkingForest
+            && self.has(Feature::WalkingGroves)
+            && !self
+                .slice
+                .iter()
+                .any(|d| d.def().effect == crate::cards::Effect::Ent)
+        {
+            self.deal_in(Feature::WalkingGroves, events);
+        }
         Ok(())
     }
 
@@ -474,6 +492,11 @@ impl Game {
             GreatDeed::Dragon => vec![check(
                 CheckKind::DragonFollows,
                 usize::from(self.companions(player).contains(&super::Companion::Dragon)),
+                1,
+            )],
+            GreatDeed::WalkingForest => vec![check(
+                CheckKind::GroveRooted,
+                usize::from(self.rooted(player)),
                 1,
             )],
             GreatDeed::Ark => {
