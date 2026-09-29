@@ -161,6 +161,7 @@ fn steer(
     mut motion: MessageReader<MouseMotion>,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
+    typing: Res<crate::wish_ui::Typing>,
     game: Res<Match>,
     selection: Res<Selection>,
     window: Single<&Window>,
@@ -203,7 +204,7 @@ fn steer(
     }
 
     // The keyboard belongs to the wish while the human writes one.
-    if game.game.wish_due() != Some(game.human) {
+    if !typing.0 {
         let step = PAN_PIXELS * per_pixel(rig.zoom) * time.delta_secs();
         let held = |a: KeyCode, b: KeyCode| keys.pressed(a) || keys.pressed(b);
         if held(KeyCode::KeyA, KeyCode::ArrowLeft) {

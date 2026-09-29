@@ -227,6 +227,6 @@ mod tests {
         assert_eq!(g.hand(me).len(), 1);
         assert!(g.guard().is_none());
         assert!(g.winner().is_none());
-        assert!(g.wish_due().is_none());
+        assert!(g.at_dusk().is_none());
     }
 }

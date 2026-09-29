@@ -219,12 +219,12 @@ fn auto_screenshot(
         (Some("told"), Some(game)) => {
             game.told.is_some() && game.wish_reply.is_none() && !dice.busy()
         }
-        (Some("wishpanel"), Some(game)) => game.game.wish_due() == Some(game.human),
+        (Some("wishpanel"), Some(game)) => game.game.wishing().contains(&game.human),
         // Another seat's wish is being written where the human can see it.
         (Some("drafting"), Some(game)) => game
             .drafting
-            .as_ref()
-            .is_some_and(|(_, _, text)| text.chars().count() >= 12),
+            .iter()
+            .any(|(&p, (_, text))| p != game.human && text.chars().count() >= 12),
         // Full night: the lights of the world are on.
         (Some("night"), Some(_)) => day_night.night >= 1.0,
         // Someone slipped out of sight (§11.6).

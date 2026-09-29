@@ -2,8 +2,8 @@
 //!
 //! Only people's seats have clocks. A turn has its own clock, which stands
 //! still while the seat waits (on a window, or held on a rival, §11.2); each window a seat may answer has one; the
-//! Dominant's wish has one, which stands still while a god thinks about
-//! words already sent. When a clock runs out the table does the plainest
+//! wish has one while dusk waits for it (§21.4), which stands still while
+//! a god thinks about words already sent. When a clock runs out the table does the plainest
 //! thing for the seat: pass (in a battle, throw with nothing burned), end
 //! the turn, or refuse the wish. It never plays for them.
 
@@ -54,7 +54,7 @@ impl SeatClock {
     pub(crate) fn follow(&mut self, t: &Timers, game: &Game, seat: PlayerId, events: &[Event]) {
         let window = game.to_answer(seat).is_some();
         let free = game.free_to_act(seat);
-        let wish = game.wish_due() == Some(seat);
+        let wish = game.wishing().contains(&seat);
 
         if events
             .iter()

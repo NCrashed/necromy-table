@@ -135,8 +135,13 @@ pub enum OracleNews {
     Listening(Option<God>),
     /// The wish could not be heard; the seat may try again.
     NotHeard(String),
-    /// A god's words for the wish granted in update `serial`.
-    WishVoice { serial: u32, text: String },
+    /// A god's words for `player`'s wish granted in update `serial` (at
+    /// dusk one update grants several, §21.4).
+    WishVoice {
+        serial: u32,
+        player: PlayerId,
+        text: String,
+    },
     /// A god's words for a story line.
     LineVoice { line: u32, text: String },
 }
@@ -149,6 +154,7 @@ enum Purpose {
     },
     WishVoice {
         serial: u32,
+        player: PlayerId,
     },
     LineVoice {
         owner: PlayerId,
@@ -272,7 +278,7 @@ impl Table {
         }
         table.broadcast(&[]);
         for (seat, god, text) in asked {
-            if table.game.wish_due() == Some(seat) {
+            if table.game.may_wish(seat) {
                 table.ask_wish(seat, god, text);
             }
         }
@@ -471,7 +477,7 @@ impl Table {
     /// for it meanwhile.
     fn dummy_intent(&self, player: PlayerId) -> Option<Intent> {
         let g = &self.game;
-        if g.wish_due() == Some(player) {
+        if g.wishing().contains(&player) {
             return Some(Intent::RefuseWish);
         }
         if g.to_answer(player).is_some() {
@@ -620,7 +626,7 @@ impl Table {
         {
             return;
         }
-        let wish_due = self.game.wish_due();
+        let wishing = self.game.wishing();
         // Every bot seat awaited takes one step per tick: they play their
         // turns side by side, as people do (§11.2).
         let bots: Vec<PlayerId> = self
@@ -629,7 +635,7 @@ impl Table {
             .into_iter()
             .filter(|&p| match self.seats[p.0 as usize] {
                 Seat::Bot | Seat::Away => true,
-                Seat::Autoplay { wish_by_hand } => !(wish_by_hand && wish_due == Some(p)),
+                Seat::Autoplay { wish_by_hand } => !(wish_by_hand && wishing.contains(&p)),
                 Seat::Human => false,
                 Seat::Dummy => self.dummy_intent(p).is_some(),
             })
@@ -648,7 +654,9 @@ impl Table {
                     Some(intent) => intent,
                     None => continue,
                 },
-                Seat::Away if wish_due == Some(player) => Intent::RefuseWish,
+                // Away, nobody wishes for them; by hand, the client does.
+                Seat::Away if self.game.may_wish(player) => Intent::RefuseWish,
+                Seat::Autoplay { wish_by_hand: true } => bot::choose_turn(&self.game, player),
                 _ => bot::choose(&self.game, player),
             };
             if self.act(player, intent).is_err() {
@@ -681,10 +689,10 @@ impl Table {
             .is_some_and(|v| v.route.voice() != necromy_oracle::Voice::Silent)
     }
 
-    /// The Dominant writes their wish: everyone else sees it as it is typed.
-    /// Only the seat whose wish is due may, and only so many letters.
+    /// A wish as it is written: everyone else sees it typed (§21.4). Only
+    /// while the seat may still wish, and only so many letters.
     fn share_draft(&mut self, seat: PlayerId, god: Option<God>, text: String) {
-        if self.game.wish_due() != Some(seat) {
+        if !self.game.may_wish(seat) {
             return;
         }
         let text: String = text.chars().take(MAX_DRAFT).collect();
@@ -705,14 +713,14 @@ impl Table {
     }
 
     fn ask_wish(&mut self, seat: PlayerId, god: God, text: String) {
-        let refuse = if self.game.wish_due() != Some(seat) {
+        let refuse = if !self.game.may_wish(seat) {
             Some("сейчас не время желаний")
         } else if !self.online() {
             Some("голос богов не отвечает")
         } else if self.voice.as_ref().is_some_and(|v| {
             v.pending
                 .iter()
-                .any(|(_, p)| matches!(p, Purpose::Wish { .. }))
+                .any(|(_, p)| matches!(p, Purpose::Wish { seat: s, .. } if *s == seat))
         }) {
             Some("бог ещё слушает прежнее")
         } else {
@@ -768,7 +776,11 @@ impl Table {
                     ..
                 } => {
                     let messages = prompt::wish_speech(&self.game, *player, *god, wish, *grade);
-                    self.job(Purpose::WishVoice { serial }, |id| voice_job(id, messages));
+                    let purpose = Purpose::WishVoice {
+                        serial,
+                        player: *player,
+                    };
+                    self.job(purpose, |id| voice_job(id, messages));
                 }
                 Event::LineTold { line } if self.seats[line.owner.0 as usize].watched() => {
                     let messages = prompt::line_voice(&self.game, line);
@@ -835,9 +847,10 @@ impl Table {
                         self.send(seat, FromTable::Oracle(OracleNews::NotHeard(why)));
                     }
                 }
-                (Purpose::WishVoice { serial }, Ok(text)) => {
+                (Purpose::WishVoice { serial, player }, Ok(text)) => {
                     let news = OracleNews::WishVoice {
                         serial,
+                        player,
                         text: text.trim().to_string(),
                     };
                     for i in 0..self.seats.len() {

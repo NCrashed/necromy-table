@@ -35,12 +35,24 @@ impl Game {
         self.champ_mut(player).hex = hex;
     }
 
-    /// Everyone still owed a choice passes.
+    /// A wish sealed and answered at once, as if dusk had come for it.
+    fn wishes(&mut self, player: PlayerId, intent: Intent) -> Result<Vec<Event>, RuleError> {
+        let mut events = self.apply(player, intent)?;
+        let from = events.len();
+        self.answer_wish(player, &mut events);
+        self.settle_story(&mut events);
+        self.check_victory(&mut events);
+        self.log.extend(events[from..].iter().cloned());
+        Ok(events)
+    }
+
+    /// Everyone still owed a choice passes; dusk gets refusals.
     fn pass_all(&mut self) {
-        if let Some(d) = self.wish_due {
-            self.apply(d, Intent::RefuseWish).unwrap();
-        }
         loop {
+            if let Some(&p) = self.wishing().first() {
+                self.apply(p, Intent::RefuseWish).unwrap();
+                continue;
+            }
             let Some(p) = self.players().find(|&p| self.to_answer(p).is_some()) else {
                 break;
             };
@@ -1229,18 +1241,18 @@ fn the_crown_goes_to_the_leader_and_ties_keep_it() {
     let mut ev = Vec::new();
     g.add_style(me, 3, StyleReason::Territory, &mut ev);
     g.add_style(foe, 1, StyleReason::Territory, &mut ev);
-    g.dawn(&mut ev);
+    g.crown(&mut ev);
     assert_eq!(g.dominant(), Some(me));
     assert_eq!(g.threat(me), 1, "the Crown draws the guard's eye");
 
     g.add_style(foe, 2, StyleReason::Territory, &mut ev);
-    g.dawn(&mut ev);
+    g.crown(&mut ev);
     assert_eq!(g.dominant(), Some(me), "a tie keeps the Crown where it was");
 
     let third = g.players().find(|&p| p != me && p != foe).unwrap();
     g.add_style(third, 3, StyleReason::Territory, &mut ev);
     g.add_style(me, -1, StyleReason::Oath, &mut ev);
-    g.dawn(&mut ev);
+    g.crown(&mut ev);
     assert_eq!(
         g.dominant(),
         None,
@@ -1250,7 +1262,8 @@ fn the_crown_goes_to_the_leader_and_ties_keep_it() {
 
 #[test]
 fn nobody_is_crowned_with_no_style() {
-    let (g, _) = Game::new(five());
+    let (mut g, _) = Game::new(five());
+    to_next_dusk(&mut g);
     assert_eq!(g.dominant(), None);
     assert!(
         g.log()
@@ -1539,11 +1552,11 @@ fn the_wager_needs_the_crown_dawn_after_dawn() {
     let mut ev = Vec::new();
     g.add_style(me, 5, StyleReason::Territory, &mut ev);
     for _ in 0..3 {
-        g.dawn(&mut ev);
+        g.crown(&mut ev);
     }
     assert_eq!(g.progress[me.0 as usize].crown_streak, 3);
     g.add_style(foe, 9, StyleReason::Territory, &mut ev);
-    g.dawn(&mut ev);
+    g.crown(&mut ev);
     assert_eq!(
         g.progress[me.0 as usize].crown_streak, 0,
         "losing the Crown breaks the streak"
@@ -1637,35 +1650,68 @@ fn wish_of(kind: WishKind, target: Option<PlayerId>) -> Wish {
     }
 }
 
-/// Crowns `me` at a dawn and returns the events.
+/// Crowns `me` at a dusk and returns the events.
 fn crown(g: &mut Game, me: PlayerId) -> Vec<Event> {
     let mut ev = Vec::new();
     g.add_style(me, 5, StyleReason::Territory, &mut ev);
-    g.dawn(&mut ev);
+    g.crown(&mut ev);
     ev
 }
 
 #[test]
-fn the_dominant_owes_a_wish_before_play_goes_on() {
+fn dusk_waits_for_every_wish_and_answers_least_style_first() {
     let (mut g, me, foe) = duel(3);
-    let ev = crown(&mut g, me);
-    assert!(
-        ev.iter()
-            .any(|e| matches!(e, Event::WishDue { player } if *player == me))
-    );
-    assert_eq!(g.awaiting(), vec![me]);
-    assert_eq!(g.apply(foe, Intent::Pass), Err(RuleError::WishPending));
-    assert_eq!(g.apply(me, Intent::EndTurn), Err(RuleError::WishPending));
-    g.apply(
-        me,
-        Intent::Wish {
-            god: God::Bhava,
-            wish: wish_of(WishKind::Land, None),
-            said: None,
-        },
-    )
-    .unwrap();
-    assert_eq!(g.wish_due(), None);
+    let mut ev = Vec::new();
+    g.add_style(me, 5, StyleReason::Territory, &mut ev);
+    g.add_style(foe, 2, StyleReason::Territory, &mut ev);
+    let land = Intent::Wish {
+        god: God::Bhava,
+        wish: wish_of(WishKind::Land, None),
+        said: None,
+    };
+    // Sealed mid-turn: the turn goes on, and it is sealed once only.
+    let sealed = g.apply(me, land.clone()).unwrap();
+    assert!(matches!(sealed.as_slice(), [Event::WishSealed { player }] if *player == me));
+    assert!(g.free_to_act(me) && !g.may_wish(me));
+    assert_eq!(g.apply(me, land), Err(RuleError::InvalidWish));
+    // Rivals see that a wish was sealed, not what it was.
+    assert_eq!(g.view_for(Some(foe), 1).seal(me), &Seal::Wish(None));
+    assert!(matches!(
+        g.view_for(Some(me), 1).seal(me),
+        Seal::Wish(Some(_))
+    ));
+
+    // The day ends: the Crown goes to the leader, and dusk waits for the rest.
+    g.apply(me, Intent::EndTurn).unwrap();
+    assert_eq!(g.at_dusk(), Some(DuskStep::Sealing));
+    assert_eq!(g.dominant(), Some(me));
+    assert!(g.awaiting().contains(&foe) && !g.awaiting().contains(&me));
+    assert_eq!(g.apply(foe, Intent::EndTurn), Err(RuleError::NotYourTurn));
+    let before = g.log().len();
+    for p in g.wishing() {
+        let intent = if p == foe {
+            Intent::Wish {
+                god: God::Maya,
+                wish: wish_of(WishKind::Peace, None),
+                said: None,
+            }
+        } else {
+            Intent::RefuseWish
+        };
+        g.apply(p, intent).unwrap();
+    }
+    // Least Style first, the Crown last; then the night.
+    let granted: Vec<PlayerId> = g.log()[before..]
+        .iter()
+        .filter_map(|e| match e {
+            Event::WishGranted { player, .. } => Some(*player),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(granted, vec![foe, me]);
+    assert_eq!(g.at_dusk(), None);
+    assert_eq!(g.time(), TimeOfDay::Night);
+    assert!(!g.may_wish(me), "no wishes by night");
 }
 
 #[test]
@@ -1677,7 +1723,7 @@ fn gods_grade_by_nature_and_novelty() {
     assert_eq!(g.wish_grade(God::Bhava, WishKind::Weaken), 1);
     assert_eq!(g.wish_grade(God::Trishna, WishKind::Fortune), 0, "crude");
     crown(&mut g, me);
-    g.apply(
+    g.wishes(
         me,
         Intent::Wish {
             god: God::Bhava,
@@ -1700,7 +1746,7 @@ fn a_wish_without_style_comes_with_a_curse() {
     crown(&mut g, me);
     let style = g.style(me);
     let events = g
-        .apply(
+        .wishes(
             me,
             Intent::Wish {
                 god: God::Trishna,
@@ -1714,8 +1760,9 @@ fn a_wish_without_style_comes_with_a_curse() {
             .iter()
             .any(|e| matches!(e, Event::WishGranted { grade: 0, .. }))
     );
-    // Two Style of riches, one lost for the lack of style.
-    assert_eq!(g.style(me), style + 1);
+    // Two Style of riches, two lost: the Crown pays double for a wish
+    // without style (§21.4).
+    assert_eq!(g.style(me), style);
     assert_eq!(g.curses(me), &[God::Trishna]);
 }
 
@@ -1763,7 +1810,7 @@ fn weaken_needs_a_rival_and_passes_wards() {
     let (mut g, me, foe) = duel(3);
     crown(&mut g, me);
     assert_eq!(
-        g.apply(
+        g.wishes(
             me,
             Intent::Wish {
                 god: God::Ahamar,
@@ -1774,7 +1821,7 @@ fn weaken_needs_a_rival_and_passes_wards() {
         Err(RuleError::InvalidWish)
     );
     assert_eq!(
-        g.apply(
+        g.wishes(
             me,
             Intent::Wish {
                 god: God::Ahamar,
@@ -1786,7 +1833,7 @@ fn weaken_needs_a_rival_and_passes_wards() {
     );
     g.champ_mut(foe).ward = Some(Element::Water);
     let hp = g.champion(foe).unwrap().hp;
-    g.apply(
+    g.wishes(
         me,
         Intent::Wish {
             god: God::Ahamar,
@@ -1806,9 +1853,8 @@ fn weaken_needs_a_rival_and_passes_wards() {
 fn every_god_twists_the_wish() {
     // Ahamar writes a debt: Threat.
     let (mut g, me, _) = duel(3);
-    crown(&mut g, me);
     let threat = g.threat(me);
-    g.apply(
+    g.wishes(
         me,
         Intent::Wish {
             god: God::Ahamar,
@@ -1822,9 +1868,8 @@ fn every_god_twists_the_wish() {
     // Maya takes a card from the hand.
     let (mut g, me, _) = duel(3);
     g.give(me, "Бинт");
-    crown(&mut g, me);
     let events = g
-        .apply(
+        .wishes(
             me,
             Intent::Wish {
                 god: God::Maya,
@@ -1848,11 +1893,11 @@ fn the_wager_is_won_by_refusing_the_crowned_wish() {
     g.secrets = vec![Some(Condition::Wager { refusals: 2 }); 5];
     g.round = crate::game::SECRET_FROM_ROUND;
     crown(&mut g, me);
-    g.apply(me, Intent::RefuseWish).unwrap();
+    g.wishes(me, Intent::RefuseWish).unwrap();
     assert_eq!(g.winner(), None, "one refusal is not the bet");
     let mut ev = Vec::new();
-    g.dawn(&mut ev);
-    let events = g.apply(me, Intent::RefuseWish).unwrap();
+    g.crown(&mut ev);
+    let events = g.wishes(me, Intent::RefuseWish).unwrap();
     assert!(
         events
             .iter()
@@ -1867,9 +1912,9 @@ fn a_wish_made_starts_the_wager_over() {
     g.secrets = vec![Some(Condition::Wager { refusals: 2 }); 5];
     g.round = crate::game::SECRET_FROM_ROUND;
     crown(&mut g, me);
-    g.apply(me, Intent::RefuseWish).unwrap();
+    g.wishes(me, Intent::RefuseWish).unwrap();
     let mut ev = Vec::new();
-    g.dawn(&mut ev);
+    g.crown(&mut ev);
     let intent = crate::bot::choose(&g, me);
     assert_eq!(
         intent,
@@ -1878,11 +1923,11 @@ fn a_wish_made_starts_the_wager_over() {
     );
     g.secrets = vec![None; 5];
     let intent = crate::bot::choose(&g, me);
-    g.apply(me, intent).unwrap();
+    g.wishes(me, intent).unwrap();
     assert_eq!(g.progress[me.0 as usize].refusals, 0);
     g.secrets = vec![Some(Condition::Wager { refusals: 2 }); 5];
-    g.dawn(&mut ev);
-    g.apply(me, Intent::RefuseWish).unwrap();
+    g.crown(&mut ev);
+    g.wishes(me, Intent::RefuseWish).unwrap();
     assert_eq!(g.winner(), None, "the wish in between broke the streak");
 }
 
@@ -1891,7 +1936,7 @@ fn a_refusal_is_loud_and_a_fall_breaks_the_wager() {
     let (mut g, me, _) = duel(3);
     crown(&mut g, me);
     let before = g.threat(me);
-    g.apply(me, Intent::RefuseWish).unwrap();
+    g.wishes(me, Intent::RefuseWish).unwrap();
     assert_eq!(g.threat(me), before + crate::game::REFUSAL_THREAT as u8);
     assert_eq!(g.progress[me.0 as usize].refusals, 1);
     let mut ev = Vec::new();
@@ -2311,7 +2356,7 @@ fn stillness_quiets_everyone_at_dusk() {
     let mut ev = Vec::new();
     g.add_threat(me, 2, &mut ev);
     g.add_threat(foe, 1, &mut ev);
-    g.dusk(&mut ev);
+    g.shift_stages(&mut ev);
     assert_eq!((g.threat(me), g.threat(foe)), (1, 0));
 }
 
@@ -2515,7 +2560,7 @@ fn a_price_is_paid_first_and_buys_budget_and_strength() {
         (g.wish_grade_of(God::Zaga, &plain) + 1).min(3)
     );
     let events = g
-        .apply(
+        .wishes(
             me,
             Intent::Wish {
                 god: God::Zaga,
@@ -2560,7 +2605,7 @@ fn a_wish_beyond_its_budget_is_cut_and_a_price_must_be_payable() {
             price: Some(price),
         };
         assert_eq!(
-            g.apply(
+            g.wishes(
                 me,
                 Intent::Wish {
                     god: God::Zaga,
@@ -2579,7 +2624,7 @@ fn a_wish_beyond_its_budget_is_cut_and_a_price_must_be_payable() {
         price: None,
     };
     assert_eq!(
-        g.apply(
+        g.wishes(
             me,
             Intent::Wish {
                 god: God::Zaga,
@@ -2594,7 +2639,7 @@ fn a_wish_beyond_its_budget_is_cut_and_a_price_must_be_payable() {
         price: None,
     };
     let events = g
-        .apply(
+        .wishes(
             me,
             Intent::Wish {
                 god: God::Zaga,
@@ -2624,7 +2669,7 @@ fn boost_of(events: &[Event]) -> u8 {
 /// Crowns `me` and grants `act` from `god` at once, with no price.
 fn wish_now(g: &mut Game, me: PlayerId, god: God, act: Act) -> Vec<Event> {
     crown(g, me);
-    g.apply(
+    g.wishes(
         me,
         Intent::Wish {
             god,
@@ -2761,7 +2806,7 @@ fn a_blessing_takes_the_card_named_or_none_not_in_hand() {
     let theirs = g.give(foe2, "Искра");
     crown(&mut g, me);
     assert_eq!(
-        g.apply(
+        g.wishes(
             me,
             Intent::Wish {
                 god: God::Bhava,
@@ -3192,7 +3237,7 @@ fn a_forged_card_takes_the_name_the_god_gave_it() {
                 .into(),
         )),
     };
-    g.apply(
+    g.wishes(
         me,
         Intent::Wish {
             god: God::Trishna,

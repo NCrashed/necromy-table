@@ -1,19 +1,22 @@
-//! The Dominant's wish (docs/design.md §7).
+//! Wishes (docs/design.md §7, §21.4).
 //!
-//! When the human wears the Crown at dawn, a panel in the middle asks for a
-//! wish. With the gods' voice up (`oracle.rs`), the human picks a god and
+//! Everyone wishes once a day, for dusk. All day the human may open the
+//! panel («Загадать желание» under the action bar) and seal a wish; at
+//! dusk, if they still have not, it opens by itself and the table waits. With the gods' voice up (`oracle.rs`), the human picks a god and
 //! writes the wish in their own words; the model reads it and the god
 //! answers. Without it, or on request, the prepared wishes are offered as
 //! buttons. The grade is not shown in advance: the god's answer tells it.
 //!
 //! Every wish, the bots' too, is answered in a panel for a few seconds: who
 //! asked whom for what, the grade in stars, the god's words and what came of
-//! it.
+//! it; at dusk the answers come one after another. Under the action bar a
+//! strip tells where the human's own wish stands and shows the rivals'
+//! wishes as they write them.
 
 use bevy::input::ButtonState;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
-use necromy_rules::{God, Intent, PlayerId, WishKind};
+use necromy_rules::{God, Intent, PlayerId, Seal, WishKind};
 
 use crate::audio::{Speech, Tone};
 use crate::hud::{INK, UiFont};
@@ -37,6 +40,7 @@ pub struct WishUiPlugin;
 impl Plugin for WishUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WishDraft>()
+            .init_resource::<Typing>()
             .add_systems(Startup, spawn)
             .add_systems(crate::InGame, (dev_wish, type_wish, buttons))
             .add_systems(
@@ -55,7 +59,8 @@ impl Plugin for WishUiPlugin {
                 (
                     share_draft.after(type_wish).after(buttons),
                     watch_draft,
-                    rebuild_watch.run_if(resource_changed::<Match>),
+                    rebuild_watch
+                        .run_if(resource_changed::<Match>.or_else(resource_changed::<WishDraft>)),
                 ),
             )
             .add_systems(crate::InGame, (expire_reply, listening_dots));
@@ -72,7 +77,13 @@ struct WishDraft {
     text: String,
     /// The human chose the prepared wishes even with the voice up.
     prepared: bool,
+    /// Opened by day, before dusk asks for it.
+    open: bool,
 }
+
+/// The keyboard is the wish's: `play::keys` leaves it alone.
+#[derive(Resource, Default)]
+pub struct Typing(pub bool);
 
 #[derive(Component)]
 struct WishPanel;
@@ -97,6 +108,10 @@ enum WishButton {
     Refuse,
     /// Switch between free words and the prepared wishes.
     Prepared(bool),
+    /// Open the panel by day.
+    Open,
+    /// Close it again: the wish can wait until dusk.
+    Later,
 }
 
 fn spawn(mut commands: Commands) {
@@ -165,10 +180,18 @@ fn text_block(
         .id()
 }
 
+/// Whether the wish panel is up: the human may still wish, and opened it or
+/// dusk waits for them.
+fn panel_up(game: &Match, draft: &WishDraft) -> bool {
+    let g = &game.game;
+    g.may_wish(game.human)
+        && !(game.autoplay && !game.paused_for_wish_panel())
+        && (draft.open || g.wishing().contains(&game.human))
+}
+
 /// Is the human writing a wish right now (panel up, free words, not sent)?
 fn writing(game: &Match, draft: &WishDraft) -> bool {
-    game.game.wish_due() == Some(game.human)
-        && !(game.autoplay && !game.paused_for_wish_panel())
+    panel_up(game, draft)
         && game.oracle.online
         && !draft.prepared
         && game.oracle.listening.is_none()
@@ -186,10 +209,12 @@ fn rebuild_panel(
     let (panel, mut visibility) = panel.into_inner();
     commands.entity(panel).despawn_related::<Children>();
     let g = &game.game;
-    if g.wish_due() != Some(game.human) || (game.autoplay && !game.paused_for_wish_panel()) {
+    if !panel_up(&game, &draft) {
         visibility.set_if_neq(Visibility::Hidden);
         return;
     }
+    let crowned = g.dominant() == Some(game.human);
+    let dusk = g.wishing().contains(&game.human);
     visibility.set_if_neq(Visibility::Inherited);
     let free = game.oracle.online && !draft.prepared;
 
@@ -208,20 +233,23 @@ fn rebuild_panel(
     let mut rows = Vec::new();
 
     let title = stats::row(&mut commands);
-    let crown = stats::icon_node(
-        &mut commands,
-        art.icon(crate::icons::StatIcon::Crown),
-        28.0,
-        true,
-    );
-    let text = stats::label(
-        &mut commands,
-        &font,
-        "Венец у тебя: загадай желание",
-        18.0,
-        true,
-    );
-    commands.entity(title).add_children(&[crown, text]);
+    if crowned {
+        let crown = stats::icon_node(
+            &mut commands,
+            art.icon(crate::icons::StatIcon::Crown),
+            28.0,
+            true,
+        );
+        commands.entity(title).add_child(crown);
+    }
+    let heading = match (dusk, crowned) {
+        (true, true) => "Закат: Венец у тебя, боги ждут твоего желания",
+        (true, false) => "Закат: боги ждут твоего желания",
+        (false, true) => "Венец у тебя: желание на закате",
+        (false, false) => "Желание на закате",
+    };
+    let text = stats::label(&mut commands, &font, heading, 18.0, true);
+    commands.entity(title).add_child(text);
     rows.push(title);
 
     // The god is thinking: show the words and wait.
@@ -253,6 +281,12 @@ fn rebuild_panel(
         "Бог исполнит по-своему. Изощрённое желание вознаграждается Стилем, грубое исполнится урезанно и с проклятием."
     };
     rows.push(text_block(&mut commands, &font, hint, 12.0, DIM));
+    let when = if crowned {
+        "Боги ответят на закате: сначала тем, у кого меньше Стиля, Венцу последним. Венцу бог даёт больше, но за грубое берёт вдвое."
+    } else {
+        "Боги ответят на закате: сначала тем, у кого меньше Стиля, Венцу последним."
+    };
+    rows.push(text_block(&mut commands, &font, when, 12.0, DIM));
     if let Some(why) = &game.oracle.failed {
         rows.push(text_block(
             &mut commands,
@@ -428,10 +462,18 @@ fn rebuild_panel(
         &mut commands,
         &font,
         WishButton::Refuse,
-        "Отказаться от желания (+2 Угрозы)",
+        if crowned {
+            "Ничего не просить (Венцу +2 Угрозы)"
+        } else {
+            "Ничего не просить"
+        },
         false,
     );
     commands.entity(actions).add_child(refuse);
+    if !dusk {
+        let later = button(&mut commands, &font, WishButton::Later, "Позже", false);
+        commands.entity(actions).add_child(later);
+    }
     rows.push(actions);
     if !game.oracle.online {
         rows.push(text_block(
@@ -512,8 +554,13 @@ fn type_wish(
     mut draft: ResMut<WishDraft>,
     mut game: ResMut<Match>,
     mut tones: MessageWriter<Tone>,
+    mut typing: ResMut<Typing>,
 ) {
-    if !writing(&game, &draft) {
+    let now = writing(&game, &draft);
+    if typing.0 != now {
+        typing.0 = now;
+    }
+    if !now {
         keys.clear();
         return;
     }
@@ -568,6 +615,8 @@ fn buttons(
             }
             WishButton::Target(p) => draft.target = Some(p),
             WishButton::Prepared(on) => draft.prepared = on,
+            WishButton::Open => draft.open = true,
+            WishButton::Later => draft.open = false,
             WishButton::Make => {
                 let Some(god) = draft.god else { continue };
                 if game.oracle.online && !draft.prepared {
@@ -603,10 +652,10 @@ fn buttons(
             }
         }
     }
-    // A wish that went through clears the draft for the next dawn.
-    let done = game.game.wish_due() != Some(game.human)
+    // A wish sealed (or the night come) clears the draft for the next day.
+    let done = !game.game.may_wish(game.human)
         && game.oracle.listening.is_none()
-        && (!draft.text.is_empty() || draft.god.is_some());
+        && (!draft.text.is_empty() || draft.god.is_some() || draft.open);
     if done {
         *draft = WishDraft::default();
     }
@@ -721,7 +770,10 @@ fn rebuild_reply(
                 .as_ref()
                 .map(|s| s.speech.clone())
                 .filter(|s| !s.is_empty())
-                .or_else(|| game.oracle.wish_voices.get(&reply.serial).cloned())
+                .or_else(|| {
+                    let key = (reply.serial, reply.player);
+                    game.oracle.wish_voices.get(&key).cloned()
+                })
                 .unwrap_or_else(|| names::god_speech(god, grade).to_string());
             // Typed out in the god's voice.
             let head = format!("{}: «", names::god(god));
@@ -748,7 +800,7 @@ fn rebuild_reply(
             let text = stats::label(
                 &mut commands,
                 &font,
-                &format!("{} отказывается от желания.", game.name(reply.player)),
+                &format!("{} ничего не просит.", game.name(reply.player)),
                 15.0,
                 true,
             );
@@ -771,7 +823,7 @@ fn expire_reply(time: Res<Time>, mut shown: Local<(u32, f32)>, mut game: ResMut<
         *shown = (game.wish_serial, now);
     }
     if now - shown.1 > REPLY_SECS {
-        game.wish_reply = None;
+        game.next_wish_reply();
     }
 }
 
@@ -794,11 +846,17 @@ fn share_draft(
     }
 }
 
-/// Another seat's wish as it is written: a key for every new letter, a
+/// Rivals' wishes as they are written: a key for every new letter, a
 /// softer one for every deletion.
 fn watch_draft(game: Res<Match>, mut heard: Local<String>, mut tones: MessageWriter<Tone>) {
-    let text = game.drafting.as_ref().map_or("", |(_, _, t)| t.as_str());
-    if text == heard.as_str() {
+    let text: String = game
+        .drafting
+        .iter()
+        .filter(|(p, _)| **p != game.human)
+        .map(|(_, (_, t))| t.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text == *heard {
         return;
     }
     let (now, before) = (text.chars().count(), heard.chars().count());
@@ -814,67 +872,103 @@ fn watch_draft(game: Res<Match>, mut heard: Local<String>, mut tones: MessageWri
     for _ in 0..(now - common).min(3) {
         tones.write(Tone::key(false));
     }
-    *heard = text.to_string();
+    *heard = text;
 }
 
+/// Under the action bar: where the human's own wish stands, and the rivals'
+/// wishes as they write them (§21.4). Hidden while the panel or an answer
+/// has the place.
 fn rebuild_watch(
     mut commands: Commands,
     game: Res<Match>,
+    draft: Res<WishDraft>,
     art: Res<StatArt>,
     font: Res<UiFont>,
     panel: Single<(Entity, &mut Visibility), With<WatchPanel>>,
 ) {
     let (panel, mut visibility) = panel.into_inner();
     commands.entity(panel).despawn_related::<Children>();
-    let Some((writer, god, text)) = game
+    let g = &game.game;
+    let me = game.human;
+    let writers: Vec<(PlayerId, Option<God>, &str)> = game
         .drafting
-        .as_ref()
-        .filter(|(p, ..)| *p != game.human && game.wish_reply.is_none())
-    else {
+        .iter()
+        .filter(|(p, (_, t))| **p != me && !t.trim().is_empty())
+        .map(|(p, (god, t))| (*p, *god, t.as_str()))
+        .collect();
+    let own = g.may_wish(me) || matches!(g.seal(me), Seal::Wish(_) | Seal::Refused);
+    let busy = game.wish_reply.is_some() || panel_up(&game, &draft) || game.autoplay;
+    if busy || (!own && writers.is_empty()) || g.winner().is_some() {
         visibility.set_if_neq(Visibility::Hidden);
         return;
-    };
+    }
     visibility.set_if_neq(Visibility::Inherited);
     let frame = commands
         .spawn((
             Node {
                 flex_direction: FlexDirection::Column,
-                row_gap: px(6.0),
-                padding: UiRect::all(px(18.0)),
+                row_gap: px(4.0),
+                padding: UiRect::axes(px(14.0), px(10.0)),
                 width: px(540.0),
                 ..default()
             },
-            Frame::Plate,
+            Frame::Panel,
         ))
         .id();
-    let head = stats::row(&mut commands);
-    let crown = stats::icon_node(
-        &mut commands,
-        art.icon(crate::icons::StatIcon::Crown),
-        24.0,
-        true,
-    );
-    let who = match god {
-        Some(god) => format!(
-            "{} загадывает желание {}",
-            game.name(*writer),
-            names::god_dative(*god)
-        ),
-        None => format!("{} загадывает желание", game.name(*writer)),
-    };
-    let who = stats::label(&mut commands, &font, &who, 15.0, true);
-    commands.entity(head).add_children(&[crown, who]);
-    let words = commands
-        .spawn((
-            Text::new(format!("«{text}▌»")),
-            font.text(14.0),
-            TextColor(INK),
-            Node {
-                width: px(510.0),
-                ..default()
-            },
-        ))
-        .id();
-    commands.entity(frame).add_children(&[head, words]);
+    let mut rows = Vec::new();
+    if own {
+        let row = stats::row(&mut commands);
+        let (text, open) = match g.seal(me) {
+            Seal::Open if g.wishing().contains(&me) => ("Закат ждёт твоего желания.", true),
+            Seal::Open => ("Желание на закате ещё не загадано.", true),
+            Seal::Refused => ("На закате ты ничего не просишь.", false),
+            Seal::Wish(_) => ("Желание запечатано: бог ответит на закате.", false),
+        };
+        let label = stats::label(&mut commands, &font, text, 13.0, open);
+        commands.entity(row).add_child(label);
+        if open {
+            let b = button(
+                &mut commands,
+                &font,
+                WishButton::Open,
+                "Загадать желание",
+                true,
+            );
+            commands.entity(row).add_child(b);
+        }
+        rows.push(row);
+    }
+    for (writer, god, text) in writers {
+        let row = stats::row(&mut commands);
+        let face = commands
+            .spawn((
+                ImageNode::new(art.portraits[writer.0 as usize].clone()),
+                Node {
+                    width: px(12.0),
+                    height: px(18.0),
+                    ..default()
+                },
+            ))
+            .id();
+        let who = match god {
+            Some(god) => format!("{} → {}:", game.name(writer), names::god_dative(god)),
+            None => format!("{}:", game.name(writer)),
+        };
+        let who = stats::label(&mut commands, &font, &who, 12.0, true);
+        let words = commands
+            .spawn((
+                Text::new(format!("«{text}▌»")),
+                font.text(12.0),
+                TextColor(INK),
+                Node {
+                    max_width: px(400.0),
+                    ..default()
+                },
+            ))
+            .id();
+        commands.entity(row).add_children(&[face, who, words]);
+        rows.push(row);
+    }
+    commands.entity(frame).add_children(&rows);
     commands.entity(panel).add_child(frame);
 }

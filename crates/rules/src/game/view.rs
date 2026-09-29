@@ -72,6 +72,12 @@ impl Game {
             }
         }
         v.known.retain(|&(who, _)| mine(who));
+        // Rivals' sealed wishes: that they wished, not what (§21.4).
+        for (i, seal) in v.seals.iter_mut().enumerate() {
+            if !mine(PlayerId(i as u8)) && matches!(seal, super::Seal::Wish(Some(_))) {
+                *seal = super::Seal::Wish(None);
+            }
+        }
         // A trial run from hiding is nobody else's to see: not its window,
         // not who has tried it (§20.2).
         let unseen = |p: PlayerId| !mine(p) && self.is_hidden(p);

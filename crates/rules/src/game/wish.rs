@@ -422,11 +422,6 @@ pub const fn god_terrain(god: God) -> Terrain {
 }
 
 impl Game {
-    /// The Dominant owes a wish (or a refusal) before play goes on.
-    pub fn wish_due(&self) -> Option<PlayerId> {
-        self.wish_due
-    }
-
     /// The grade `god` would give `kind` right now (§7.4). The same rule the
     /// god applies, so bots and the UI can reason about it.
     pub fn wish_grade(&self, god: God, kind: WishKind) -> u8 {
@@ -537,7 +532,9 @@ impl Game {
             self.pay(player, price, events);
         }
         let price_value = wish.price.map_or(0, Price::value);
-        let budget = (grade + price_value).max(1);
+        // The Crown asks with more weight (§21.4).
+        let crowned = self.dominant == Some(player);
+        let budget = (grade + price_value + u8::from(crowned)).max(1);
         let mut spent = 0;
         let granted: Vec<Act> = wish
             .acts
@@ -553,7 +550,6 @@ impl Game {
         for act in &granted {
             self.asked.push((god, act.kind()));
         }
-        self.wish_due = None;
         self.progress[player.0 as usize].refusals = 0;
         events.push(Event::WishGranted {
             player,
@@ -574,18 +570,21 @@ impl Game {
             self.grant_act(player, god, act, power, forged.as_ref(), events);
         }
 
-        // A god in its light stage gives without a twist.
-        if self.stage(god) != 0 {
+        // A god in its light stage gives without a twist, and so does any god
+        // to a Crown that asked well; a Crown that asked badly gets it twice.
+        let twists = match (self.stage(god), crowned, grade) {
+            (0, _, _) => 0,
+            (_, true, 2..) => 0,
+            (_, true, 0) => 2,
+            _ => 1,
+        };
+        for _ in 0..twists {
             self.twist(player, god, events);
         }
 
         // The grade becomes Style; a wish without style also carries a curse.
         // Kept small: a wish is power already, and Style keeps the Crown.
-        let style = match grade {
-            3 => 1,
-            1 | 2 => 0,
-            _ => -1,
-        };
+        let style = self.crown_wish_style(player, super::dusk::grade_style(grade));
         if style != 0 {
             self.add_style(player, style, StyleReason::Wish, events);
         }

@@ -93,9 +93,6 @@ fn a_broken_intent_is_refused_to_its_sender() {
     let mut t = table(seats);
     let human = PlayerId(1);
     t.drain(human);
-    if t.game().wish_due().is_some() {
-        return;
-    }
     // Everyone acts at once (§11.2): the human ends their turn, then tries
     // again out of turn, which is refused to them alone.
     t.submit(human, ToTable::Act(Intent::EndTurn));
@@ -133,24 +130,15 @@ fn a_wish_being_written_is_seen_by_the_others() {
     let seats = vec![Seat::Autoplay { wish_by_hand: true }; 5];
     let mut t = table(seats);
     let everyone: Vec<PlayerId> = (0..5).map(PlayerId).collect();
-    // Play until someone's wish waits on their words.
-    let writer = loop {
-        for &p in &everyone {
-            if let Some(&(serial, _)) = updates(&t.drain(p)).last() {
-                t.submit(p, ToTable::Shown(serial));
-            }
-        }
-        if let Some(p) = t.game().wish_due() {
-            break p;
-        }
-        assert!(
-            t.game().winner().is_none(),
-            "the match ended without a wish"
-        );
-        t.tick(BOT_STEP_SECS);
-    };
-    let other = everyone.iter().copied().find(|&p| p != writer).unwrap();
-    // Someone else cannot write it.
+    for &p in &everyone {
+        t.drain(p);
+    }
+    // By day everyone may write a wish (§21.4); once sealed, no more.
+    let (writer, other) = (PlayerId(0), PlayerId(1));
+    t.submit(other, ToTable::Act(Intent::RefuseWish));
+    for &p in &everyone {
+        t.drain(p);
+    }
     t.submit(
         other,
         ToTable::Draft {

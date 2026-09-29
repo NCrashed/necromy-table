@@ -101,11 +101,15 @@ impl Game {
         });
     }
 
-    /// Dusk: Trishna pulls, then every god whose pressure crossed the
-    /// threshold moves one stage and starts over.
-    pub(super) fn dusk(&mut self, events: &mut Vec<Event>) {
+    /// Dusk: truces end, wagers are settled.
+    pub(super) fn settle_the_day(&mut self, events: &mut Vec<Event>) {
         self.end_truces();
         self.settle_wagers(events);
+    }
+
+    /// Dusk, after the wishes: Trishna pulls, then every god whose pressure
+    /// crossed the threshold moves one stage and starts over.
+    pub(super) fn shift_stages(&mut self, events: &mut Vec<Event>) {
         let t = God::Trishna.index();
         self.pantheon.pressure[t] = self.pantheon.pressure[t].saturating_add(TRISHNA_DRIFT);
         for god in God::ALL {

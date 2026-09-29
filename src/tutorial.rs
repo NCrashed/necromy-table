@@ -654,30 +654,17 @@ fn land_steps() -> Vec<Step> {
         .hexes(&[LAND]),
         Step::read(
             "На твоей земле флаг. На каждом рассвете земля приносит Стиль — очки \
-             игры за столом (звезда на листе). У кого на рассвете больше всех Стиля, \
-             тот получает Венец и становится Доминирующим.",
+             игры за столом (звезда на листе). У кого на закате больше всех Стиля, \
+             тот получает Венец.",
         ),
         Step::act(
-            "Закончи ход — наступит ночь.",
-            |e, _| matches!(e, Event::RoundStarted { round: 2, .. }),
-            |_, _, i| matches!(i, Intent::EndTurn | Intent::Pass),
-            "Закончи ход: пробел или кнопка наверху.",
-            |_, _| Some(Intent::EndTurn),
-        ),
-        Step::act(
-            "Закончи ход ещё раз — придёт рассвет.",
-            |e, _| matches!(e, Event::WishDue { player } if *player == ME),
-            |_, _, i| matches!(i, Intent::EndTurn | Intent::Pass),
-            "Закончи ход: пробел или кнопка наверху.",
-            |_, _| Some(Intent::EndTurn),
-        ),
-        Step::act(
-            "Ты в Венце! Доминирующий на рассвете загадывает желание одному из \
-             богов: выбери бога и желание в панели. Бог ценит то, что ему по вкусу, \
-             и не любит повторов.",
-            |e, _| matches!(e, Event::WishGranted { player, .. } if *player == ME),
+            "Раз в день, на закате, каждый загадывает желание одному из богов. \
+             Загадать можно заранее: нажми «Загадать желание» под строкой хода, \
+             выбери бога и желание. Бог ценит то, что ему по вкусу, и не любит \
+             повторов.",
+            |e, _| matches!(e, Event::WishSealed { player } if *player == ME),
             |_, _, i| matches!(i, Intent::Wish { .. }),
-            "Выбери желание в панели.",
+            "Нажми «Загадать желание» и выбери желание в панели.",
             |_, _| {
                 Some(Intent::Wish {
                     god: God::Trishna,
@@ -686,10 +673,19 @@ fn land_steps() -> Vec<Step> {
                 })
             },
         ),
+        Step::act(
+            "Желание запечатано: соперники видят, что ты загадал, но не что. \
+             Закончи ход — придёт закат, и боги ответят.",
+            |e, _| matches!(e, Event::WishGranted { player, .. } if *player == ME),
+            |_, _, i| matches!(i, Intent::EndTurn | Intent::Pass),
+            "Закончи ход: пробел или кнопка наверху.",
+            |_, _| Some(Intent::EndTurn),
+        ),
         Step::read(
-            "Бог ответил. Удачное желание приносит Стиль, грубое — проклятие. Венец \
-             добавляет Угрозы, а отказ от желания — ещё больше. Венец держит тот, \
-             кто ведёт по Стилю.",
+            "Бог ответил. Удачное желание приносит Стиль, грубое — проклятие. \
+             Боги отвечают по очереди: сначала тем, у кого меньше Стиля, Венцу \
+             последним. Венцу бог даёт больше, но за грубое берёт вдвое, и Венец \
+             добавляет Угрозы.",
         ),
     ]
 }
@@ -1093,7 +1089,7 @@ fn place(
 ) {
     // The fight plays in the middle: up to the top edge. The wish panel
     // fills the middle: the lesson goes to the column right of it.
-    let wishing = game.game.wish_due() == Some(game.human);
+    let wishing = game.game.wishing().contains(&game.human);
     let (left, right) = if wishing {
         (Val::Auto, px(10.0))
     } else {
@@ -1148,7 +1144,7 @@ fn rebuild(
                 row_gap: px(8.0),
                 padding: UiRect::all(px(18.0)),
                 // Narrow beside the wish panel, which fills the middle.
-                width: px(if game.game.wish_due() == Some(game.human) {
+                width: px(if game.game.wishing().contains(&game.human) {
                     290.0
                 } else {
                     456.0

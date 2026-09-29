@@ -139,10 +139,12 @@ pub struct Match {
     pub heard: Vec<Event>,
     /// Events for `effects.rs` to show on the board, drained there.
     pub effects: Vec<Event>,
-    /// Another seat's wish as they write it: who, the god, the words.
-    pub drafting: Option<(PlayerId, Option<God>, String)>,
-    /// The last wish and the god's answer, shown for a moment (§7).
+    /// Rivals' wishes as they write them: the god and the words (§21.4).
+    pub drafting: std::collections::BTreeMap<PlayerId, (Option<God>, String)>,
+    /// The wish and the god's answer on screen now, shown for a moment (§7).
     pub wish_reply: Option<WishReply>,
+    /// Answers still to show: at dusk the gods answer everyone at once.
+    pub wish_queue: VecDeque<WishReply>,
     /// Bumped for every new `wish_reply`.
     pub wish_serial: u32,
     /// The last story line told to the human, for its voice popup (§8).
@@ -175,8 +177,9 @@ pub struct OracleState {
     pub listening: Option<God>,
     /// Why the last free-words wish was not heard.
     pub failed: Option<String>,
-    /// The model's words for wishes, by the table's update serial.
-    pub wish_voices: HashMap<u32, String>,
+    /// The model's words for wishes, by the table's update serial and who
+    /// asked.
+    pub wish_voices: HashMap<(u32, PlayerId), String>,
     /// The model's words for story lines, by line id.
     pub line_voices: HashMap<u32, String>,
 }
@@ -532,9 +535,14 @@ impl Match {
         {
             return;
         }
-        let intent = necromy_rules::bot::choose(&self.game, human);
+        // With `NECROMY_WISH` the wish is written by hand (`wish_ui::dev_wish`).
+        let intent = if wish_by_hand() {
+            necromy_rules::bot::choose_turn(&self.game, human)
+        } else {
+            necromy_rules::bot::choose(&self.game, human)
+        };
         if self.act(human, intent).is_err() {
-            let fallback = if self.game.wish_due() == Some(human) {
+            let fallback = if self.game.wishing().contains(&human) {
                 Intent::RefuseWish
             } else if self.game.battle_dice(human).is_some() {
                 Intent::Burn { cards: Vec::new() }
@@ -609,10 +617,11 @@ impl Match {
             dusk_news: Vec::new(),
             heard: Vec::new(),
             effects: Vec::new(),
-            drafting: None,
+            drafting: Default::default(),
             stages_seen: God::ALL.map(|g| view.stage(g)),
             stage_shifts: 0,
             wish_reply: None,
+            wish_queue: VecDeque::new(),
             wish_serial: 0,
             told: None,
             told_serial: 0,
@@ -641,7 +650,15 @@ impl Match {
     /// human's wish so its panel can be captured, and `NECROMY_WISH` stops
     /// there so the wish can be written (`wish_ui::dev_wish`).
     pub fn paused_for_wish_panel(&self) -> bool {
-        self.game.wish_due() == Some(self.human) && wish_by_hand()
+        self.game.wishing().contains(&self.human) && wish_by_hand()
+    }
+
+    /// The next god's answer from the queue goes on screen, if any.
+    pub fn next_wish_reply(&mut self) {
+        self.wish_reply = self.wish_queue.pop_front();
+        if self.wish_reply.is_some() {
+            self.wish_serial += 1;
+        }
     }
 
     /// The game is waiting on the human, on their turn or in a window.
@@ -767,11 +784,9 @@ impl Match {
                         self.seen_mobs.insert(m.id, *m);
                     }
                     self.record(&events);
-                    if let Some((writer, ..)) = self.drafting
-                        && self.game.wish_due() != Some(writer)
-                    {
-                        self.drafting = None;
-                    }
+                    // A wish sealed is no longer being written.
+                    let game = &self.game;
+                    self.drafting.retain(|&p, _| game.may_wish(p));
                     // The match is over: there is no seat to come back to.
                     if self.game.winner().is_some() && matches!(self.link, Link::Remote(_)) {
                         crate::lobby::Ticket::forget();
@@ -789,7 +804,9 @@ impl Match {
                     self.clock_since = 0.0;
                 }
                 FromTable::Drafting { player, god, text } => {
-                    self.drafting = Some((player, god, text));
+                    if self.game.may_wish(player) {
+                        self.drafting.insert(player, (god, text));
+                    }
                 }
                 FromTable::TimedOut(what) => self.feed.push(
                     match what {
@@ -817,8 +834,12 @@ impl Match {
                     }
                     OracleNews::Listening(god) => self.oracle.listening = god,
                     OracleNews::NotHeard(why) => self.oracle.failed = Some(why),
-                    OracleNews::WishVoice { serial, text } => {
-                        self.oracle.wish_voices.insert(serial, text);
+                    OracleNews::WishVoice {
+                        serial,
+                        player,
+                        text,
+                    } => {
+                        self.oracle.wish_voices.insert((serial, player), text);
                     }
                     OracleNews::LineVoice { line, text } => {
                         self.oracle.line_voices.insert(line, text);
@@ -834,12 +855,13 @@ impl Match {
         if let Some(seen) = self.lesson_events.as_mut() {
             seen.extend_from_slice(events);
         }
-        // A wish in this batch, and the lines of what it did.
-        let mut wished: Option<WishReply> = None;
+        // Wishes in this batch (dusk answers them all at once, §21.4), and
+        // the lines of what each did.
+        let mut wished: Vec<WishReply> = Vec::new();
         // Outcome of a card aimed at the human, gathered from this batch.
         let mut hit: Option<IncomingResult> = None;
         for event in events {
-            if let Some(w) = wished.as_mut()
+            if let Some(w) = wished.last_mut()
                 && let Some(line) = self.describe(event)
             {
                 w.lines.push(line);
@@ -853,7 +875,7 @@ impl Match {
                     grade,
                     said,
                 } => {
-                    wished = Some(WishReply {
+                    wished.push(WishReply {
                         player: *player,
                         serial: self.serial,
                         wish: Some((*god, wish.clone(), *grade, *dropped)),
@@ -862,7 +884,7 @@ impl Match {
                     });
                 }
                 Event::WishRefused { player } => {
-                    wished = Some(WishReply {
+                    wished.push(WishReply {
                         player: *player,
                         serial: self.serial,
                         wish: None,
@@ -977,9 +999,9 @@ impl Match {
         for show in self.shows.iter_mut().filter(|s| s.done) {
             show.closed = true;
         }
-        if let Some(w) = wished {
-            self.wish_reply = Some(w);
-            self.wish_serial += 1;
+        self.wish_queue.extend(wished);
+        if self.wish_reply.is_none() {
+            self.next_wish_reply();
         }
         if let Some(mut h) = hit {
             if h.lines.is_empty() {
@@ -1704,10 +1726,18 @@ impl Match {
                 }
             ),
             Event::WorldStirred { stir } => names::world_stir(*stir).into(),
-            Event::WishDue { player } => format!("{} загадывает желание…", self.name(*player)),
-            Event::WishRefused { player } => {
-                format!("{} отказывается от желания.", self.name(*player))
-            }
+            Event::WishDue { player } => format!("Закат ждёт желания: {}…", self.name(*player)),
+            Event::WishSealed { player } => format!("{} запечатывает желание.", self.name(*player)),
+            Event::WishLost { player, god } => format!(
+                "{} не находит, что дать {}: запечатанного больше нет.",
+                names::god(*god),
+                self.name_dative(*player)
+            ),
+            Event::WishRefused { player } => format!("{} ничего не просит.", self.name(*player)),
+            Event::LandRaised { terrain, .. } => format!(
+                "Из мглы поднимается земля: {}.",
+                names::terrain(*terrain).0.to_lowercase()
+            ),
             Event::WishGranted {
                 player,
                 god,
@@ -2320,11 +2350,12 @@ fn click_board(
 
 fn keys(
     keys: Res<ButtonInput<KeyCode>>,
+    typing: Res<crate::wish_ui::Typing>,
     mut game: ResMut<Match>,
     mut selection: ResMut<Selection>,
 ) {
     // While the human writes a wish, the keyboard is the wish's.
-    if game.game.wish_due() == Some(game.human) {
+    if typing.0 {
         return;
     }
     if keys.just_pressed(KeyCode::Escape) {

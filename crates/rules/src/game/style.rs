@@ -259,7 +259,7 @@ impl Game {
         self.note_bet(player, super::wish::Bet::Claim);
     }
 
-    /// Dawn: land pays Style, then the Crown goes to the leader (§6.1).
+    /// Dawn: land pays Style. The Crown goes at dusk (`dusk.rs`).
     pub(super) fn dawn(&mut self, events: &mut Vec<Event>) {
         self.stealth_at_dawn(events);
         self.militia_at_dawn();
@@ -299,28 +299,6 @@ impl Game {
                 });
                 self.add_style(p, 1, StyleReason::Territory, events);
             }
-        }
-
-        let best = self.players().map(|p| self.style(p)).max().unwrap_or(0);
-        let leaders: Vec<PlayerId> = self.players().filter(|&p| self.style(p) == best).collect();
-        let crowned = if best == 0 {
-            None
-        } else if leaders.len() == 1 {
-            Some(leaders[0])
-        } else {
-            // A tie keeps the Crown where it was; otherwise the table is contested.
-            self.dominant.filter(|d| leaders.contains(d))
-        };
-        self.dominant = crowned;
-        events.push(Event::Crowned { player: crowned });
-        self.count_dawn();
-        if let Some(d) = crowned {
-            self.wish_due = Some(d);
-            events.push(Event::WishDue { player: d });
-        }
-        if let Some(d) = crowned {
-            // The Crown draws the guard's eye (§6.1).
-            self.add_threat(d, 1, events);
         }
     }
 

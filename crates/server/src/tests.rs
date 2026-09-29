@@ -117,6 +117,8 @@ fn friends_meet_by_code_and_play_against_bots() {
                     if view.awaiting().contains(&seat) {
                         let intent = if view.to_answer(seat).is_some() {
                             Intent::Pass
+                        } else if view.wishing().contains(&seat) {
+                            Intent::RefuseWish
                         } else {
                             Intent::EndTurn
                         };
@@ -159,6 +161,8 @@ fn a_seat_left_empty_goes_to_a_bot() {
                 if view.awaiting().contains(&seat) {
                     let intent = if view.to_answer(seat).is_some() {
                         Intent::Pass
+                    } else if view.wishing().contains(&seat) {
+                        Intent::RefuseWish
                     } else {
                         Intent::EndTurn
                     };
@@ -309,7 +313,7 @@ fn play_a_while(rig: &mut Rig, c: &ClientConn, seat: PlayerId) -> u32 {
                 if view.awaiting().contains(&seat) {
                     let intent = if view.to_answer(seat).is_some() {
                         Intent::Pass
-                    } else if view.wish_due() == Some(seat) {
+                    } else if view.wishing().contains(&seat) {
                         Intent::RefuseWish
                     } else {
                         Intent::EndTurn

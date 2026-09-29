@@ -142,15 +142,16 @@ pub enum Intent {
     Burn {
         cards: Vec<CardId>,
     },
-    /// The Dominant at dawn: ask `god` for `wish`, one or two acts and
-    /// perhaps a price (§7.3).
+    /// Any time of the day: seal a wish for dusk, asking `god` for `wish`,
+    /// one or two acts and perhaps a price (§7.3, §21.4).
     Wish {
         god: God,
         wish: wish::Wish,
         /// A model's reading of a free-text wish; `None` for a prepared one.
         said: Option<wish::Said>,
     },
-    /// The Dominant at dawn: make no wish (the Wager wants this, §10).
+    /// Any time of the day: want nothing tonight (the Wager wants this
+    /// from the Crown, §10).
     RefuseWish,
     /// In a window: play nothing.
     Pass,
@@ -528,9 +529,19 @@ pub enum Event {
         hex: Hex,
         by: PlayerId,
     },
-    /// Dawn: the Dominant owes a wish before play goes on.
+    /// Dusk waits for `player`'s wish (§21.4).
     WishDue {
         player: PlayerId,
+    },
+    /// `player` sealed their wish for tonight (or a refusal); what they
+    /// asked stays hidden until the god answers.
+    WishSealed {
+        player: PlayerId,
+    },
+    /// Nothing of the sealed wish could still be given at dusk.
+    WishLost {
+        player: PlayerId,
+        god: God,
     },
     WishRefused {
         player: PlayerId,
@@ -943,8 +954,6 @@ pub enum RuleError {
     NoWindow,
     /// Someone has won; the match takes no more intents.
     GameOver,
-    /// The Dominant must wish or refuse first.
-    WishPending,
     /// Not a wish this player can make now (not theirs, or a bad target).
     InvalidWish,
     AlreadyChose,
@@ -984,7 +993,6 @@ impl std::fmt::Display for RuleError {
             RuleError::WindowOpen => write!(f, "a reaction window is open"),
             RuleError::NoWindow => write!(f, "no reaction window to pass in"),
             RuleError::GameOver => write!(f, "the match is over"),
-            RuleError::WishPending => write!(f, "the Dominant is making a wish"),
             RuleError::InvalidWish => write!(f, "invalid wish"),
             RuleError::AlreadyChose => write!(f, "already chose in this window"),
             RuleError::NotInHand => write!(f, "card is not in hand"),
@@ -1052,8 +1060,10 @@ pub struct Game {
     secrets: Vec<Option<victory::Condition>>,
     progress: Vec<victory::Progress>,
     winner: Option<(PlayerId, victory::Condition)>,
-    /// The Dominant owes a wish (§7).
-    wish_due: Option<PlayerId>,
+    /// Per player, tonight's wish (§21.4).
+    seals: Vec<dusk::Seal>,
+    /// Dusk under way, waiting on wishes or tributes.
+    dusk: Option<dusk::DuskStep>,
     /// Every wish granted so far: the gods remember (§7.5).
     asked: Vec<(God, wish::WishKind)>,
     /// Per player, the gods whose curse they carry.
@@ -1180,7 +1190,8 @@ impl Game {
             secrets: secrets.into_iter().map(Some).collect(),
             progress: vec![victory::Progress::default(); champions_len],
             winner: None,
-            wish_due: None,
+            seals: vec![dusk::Seal::Open; champions_len],
+            dusk: None,
             asked: Vec::new(),
             curses: vec![Vec::new(); champions_len],
             lines: Vec::new(),
@@ -1281,8 +1292,7 @@ impl Game {
     /// `player` may move and play on their own turn right now: acting, not
     /// waiting on a window of their own, not answering in one.
     pub fn free_to_act(&self, player: PlayerId) -> bool {
-        self.wish_due.is_none()
-            && self.phase(player) == &Phase::Acting
+        self.phase(player) == &Phase::Acting
             && self
                 .windows
                 .iter()
@@ -1334,13 +1344,11 @@ impl Game {
     /// Players the game is waiting on right now: those with a window to
     /// answer, and those free to take their turn.
     pub fn awaiting(&self) -> Vec<PlayerId> {
-        if let Some(d) = self.wish_due {
-            return vec![d];
-        }
+        let wishing = self.wishing();
         self.order
             .iter()
             .copied()
-            .filter(|&p| self.answering(p).is_some() || self.free_to_act(p))
+            .filter(|&p| self.answering(p).is_some() || self.free_to_act(p) || wishing.contains(&p))
             .collect()
     }
 
@@ -1640,35 +1648,17 @@ impl Game {
         if self.winner.is_some() {
             return Err(RuleError::GameOver);
         }
-        if let Some(dominant) = self.wish_due {
-            if player != dominant {
-                return Err(RuleError::WishPending);
-            }
-            let mut events = Vec::new();
-            match intent {
-                Intent::Wish { god, wish, said } => {
-                    self.check_wish(player, &wish)?;
-                    self.grant_wish(player, god, wish, said, &mut events);
-                }
-                Intent::RefuseWish => {
-                    self.wish_due = None;
-                    // Turning down what the table pays is loud (§10): +2 Threat.
-                    self.progress[player.0 as usize].refusals += 1;
-                    events.push(Event::WishRefused { player });
-                    self.add_threat(player, REFUSAL_THREAT, &mut events);
-                }
-                _ => return Err(RuleError::WishPending),
-            }
-            self.settle_story(&mut events);
-            self.check_victory(&mut events);
-            self.log.extend(events.iter().cloned());
-            return Ok(events);
-        }
         if self.champion(player).is_none() {
             return Err(RuleError::UnknownPlayer);
         }
         let mut events = Vec::new();
-        if let Some(i) = self.answering(player) {
+        // A wish is sealed any time of the day, turn or no turn (§21.4).
+        if let Intent::Wish { god, wish, said } = intent {
+            let sealed = dusk::SealedWish { god, wish, said };
+            self.seal_wish(player, dusk::Seal::Wish(Some(sealed)), &mut events)?;
+        } else if intent == Intent::RefuseWish {
+            self.seal_wish(player, dusk::Seal::Refused, &mut events)?;
+        } else if let Some(i) = self.answering(player) {
             self.apply_in_window(i, player, intent, &mut events)?;
         } else {
             match intent {
@@ -1681,7 +1671,6 @@ impl Game {
                         },
                     );
                 }
-                Intent::Wish { .. } | Intent::RefuseWish => return Err(RuleError::InvalidWish),
                 _ => {}
             }
             if !self.free_to_act(player) {
@@ -1824,7 +1813,7 @@ impl Game {
         loop {
             let mut moved = false;
             for p in self.order.clone() {
-                if self.wish_due.is_some() || self.winner.is_some() {
+                if self.winner.is_some() {
                     return;
                 }
                 let Phase::Held { intent, .. } = self.phase(p).clone() else {
@@ -1854,23 +1843,57 @@ impl Game {
     }
 
     /// With everyone done and no window open, the world acts and the next
-    /// round begins.
+    /// round begins. After a day, dusk comes first (§21.4): the day's
+    /// accounts, the Crown, everyone's wish, the gods' answers and the
+    /// tributes they ask, then the gods shift. Dusk waits on people twice
+    /// (`DuskStep`); each intent moves it on as far as it can go.
     fn end_round_when_done(&mut self, events: &mut Vec<Event>) {
-        let done = self.turns.iter().all(|t| t.phase == Phase::Done);
-        if !done || !self.windows.is_empty() || self.wish_due.is_some() || self.winner.is_some() {
+        if self.winner.is_some() || !self.windows.is_empty() {
             return;
         }
-        self.world_phase(events);
-        if self.time == TimeOfDay::Day {
-            events.push(Event::Dusk { round: self.round });
-            self.dusk(events);
-            self.judge_the_day(events);
-            if self.scripted.is_none() {
-                if self.has(Feature::Trials) {
-                    self.trials_at_dusk(events);
+        match self.dusk {
+            None => {
+                if !self.turns.iter().all(|t| t.phase == Phase::Done) {
+                    return;
                 }
-                self.storyteller(events);
+                self.world_phase(events);
+                if self.time != TimeOfDay::Day {
+                    self.start_round(events);
+                    return;
+                }
+                events.push(Event::Dusk { round: self.round });
+                self.settle_the_day(events);
+                self.judge_the_day(events);
+                self.begin_dusk(events);
+                if self.dusk.is_none() {
+                    self.end_dusk(events);
+                } else {
+                    self.end_round_when_done(events);
+                }
             }
+            Some(dusk::DuskStep::Sealing) => {
+                if !self.wishing().is_empty() {
+                    return;
+                }
+                self.answer_wishes(events);
+                self.dusk = Some(dusk::DuskStep::Answering);
+                self.end_round_when_done(events);
+            }
+            Some(dusk::DuskStep::Answering) => {
+                self.dusk = None;
+                self.end_dusk(events);
+            }
+        }
+    }
+
+    /// The gods shift, trials and stories come, and the night begins.
+    fn end_dusk(&mut self, events: &mut Vec<Event>) {
+        self.shift_stages(events);
+        if self.scripted.is_none() {
+            if self.has(Feature::Trials) {
+                self.trials_at_dusk(events);
+            }
+            self.storyteller(events);
         }
         self.start_round(events);
     }
@@ -2903,6 +2926,7 @@ impl Game {
 mod battle;
 mod beasts;
 mod creation;
+mod dusk;
 mod gear;
 mod guard;
 mod laws;
@@ -2920,6 +2944,7 @@ mod wish;
 mod world;
 pub use battle::Score;
 pub use beasts::{BEAST_DICE, BEAST_HEALTH, BEAST_RANGE};
+pub use dusk::{DuskStep, Seal, SealedWish};
 pub use gear::{Gain, SACRIFICE};
 pub use guard::{GUARD_DICE, GUARD_HEALTH, GUARD_RELIEF, GUARD_STEPS, Guard};
 pub use laws::{BURDEN_FREE, CHOSEN, CRACK_REACH, Law, Patronage, SENTENCE_THRESHOLD, SIGN, VOICE};

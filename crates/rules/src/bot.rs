@@ -15,9 +15,17 @@ use crate::gods::God;
 use necromy_dice::Face;
 
 pub fn choose(game: &Game, player: PlayerId) -> Intent {
-    if game.wish_due() == Some(player) {
+    // Tonight's wish first, on its turn or when dusk waits for it (§21.4).
+    let wish_now = game.may_wish(player) && (game.at_dusk().is_some() || game.free_to_act(player));
+    if wish_now && game.to_answer(player).is_none() {
         return wish(game, player);
     }
+    choose_turn(game, player)
+}
+
+/// Like `choose`, but leaves tonight's wish to someone else: a person
+/// writes it while the bot plays their turn.
+pub fn choose_turn(game: &Game, player: PlayerId) -> Intent {
     match game.to_answer(player) {
         Some(window) => respond(game, player, window.kind),
         None if game.free_to_act(player) => own_turn(game, player),
@@ -358,7 +366,7 @@ fn is_body(effect: Effect) -> bool {
     )
 }
 
-/// The Dominant's wish: the best-graded plain wish, from its own patron when
+/// Tonight's wish: the best-graded plain wish, from its own patron when
 /// tied; at the leader in Style when it needs a rival. A bot holding the
 /// Wager refuses every wish: that is the bet.
 fn wish(game: &Game, player: PlayerId) -> Intent {

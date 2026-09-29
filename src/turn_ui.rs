@@ -325,8 +325,7 @@ fn rebuild_action(
                 Some((ActionButton::Rebuild, "Восстановить")),
                 true,
             ),
-            // The wish panel has the centre while the human wishes.
-            None if game.is_human_turn() && g.wish_due() != Some(human) => (
+            None if game.is_human_turn() => (
                 "Твой ход".to_string(),
                 "светлая клетка — идти, зелёная — ополчение пропустит, красная — напасть, карта из руки — сыграть",
                 Some((ActionButton::EndTurn, "Конец хода\n(пробел)")),
@@ -347,7 +346,32 @@ fn rebuild_action(
                     false,
                 )
             }
-            None if g.phase(human) == &necromy_rules::Phase::Done && g.wish_due().is_none() => {
+            // Dusk waits for wishes (§21.4).
+            None if g.at_dusk() == Some(necromy_rules::DuskStep::Sealing) => {
+                let names: Vec<String> = g.wishing().iter().map(|&p| game.name(p)).collect();
+                if g.wishing().contains(&human) {
+                    (
+                        "Закат: загадай желание".to_string(),
+                        "боги ответят по очереди, Венцу последним",
+                        None,
+                        true,
+                    )
+                } else {
+                    (
+                        format!("Закат · боги ждут желаний: {}", names.join(", ")),
+                        "твоё запечатано; ответы придут по очереди",
+                        None,
+                        false,
+                    )
+                }
+            }
+            None if g.at_dusk().is_some() => (
+                "Закат: боги отвечают".to_string(),
+                "дань, которую просят боги, ещё собирают",
+                None,
+                false,
+            ),
+            None if g.phase(human) == &necromy_rules::Phase::Done => {
                 let names: Vec<String> = g
                     .order()
                     .iter()
