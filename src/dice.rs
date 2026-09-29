@@ -43,7 +43,10 @@ impl Plugin for DicePlugin {
         app.init_resource::<DiceShow>()
             .init_resource::<Revealed>()
             .add_systems(Startup, build_dice_scene)
-            .add_systems(crate::InGame, (take_throws, play_throws).chain());
+            .add_systems(
+                crate::InGame,
+                (start_over, take_throws, play_throws).chain(),
+            );
     }
 }
 
@@ -574,4 +577,30 @@ fn face_atlas() -> Image {
         }
     }
     image
+}
+
+/// Another show went on screen, or the human closed one: the trays empty
+/// and start over from the throws the new show brings.
+fn start_over(
+    mut commands: Commands,
+    game: Res<Match>,
+    mut seen: Local<u32>,
+    mut show: ResMut<DiceShow>,
+    mut revealed: ResMut<Revealed>,
+) {
+    if game.show_serial == *seen {
+        return;
+    }
+    *seen = game.show_serial;
+    for p in show.playing.iter_mut().filter_map(Option::take) {
+        for e in p.dice {
+            commands.entity(e).despawn();
+        }
+    }
+    for queue in &mut show.queue {
+        queue.clear();
+    }
+    show.settled_at = None;
+    show.busy = false;
+    revealed.0 = [Vec::new(), Vec::new()];
 }

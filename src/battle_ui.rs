@@ -422,6 +422,11 @@ fn centre_column(
             commands.entity(column).add_child(b);
         }
     }
+    // Someone else's battle, looked at by choice: it may be closed.
+    if m.watching {
+        let close = crate::watch_ui::close_button(commands, font);
+        commands.entity(column).add_child(close);
+    }
     column
 }
 

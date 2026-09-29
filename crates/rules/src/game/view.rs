@@ -13,7 +13,7 @@
 //! shuffled among themselves with the server's salt: a client learns what is
 //! left unseen, not who holds it.
 
-use super::{Choice, Event, Game, Intent, Phase, PlayerId, Target};
+use super::{Choice, Event, Fighter, Game, Intent, Phase, PlayerId, Target, WindowKind};
 use crate::cards::CardId;
 use crate::rng::Rng;
 
@@ -70,6 +70,14 @@ impl Game {
             }
         }
         v.known.retain(|&(who, _)| mine(who));
+        // A trial run from hiding is nobody else's to see: not its window,
+        // not who has tried it (§20.2).
+        let unseen = |p: PlayerId| !mine(p) && self.is_hidden(p);
+        v.windows
+            .retain(|w| !matches!(w.kind, WindowKind::Trial { player, .. } if unseen(player)));
+        for trial in &mut v.trials {
+            trial.tried.retain(|&p| !unseen(p));
+        }
         for window in &mut v.windows {
             for (p, choice) in window.choices.iter_mut() {
                 if !mine(*p) {
@@ -114,6 +122,24 @@ impl Game {
             Event::Moved { player, .. }
             | Event::Blinked { player, .. }
             | Event::TrapSet { player, .. }
+            // A trial from hiding: its window, burns, dice and outcome.
+            | Event::TrialBegun { player, .. }
+            | Event::TrialPassed { player, .. }
+            | Event::TrialFailed { player, .. }
+            | Event::Burned { player, .. }
+            | Event::ChoiceMade { player }
+            | Event::DiceThrown {
+                fighter: Fighter::Champion(player),
+                ..
+            }
+            | Event::WindowOpened {
+                kind: WindowKind::Trial { player, .. },
+                ..
+            }
+            | Event::WindowClosed {
+                kind: WindowKind::Trial { player, .. },
+                ..
+            }
                 if unseen(*player) =>
             {
                 return None;

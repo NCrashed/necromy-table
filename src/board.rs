@@ -923,6 +923,15 @@ fn track_hover(
         if s == "guard" {
             return game.game.guard().map(|g| g.hex);
         }
+        // The latest battle or trial of others (`watch_ui.rs`).
+        if s == "show" {
+            return game
+                .shows
+                .iter()
+                .rev()
+                .find(|show| !show.who.contains(&game.human))
+                .map(|show| show.hex);
+        }
         if s == "trial" {
             let me = game.game.champion(game.human)?.hex;
             return game

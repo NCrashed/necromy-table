@@ -94,6 +94,17 @@ pub struct Match {
     pub battle: Option<BattleInfo>,
     /// The trial on screen (§20.2), from its first step to the end of its dice.
     pub trial: Option<TrialInfo>,
+    /// Battles and trials on the table, each with the events that tell it.
+    /// The human's own go on screen at once; the others wait behind an icon
+    /// over their hex (`watch_ui.rs`) until the human looks.
+    pub shows: Vec<Show>,
+    next_show: u32,
+    /// The show on the panels now, if any.
+    pub on_screen: Option<u32>,
+    /// The human chose to look at it: it is not theirs, it may be closed.
+    pub watching: bool,
+    /// Bumped whenever the show on screen changes: the dice trays start over.
+    pub show_serial: u32,
     /// The last card that hit the human and what it did, shown for a moment
     /// after its Target window closed.
     pub incoming_result: Option<IncomingResult>,
@@ -228,6 +239,31 @@ impl BattleInfo {
     fn side(&self, player: PlayerId) -> usize {
         usize::from(player == self.defender)
     }
+}
+
+/// A battle or a trial on the table, as the events told it (§12, §20.2).
+pub struct Show {
+    pub id: u32,
+    pub hex: Hex,
+    pub kind: ShowKind,
+    /// Champions in it: attacker and defender, the guard's target, the one
+    /// on trial.
+    pub who: Vec<PlayerId>,
+    /// Its events so far, from the one that began it.
+    pub events: Vec<Event>,
+    /// Its outcome has come; the batch that brought it still adds blows.
+    pub done: bool,
+    /// Takes no more events: its outcome's batch is over.
+    pub closed: bool,
+    /// Seconds since it ended, counted by `watch_ui.rs` to let it go.
+    pub since_done: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShowKind {
+    Battle,
+    Guard,
+    Trial,
 }
 
 pub struct ThrowView {
@@ -504,6 +540,11 @@ impl Match {
             throws: Vec::new(),
             battle: None,
             trial: None,
+            shows: Vec::new(),
+            next_show: 0,
+            on_screen: None,
+            watching: false,
+            show_serial: 0,
             incoming_result: None,
             incoming_serial: 0,
             offerings: Vec::new(),
@@ -796,6 +837,7 @@ impl Match {
                     lines: Vec::new(),
                 });
             }
+            self.route_show(event);
             match event {
                 Event::Moved { player, to, .. } => self.steps.push((*player, *to)),
                 Event::Blinked { player, to, .. } => self.steps.push((*player, *to)),
@@ -812,14 +854,7 @@ impl Match {
                 Event::Revealed { player, hex, .. } => self.steps.push((*player, *hex)),
                 Event::ChampionFell {
                     player, respawn, ..
-                } => {
-                    self.steps.push((*player, *respawn));
-                    if let Some(b) = self.battle.as_mut().filter(|b| b.scores.is_some())
-                        && let Some(side) = b.side_of(*player)
-                    {
-                        b.fell[side] = true;
-                    }
-                }
+                } => self.steps.push((*player, *respawn)),
                 Event::Offered {
                     player,
                     god,
@@ -831,93 +866,6 @@ impl Match {
                     self.dusk_news.push((*god, from, *stage));
                     self.stage_shifts += 1;
                 }
-                Event::TrialBegun { player, hex } => {
-                    self.trial = Some(TrialInfo {
-                        player: *player,
-                        hex: *hex,
-                        trial: self.game.trial_at(*hex).cloned(),
-                        burned: Vec::new(),
-                        result: None,
-                    });
-                }
-                Event::TrialPassed {
-                    player,
-                    trial,
-                    got,
-                    need,
-                }
-                | Event::TrialFailed {
-                    player,
-                    trial,
-                    got,
-                    need,
-                } => {
-                    let passed = matches!(event, Event::TrialPassed { .. });
-                    if let Some(t) = self.trial.as_mut().filter(|t| t.player == *player) {
-                        t.trial = Some(trial.clone());
-                        t.result = Some((*got, *need, passed));
-                    }
-                }
-                Event::BattleStarted { attacker, defender } => {
-                    self.battle = Some(BattleInfo::new(Some(*attacker), *defender));
-                }
-                Event::GuardStruck { target } => {
-                    self.battle = Some(BattleInfo::new(None, *target));
-                }
-                Event::Burned { player, faces, .. } => {
-                    if let Some(t) = self.trial.as_mut().filter(|t| t.player == *player) {
-                        t.burned = faces.clone();
-                    }
-                    if let Some(b) = self.battle.as_mut() {
-                        let side = b.side(*player);
-                        b.burned[side] = faces.clone();
-                    }
-                }
-                Event::BattleResolved {
-                    attacker_score,
-                    defender_score,
-                    ..
-                } => {
-                    if let Some(b) = self.battle.as_mut() {
-                        b.scores = Some((*attacker_score, *defender_score));
-                    }
-                }
-                Event::GuardResolved {
-                    guard_score,
-                    target_score,
-                    ..
-                } => {
-                    if let Some(b) = self.battle.as_mut() {
-                        b.scores = Some((*guard_score, *target_score));
-                    }
-                }
-                // Blows of the battle on screen: remember health before and after.
-                Event::Damaged { player, amount, hp } => {
-                    if let Some(b) = self.battle.as_mut().filter(|b| b.scores.is_some())
-                        && let Some(side) = b.side_of(*player)
-                    {
-                        let before = b.hp[side].map_or(hp + amount, |(before, _)| before);
-                        b.hp[side] = Some((before, *hp));
-                    }
-                }
-                Event::DiceThrown {
-                    fighter,
-                    seed,
-                    count,
-                    faces,
-                } => {
-                    let defender = self.battle.as_ref().map(|b| b.defender);
-                    let side = usize::from(
-                        matches!(fighter, Fighter::Champion(p) if Some(*p) == defender),
-                    );
-                    self.throws.push(ThrowView {
-                        side,
-                        seed: *seed,
-                        count: *count,
-                        faces: faces.clone(),
-                    });
-                    self.holding = true;
-                }
                 _ => {}
             }
             if let Some(line) = self.describe(event) {
@@ -927,6 +875,10 @@ impl Match {
                     self.feed.push(line);
                 }
             }
+        }
+        // A show whose outcome came in this batch has had its blows too.
+        for show in self.shows.iter_mut().filter(|s| s.done) {
+            show.closed = true;
         }
         if let Some(w) = wished {
             self.wish_reply = Some(w);
@@ -943,10 +895,217 @@ impl Match {
         self.feed.drain(..excess);
     }
 
+    /// Sends a battle's or a trial's event to its show, and on to the
+    /// panels when that show is on screen. The human's own shows go on
+    /// screen as they begin (all of them with `NECROMY_WATCH=all`).
+    fn route_show(&mut self, event: &Event) {
+        let begins = match event {
+            Event::BattleStarted { attacker, defender } => {
+                Some((ShowKind::Battle, vec![*attacker, *defender]))
+            }
+            Event::GuardStruck { target } => Some((ShowKind::Guard, vec![*target])),
+            Event::TrialBegun { player, .. } => Some((ShowKind::Trial, vec![*player])),
+            _ => None,
+        };
+        if let Some((kind, who)) = begins {
+            let hex = match event {
+                Event::TrialBegun { hex, .. } => *hex,
+                // Where the one attacked stands.
+                _ => {
+                    let at = *who.last().expect("a show has someone in it");
+                    self.game.champion(at).map_or(Hex::ZERO, |c| c.hex)
+                }
+            };
+            self.next_show += 1;
+            let id = self.next_show;
+            let mine = who.contains(&self.human) || watch_all();
+            self.shows.push(Show {
+                id,
+                hex,
+                kind,
+                who,
+                events: vec![event.clone()],
+                done: false,
+                closed: false,
+                since_done: 0.0,
+            });
+            if mine {
+                self.put_on_screen(id, false);
+            }
+            return;
+        }
+        // Blows come after the outcome, in its batch; the rest before it.
+        let (who, guard, ends, after): (Option<PlayerId>, bool, bool, bool) = match event {
+            Event::Burned { player, .. } => (Some(*player), false, false, false),
+            Event::DiceThrown {
+                fighter: Fighter::Champion(p),
+                ..
+            } => (Some(*p), false, false, false),
+            Event::DiceThrown {
+                fighter: Fighter::Guard,
+                ..
+            } => (None, true, false, false),
+            Event::BattleResolved { defender, .. } => (Some(*defender), false, true, false),
+            Event::GuardResolved { target, .. } => (Some(*target), true, true, false),
+            Event::TrialPassed { player, .. } | Event::TrialFailed { player, .. } => {
+                (Some(*player), false, true, false)
+            }
+            Event::Damaged { player, .. } | Event::ChampionFell { player, .. } => {
+                (Some(*player), false, false, true)
+            }
+            _ => return,
+        };
+        let Some(show) = self.shows.iter_mut().rev().find(|s| {
+            !s.closed
+                && s.done == after
+                && (!guard || s.kind == ShowKind::Guard)
+                && who.is_none_or(|p| s.who.contains(&p))
+        }) else {
+            return;
+        };
+        show.events.push(event.clone());
+        if ends {
+            show.done = true;
+        }
+        if self.on_screen == Some(show.id) {
+            self.screen_event(event);
+        }
+    }
+
+    /// Puts show `id` on the panels, from its first event: the human's own
+    /// (`watching` false), or one they chose to look at.
+    pub fn put_on_screen(&mut self, id: u32, watching: bool) {
+        self.release_feed();
+        self.battle = None;
+        self.trial = None;
+        self.throws.clear();
+        self.on_screen = Some(id);
+        self.watching = watching;
+        self.show_serial += 1;
+        let events = self
+            .shows
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| s.events.clone())
+            .unwrap_or_default();
+        for event in &events {
+            self.screen_event(event);
+        }
+    }
+
+    /// The human looks away from a show that is not theirs.
+    pub fn close_show(&mut self) {
+        self.end_battle_view();
+        self.show_serial += 1;
+    }
+
+    /// What the battle and trial panels learn from an event of the show on
+    /// screen.
+    fn screen_event(&mut self, event: &Event) {
+        match event {
+            Event::TrialBegun { player, hex } => {
+                self.trial = Some(TrialInfo {
+                    player: *player,
+                    hex: *hex,
+                    trial: self.game.trial_at(*hex).cloned(),
+                    burned: Vec::new(),
+                    result: None,
+                });
+            }
+            Event::TrialPassed {
+                player,
+                trial,
+                got,
+                need,
+            }
+            | Event::TrialFailed {
+                player,
+                trial,
+                got,
+                need,
+            } => {
+                let passed = matches!(event, Event::TrialPassed { .. });
+                if let Some(t) = self.trial.as_mut().filter(|t| t.player == *player) {
+                    t.trial = Some(trial.clone());
+                    t.result = Some((*got, *need, passed));
+                }
+            }
+            Event::BattleStarted { attacker, defender } => {
+                self.battle = Some(BattleInfo::new(Some(*attacker), *defender));
+            }
+            Event::GuardStruck { target } => {
+                self.battle = Some(BattleInfo::new(None, *target));
+            }
+            Event::Burned { player, faces, .. } => {
+                if let Some(t) = self.trial.as_mut().filter(|t| t.player == *player) {
+                    t.burned = faces.clone();
+                }
+                if let Some(b) = self.battle.as_mut() {
+                    let side = b.side(*player);
+                    b.burned[side] = faces.clone();
+                }
+            }
+            Event::BattleResolved {
+                attacker_score,
+                defender_score,
+                ..
+            } => {
+                if let Some(b) = self.battle.as_mut() {
+                    b.scores = Some((*attacker_score, *defender_score));
+                }
+            }
+            Event::GuardResolved {
+                guard_score,
+                target_score,
+                ..
+            } => {
+                if let Some(b) = self.battle.as_mut() {
+                    b.scores = Some((*guard_score, *target_score));
+                }
+            }
+            // Blows of the battle on screen: remember health before and after.
+            Event::Damaged { player, amount, hp } => {
+                if let Some(b) = self.battle.as_mut().filter(|b| b.scores.is_some())
+                    && let Some(side) = b.side_of(*player)
+                {
+                    let before = b.hp[side].map_or(hp + amount, |(before, _)| before);
+                    b.hp[side] = Some((before, *hp));
+                }
+            }
+            Event::DiceThrown {
+                fighter,
+                seed,
+                count,
+                faces,
+            } => {
+                let defender = self.battle.as_ref().map(|b| b.defender);
+                let side =
+                    usize::from(matches!(fighter, Fighter::Champion(p) if Some(*p) == defender));
+                self.throws.push(ThrowView {
+                    side,
+                    seed: *seed,
+                    count: *count,
+                    faces: faces.clone(),
+                });
+                self.holding = true;
+            }
+            Event::ChampionFell { player, .. } => {
+                if let Some(b) = self.battle.as_mut().filter(|b| b.scores.is_some())
+                    && let Some(side) = b.side_of(*player)
+                {
+                    b.fell[side] = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// The battle panel closes: the fight is told in the feed.
     pub fn end_battle_view(&mut self) {
         self.battle = None;
         self.trial = None;
+        self.on_screen = None;
+        self.watching = false;
         self.release_feed();
     }
 
@@ -1152,11 +1311,10 @@ impl Match {
                 names::trial_name(trial.god),
                 names::trial_ask(&self.game, trial)
             ),
-            Event::TrialBegun { player, .. } => {
+            Event::TrialBegun { player, hex } => {
                 let what = self
-                    .trial
-                    .as_ref()
-                    .and_then(|t| t.trial.as_ref())
+                    .game
+                    .trial_at(*hex)
                     .map_or("испытание", |t| names::trial_name(t.god));
                 format!("{} выходит на {what}.", self.name(*player))
             }
@@ -1887,4 +2045,10 @@ fn remote_autoplay(time: Res<Time>, mut next: Local<f32>, mut game: ResMut<Match
     *next = time.elapsed_secs() + 0.35;
     // The answer redraws when it comes (`drive_table`), not the asking.
     game.bypass_change_detection().play_for_human();
+}
+
+/// Dev aid: `NECROMY_WATCH=all` puts every battle and trial on screen, as
+/// before shows could wait behind their icons (screenshots of rivals' fights).
+fn watch_all() -> bool {
+    std::env::var("NECROMY_WATCH").is_ok_and(|v| v == "all")
 }

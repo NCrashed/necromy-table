@@ -3106,3 +3106,41 @@ fn a_forged_card_takes_the_name_the_god_gave_it() {
     // The rules still read it as its template.
     assert_eq!(g.def(card).name, forge_template(God::Trishna));
 }
+
+#[test]
+fn a_trial_in_the_open_brings_the_hidden_out_but_cover_keeps_them() {
+    let (mut g, me, _) = duel(3);
+    trial_on(&mut g, Hex::new(1, 0), God::Zaga, Boon::Style);
+    g.champ_mut(me).hidden = true;
+    g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    assert!(!g.is_hidden(me), "plains: the gods watch in the open");
+
+    let (mut g, me, foe) = duel(3);
+    trial_on(&mut g, Hex::new(1, 0), God::Bhava, Boon::Style);
+    g.board.tile_mut(Hex::new(1, 0)).unwrap().terrain = Terrain::Forest;
+    g.champ_mut(me).hidden = true;
+    let events = g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    assert!(g.is_hidden(me), "the woods keep them");
+    assert!(g.trial_of(me).is_some());
+    // The foe learns nothing of it: no window, no name on the trial, no event.
+    let view = g.view_for(Some(foe), 3);
+    assert!(view.windows().is_empty());
+    assert!(view.trial_at(Hex::new(1, 0)).unwrap().tried.is_empty());
+    for e in &events {
+        if matches!(e, Event::TrialBegun { .. } | Event::WindowOpened { .. }) {
+            assert!(Game::event_for(&view, Some(foe), e).is_none(), "{e:?}");
+        }
+    }
+    // The one in hiding sees their own trial.
+    let mine = g.view_for(Some(me), 3);
+    assert!(mine.trial_of(me).is_some());
+    let cards = burn_all(&mut g, me, "Искра");
+    let events = g.apply(me, Intent::Burn { cards }).unwrap();
+    let view = g.view_for(Some(foe), 3);
+    assert!(events.iter().all(|e| {
+        !matches!(
+            e,
+            Event::TrialPassed { .. } | Event::TrialFailed { .. } | Event::Burned { .. }
+        ) || Game::event_for(&view, Some(foe), e).is_none()
+    }));
+}

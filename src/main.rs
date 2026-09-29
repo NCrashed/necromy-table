@@ -29,6 +29,7 @@ mod turn_ui;
 mod tutorial;
 mod ui_skin;
 mod victory_ui;
+mod watch_ui;
 mod wish_ui;
 
 use bevy::ecs::schedule::ScheduleLabel;
@@ -78,6 +79,7 @@ fn main() {
             stats::StatsPlugin,
             battle_ui::BattleUiPlugin,
             trial_ui::TrialUiPlugin,
+            watch_ui::WatchUiPlugin,
             fight::FightPlugin,
             turn_ui::TurnUiPlugin,
             victory_ui::VictoryUiPlugin,
@@ -240,6 +242,15 @@ fn auto_screenshot(
                 && game.told.is_none()
                 && !dice.busy()
         }
+        // Someone else's battle or trial waits behind its icon.
+        (Some("watch"), Some(game)) => {
+            game.on_screen.is_none()
+                && game.told.is_none()
+                && game.shows.iter().any(|s| !s.who.contains(&game.human))
+        }
+        // A show of others on the panels by choice, its dice at rest
+        // (with `NECROMY_WATCH=click`).
+        (Some("watching"), Some(game)) => game.watching && dice.settled(),
         // Trials on the board, nothing over it: their stones and faces.
         (Some("trials"), Some(game)) => {
             !game.game.trials().is_empty()

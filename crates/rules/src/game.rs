@@ -1644,27 +1644,29 @@ impl Game {
             }
             self.claim(player, at, events);
         }
-        // A trial stops whoever walks onto it and brings them into view.
+        // A trial stops whoever walks onto it. Out in the open it brings them
+        // into view; under cover (woods, groves, swamps) the one in hiding
+        // stays there, and the trial is theirs alone to know of (§20.2).
         let trial = at == to && self.trial_for(player, at).is_some();
-        if trial && self.is_hidden(player) {
+        let cover = self.board.tile(at).is_some_and(|t| t.terrain.gives_cover());
+        if trial && !cover && self.is_hidden(player) {
             self.reveal(player, RevealReason::Trial, events);
         }
         // Nobody sees a hidden champion walk by, so nobody reacts to it.
-        if self.is_hidden(player) {
-            return Ok(());
+        if !self.is_hidden(player) {
+            let near = self.watchers(player, at);
+            self.open_window(
+                player,
+                WindowKind::Enter {
+                    mover: player,
+                    hex: at,
+                },
+                near,
+                None,
+                None,
+                events,
+            );
         }
-        let near = self.watchers(player, at);
-        self.open_window(
-            player,
-            WindowKind::Enter {
-                mover: player,
-                hex: at,
-            },
-            near,
-            None,
-            None,
-            events,
-        );
         if trial {
             self.begin_trial(player, at, events);
         }

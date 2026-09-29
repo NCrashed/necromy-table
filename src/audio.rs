@@ -870,12 +870,26 @@ fn hear_events(
             Event::CurseBit { player, .. } => (Sound::new("curse-bit"), by(*player)),
             Event::Crowned { .. } => (Sound::new("crown"), Heard::Always),
             Event::GuardSpawned { .. } => (Sound::new("guard-arrive"), Heard::Always),
-            // The battle panel comes up over everything, whoever fights.
-            Event::BattleStarted { .. } | Event::GuardStruck { .. } => {
-                in_battle = true;
-                (Sound::new("battle-start"), Heard::Always)
+            // The human's own battle comes up on screen and its blows sound
+            // there (`fight.rs`); another's is heard only near the camera,
+            // blows and all, until the human looks at it (`watch_ui.rs`).
+            Event::BattleStarted { attacker, defender } => {
+                if [*attacker, *defender].contains(&human) {
+                    in_battle = true;
+                    (Sound::new("battle-start"), Heard::Always)
+                } else {
+                    (Sound::new("battle-start"), by(*defender))
+                }
             }
-            Event::Burned { .. } => (Sound::new("card-burn"), Heard::Always),
+            Event::GuardStruck { target } => {
+                if *target == human {
+                    in_battle = true;
+                    (Sound::new("battle-start"), Heard::Always)
+                } else {
+                    (Sound::new("battle-start"), by(*target))
+                }
+            }
+            Event::Burned { player, .. } => (Sound::new("card-burn"), by(*player)),
             Event::Victory { player, .. } => {
                 let name = if *player == human {
                     "victory"

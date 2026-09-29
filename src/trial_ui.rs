@@ -376,6 +376,11 @@ fn rebuild(
         commands.entity(right).add_child(text);
     }
 
+    // Someone else's trial, looked at by choice: it may be closed.
+    if game.watching {
+        let close = crate::watch_ui::close_button(&mut commands, &font);
+        commands.entity(right).add_child(close);
+    }
     commands.entity(frame).add_children(&[left, right]);
     commands.entity(panel).add_child(frame);
 }
