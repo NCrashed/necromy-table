@@ -1843,6 +1843,25 @@ impl Match {
                 self.name(*player),
                 names::building(*building)
             ),
+            Event::CompanionJoined { player, companion } => format!(
+                "{} ведёт нового спутника: {}.",
+                self.name(*player),
+                names::companion(*companion)
+            ),
+            Event::CompanionSeized {
+                player,
+                from,
+                companion,
+            } => format!(
+                "{} уводит у {} спутника: {}.",
+                self.name(*player),
+                self.name_genitive(*from),
+                names::companion(*companion)
+            ),
+            Event::CompanionsScattered { player, count } => format!(
+                "У {} разбегаются спутники: {count}.",
+                self.name_genitive(*player)
+            ),
             Event::QuarterRaised { player, .. } => format!(
                 "{} поднимает новый квартал своего города.",
                 self.name(*player)

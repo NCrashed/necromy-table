@@ -161,6 +161,8 @@ pub fn feature_id(f: Feature) -> &'static str {
         Feature::Cargo => "cargo",
         Feature::Buildings => "buildings",
         Feature::City => "city",
+        Feature::Companions => "companions",
+        Feature::Legion => "legion",
     }
 }
 
@@ -182,6 +184,8 @@ fn feature_words(f: Feature) -> &'static str {
         Feature::Cargo => "ноша: носить тела и грузы",
         Feature::Buildings => "постройки: таверна, кузня, святилище, стена",
         Feature::City => "города из поселений",
+        Feature::Companions => "спутники: прирученные звери",
+        Feature::Legion => "легион мертвецов, идущих за чемпионом",
     }
 }
 

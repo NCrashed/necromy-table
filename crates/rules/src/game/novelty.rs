@@ -32,6 +32,9 @@ pub enum Novelty {
     FinishedLine,
     /// A building raised on a settlement.
     Built,
+    /// A beast tamed, an undead enlisted.
+    Tamed,
+    Enlisted,
     /// A wish of this kind, granted.
     Wished(WishKind),
     /// A mechanic brought into the world.

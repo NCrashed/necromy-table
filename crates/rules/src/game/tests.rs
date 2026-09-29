@@ -4906,3 +4906,89 @@ fn a_reconciled_pair_keeps_the_peace_two_dusks() {
     g.dusk_of_deeds(&mut ev);
     assert_eq!(g.winner(), Some((me, GreatDeed::Reconciliation)));
 }
+
+// ---- Companions (§21.8) ----
+
+/// An undead next to `me`, and Spirit to spare.
+fn undead_beside(g: &mut Game, me: PlayerId) -> u32 {
+    let here = g.champion(me).unwrap().hex;
+    let spot = here
+        .all_neighbors()
+        .into_iter()
+        .find(|&h| g.board.contains(h) && g.champion_at(h).is_none() && !g.mob_at(h))
+        .unwrap();
+    g.champ_mut(me).spirit_points = 5;
+    undead_on(g, spot, 2)
+}
+
+#[test]
+fn the_undead_join_a_legion_only_where_the_world_has_one() {
+    let (mut g, me, _) = duel(3);
+    without(&mut g, &[Feature::Legion]);
+    let id = undead_beside(&mut g, me);
+    assert_eq!(
+        g.apply(me, Intent::Recruit { mob: id }),
+        Err(RuleError::CannotRecruit)
+    );
+    g.world.add(Feature::Legion);
+    let before = g.dice_for(me, false);
+    g.apply(me, Intent::Recruit { mob: id }).unwrap();
+    assert_eq!(g.companions(me), &[Companion::Undead]);
+    assert!(g.mobs().iter().all(|m| m.id != id));
+    assert_eq!(g.champion(me).unwrap().spirit_points, 5 - ENLIST_SPIRIT);
+    assert_eq!(g.dice_for(me, false), before + 1);
+}
+
+#[test]
+fn a_beast_is_tamed_for_spirit() {
+    let (mut g, me, _) = duel(3);
+    let id = undead_beside(&mut g, me);
+    let lair = g.mobs().iter().find(|m| m.id == id).unwrap().hex;
+    g.mobs.iter_mut().find(|m| m.id == id).unwrap().kind = MobKind::Beast { lair };
+    g.apply(me, Intent::Recruit { mob: id }).unwrap();
+    assert_eq!(g.companions(me), &[Companion::Beast]);
+    assert_eq!(g.champion(me).unwrap().spirit_points, 5 - TAME_SPIRIT);
+}
+
+#[test]
+fn companions_go_to_the_winner_and_scatter_on_a_fall() {
+    let (mut g, me, foe) = duel(3);
+    g.champ_mut(foe).companions = vec![Companion::Beast, Companion::Undead];
+    let mut ev = Vec::new();
+    g.seize_companion(me, foe, &mut ev);
+    assert_eq!(g.companions(me), &[Companion::Undead]);
+    assert_eq!(g.companions(foe), &[Companion::Beast]);
+    // The fallen lose the rest; an undead rises where they fell.
+    let at = g.champion(me).unwrap().hex;
+    let undead = g.mobs().iter().filter(|m| m.is_undead()).count();
+    g.fall(me, &mut ev);
+    assert!(g.companions(me).is_empty());
+    assert_eq!(
+        g.mobs().iter().filter(|m| m.is_undead()).count(),
+        undead + 1
+    );
+    assert!(g.mobs().iter().any(|m| m.hex == at));
+}
+
+#[test]
+fn a_legion_of_five_is_a_deed_and_a_god_can_thin_it() {
+    let (mut g, me, foe) = duel(3);
+    g.chosen[me.0 as usize] = Some(GreatDeed::Legion);
+    g.champ_mut(me).companions = vec![Companion::Undead; LEGION];
+    let mut ev = Vec::new();
+    g.dusk_of_deeds(&mut ev);
+    g.dusk_of_deeds(&mut ev);
+    assert!(g.on_eve(me));
+    // A god's hand takes one away before the next dusk.
+    g.grant_act(
+        foe,
+        God::Ahamar,
+        Act::Weaken { target: me },
+        2,
+        None,
+        &mut ev,
+    );
+    assert_eq!(g.companions(me).len(), LEGION - 1);
+    g.dusk_of_deeds(&mut ev);
+    assert_eq!(g.winner(), None);
+}

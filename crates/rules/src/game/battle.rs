@@ -74,7 +74,11 @@ impl Game {
                 w.ambush == Some(player)
                     && matches!(w.kind, WindowKind::Battle { attacker, .. } if attacker == player)
             });
-        c.might + u8::from(high_ground) + u8::from(ambush) + self.item_dice(player, defending)
+        c.might
+            + u8::from(high_ground)
+            + u8::from(ambush)
+            + self.item_dice(player, defending)
+            + self.companion_dice(player)
     }
 
     /// Dice `player` throws in an open Battle or Trial window, if they are
@@ -189,9 +193,11 @@ impl Game {
         if to_defender > to_attacker {
             self.battle_style(attacker, defender, events);
             self.seize_cargo(attacker, defender, events);
+            self.seize_companion(attacker, defender, events);
         } else if to_attacker > to_defender {
             self.battle_style(defender, attacker, events);
             self.seize_cargo(defender, attacker, events);
+            self.seize_companion(defender, attacker, events);
         }
         // Trishna's Thirst: whoever drew more blood drinks a Spirit (§5.3).
         if self.law_active(super::Law::Thirst) && to_defender != to_attacker {

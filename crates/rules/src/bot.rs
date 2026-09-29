@@ -463,6 +463,8 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
                     target: Some(rival),
                 },
             ),
+            // A legion thins by a god's hand.
+            GreatDeed::Legion => wish(God::Ahamar, crate::Act::Weaken { target: rival }),
         });
     }
     let deed = game.deed(player)?;
@@ -515,6 +517,10 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
                 )
             }
         }
+        // No undead to enlist: bodies near, to rise.
+        (GreatDeed::Legion, LegionSize) if !game.mobs().iter().any(|m| m.is_undead()) => {
+            wish(God::Zaga, crate::Act::Dead)
+        }
         // Bhava's woods round where it stands.
         (GreatDeed::WorldTree, WoodsAround) => wish(God::Bhava, crate::Act::Land),
         // A god of the pair out of its light: an offering to the god that
@@ -536,6 +542,15 @@ fn deed_goal(game: &Game, player: PlayerId) -> Option<Hex> {
         GreatDeed::DissolvedLand => game.left_to_dissolve(player),
         GreatDeed::WorldTree => game.hero_grove(),
         GreatDeed::Island => None,
+        // The nearest undead to write into the legion.
+        GreatDeed::Legion => {
+            let me = game.champion(player)?.hex;
+            game.mobs()
+                .iter()
+                .filter(|m| m.is_undead())
+                .map(|m| m.hex)
+                .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
+        }
         // A settlement of its own to build on, or one to take, but only
         // with the Spirit to build there, else it would idle on it.
         GreatDeed::City | GreatDeed::Reconciliation => {
@@ -601,6 +616,21 @@ fn border_pair(game: &Game, hex: Hex) -> Option<[God; 2]> {
 /// A move on its own turn for the bot's deed, where it stands (§21.10):
 /// a quarter for its city, what the city lacks, a shrine of two.
 fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
+    // A companion next to it: an undead for a legion, a beast when Spirit
+    // is to spare.
+    let spare = game.champion(player)?.spirit_points >= crate::TAME_SPIRIT + 2;
+    if let Some(mob) = game.recruitable(player).into_iter().find(|&id| {
+        game.mobs().iter().any(|m| {
+            m.id == id
+                && if m.is_undead() {
+                    game.deed(player) == Some(GreatDeed::Legion)
+                } else {
+                    spare
+                }
+        })
+    }) {
+        return Some(Intent::Recruit { mob });
+    }
     let deed = game.deed(player)?;
     let spirit = game.champion(player)?.spirit_points;
     let here = game.champion(player)?.hex;

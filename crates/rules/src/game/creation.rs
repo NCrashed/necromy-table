@@ -305,7 +305,9 @@ impl Game {
             | Feature::Beasts
             | Feature::Cargo
             | Feature::Buildings
-            | Feature::City => {}
+            | Feature::City
+            | Feature::Companions
+            | Feature::Legion => {}
         }
     }
 

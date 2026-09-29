@@ -79,6 +79,8 @@ pub struct Champion {
     pub gear: [Option<crate::items::ItemId>; 3],
     /// What they carry (§21.8).
     pub cargo: Option<cargo::Cargo>,
+    /// Who follows them (§21.8).
+    pub companions: Vec<companions::Companion>,
 }
 
 impl Champion {
@@ -112,6 +114,7 @@ impl Champion {
             poison: None,
             gear: [None; 3],
             cargo: None,
+            companions: Vec::new(),
         }
     }
 
@@ -177,6 +180,11 @@ pub enum Intent {
     /// the free hex next to it.
     Quarter {
         hex: Hex,
+    },
+    /// On your turn: tame the beast or enlist the undead `mob` next to you
+    /// (§21.8).
+    Recruit {
+        mob: u32,
     },
     /// On your turn: take the body (or burden) underfoot on your back (§21.8).
     Take,
@@ -735,6 +743,22 @@ pub enum Event {
         from: PlayerId,
         cargo: cargo::Cargo,
     },
+    /// A mob follows `player` now (§21.8).
+    CompanionJoined {
+        player: PlayerId,
+        companion: companions::Companion,
+    },
+    /// `player` won `companion` from `from` in battle.
+    CompanionSeized {
+        player: PlayerId,
+        from: PlayerId,
+        companion: companions::Companion,
+    },
+    /// `player` lost `count` companions: fell, or a god took them.
+    CompanionsScattered {
+        player: PlayerId,
+        count: u8,
+    },
     /// `player` did something first at this table (§21.5); Style follows.
     First {
         player: PlayerId,
@@ -1084,6 +1108,8 @@ pub enum RuleError {
     NoCargo,
     /// Nothing of that can be built here.
     CannotBuild,
+    /// No such mob next to you, or it will not follow.
+    CannotRecruit,
 }
 
 impl std::fmt::Display for RuleError {
@@ -1094,6 +1120,7 @@ impl std::fmt::Display for RuleError {
             RuleError::NotRuins => write!(f, "not the ruins of a settlement"),
             RuleError::InvalidDeed => write!(f, "not a deed to choose"),
             RuleError::CannotBuild => write!(f, "that cannot be built here"),
+            RuleError::CannotRecruit => write!(f, "nothing here will follow you"),
             RuleError::NoCargo => write!(f, "nothing to take or to lay down"),
             RuleError::NoCycle => write!(f, "the hand went through already or holds no such card"),
             RuleError::NothingWorn => write!(f, "nothing worn there"),
@@ -1885,6 +1912,7 @@ impl Game {
             Intent::Play { card, target } => self.play_own(player, card, target, events),
             Intent::Sacrifice { slot } => self.sacrifice(player, slot, events),
             Intent::Rebuild => self.rebuild(player, events),
+            Intent::Recruit { mob } => self.take_companion(player, mob, events),
             Intent::Take => self.take(player, events),
             Intent::Build { building } => self.build(player, building, events),
             Intent::Quarter { hex } => self.raise_quarter(player, hex, events),
@@ -1915,6 +1943,7 @@ impl Game {
             Intent::Play { card, target } => self.check_play(player, card, target),
             Intent::Sacrifice { slot } => self.check_sacrifice(player, slot).map(|_| ()),
             Intent::Rebuild => self.check_rebuild(player).map(|_| ()),
+            Intent::Recruit { mob } => self.check_recruit(player, mob).map(|_| ()),
             Intent::Take => self.check_take(player).map(|_| ()),
             Intent::Build { building } => self.check_build(player, building).map(|_| ()),
             Intent::Quarter { hex } => self.check_quarter(player, hex),
@@ -2370,6 +2399,7 @@ impl Game {
             | Intent::Take
             | Intent::Lay
             | Intent::Build { .. }
+            | Intent::Recruit { .. }
             | Intent::Quarter { .. }
             | Intent::Cycle { .. } => {
                 return Err(RuleError::WindowOpen);
@@ -2968,6 +2998,7 @@ impl Game {
             .unwrap_or(home);
         self.drop_on_fall(player, at, events);
         self.drop_cargo(player, at, events);
+        self.scatter_companions(player, at, events);
         // Whoever falls wakes at home, in plain sight.
         self.reveal(player, stealth::RevealReason::Stumbled, events);
         let champ = self.champ_mut(player);
@@ -3202,6 +3233,7 @@ mod battle;
 mod beasts;
 mod buildings;
 mod cargo;
+mod companions;
 mod creation;
 mod dusk;
 mod gear;
@@ -3224,6 +3256,7 @@ pub use battle::Score;
 pub use beasts::{BEAST_DICE, BEAST_HEALTH, BEAST_RANGE};
 pub use buildings::{BUILD_SPIRIT, Building, QUARTER_SPIRIT, WALLED_MILITIA};
 pub use cargo::Cargo;
+pub use companions::{COMPANION_DICE, Companion, ENLIST_SPIRIT, RETINUE, TAME_SPIRIT};
 pub use dusk::{DuskStep, Seal, SealedWish};
 pub use gear::{Gain, SACRIFICE};
 pub use guard::{GUARD_DICE, GUARD_HEALTH, GUARD_RELIEF, GUARD_STEPS, Guard};
@@ -3242,7 +3275,9 @@ pub use stealth::RevealReason;
 pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
 pub use trial::{Boon, TRIAL_ROUNDS, TRIALS_ON_BOARD, Trial, trial_face};
-pub use victory::{CITY, Check, CheckKind, DISSOLVED, GreatDeed, ISLAND, OFFERED, REFUSAL_THREAT};
+pub use victory::{
+    CITY, Check, CheckKind, DISSOLVED, GreatDeed, ISLAND, LEGION, OFFERED, REFUSAL_THREAT,
+};
 pub use wish::{
     Act, Bet, FORESEE, FORGED_LINE, FORGED_NAME, MAX_ACTS, Price, Said, TRIBUTE_THREAT, Truce,
     WAGER_STAKE, Wager, Wish, WishKind, forge_template, god_terrain, likes_a_stake, taste_for,

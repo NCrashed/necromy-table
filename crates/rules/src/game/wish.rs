@@ -715,7 +715,7 @@ impl Game {
     }
 
     /// One act of a granted wish, at `power`.
-    fn grant_act(
+    pub(super) fn grant_act(
         &mut self,
         player: PlayerId,
         god: God,
@@ -737,6 +737,13 @@ impl Game {
                 // A god's hand passes any ward.
                 self.damage(target, power.saturating_sub(1).max(1), events);
                 self.root(target, events);
+                // And one who followed them runs off (§21.8).
+                if self.champ_mut(target).companions.pop().is_some() {
+                    events.push(Event::CompanionsScattered {
+                        player: target,
+                        count: 1,
+                    });
+                }
             }
             Act::Land => self.grant_land(god, me, usize::from(power), events),
             // No bodies in the world yet: asking for the dead brings them in.

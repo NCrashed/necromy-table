@@ -162,6 +162,8 @@ pub fn novelty(n: necromy_rules::Novelty) -> String {
         Novelty::TookTable => "садится за Стол Ахамара".into(),
         Novelty::Rebuilt => "отстраивает руины".into(),
         Novelty::Built => "строит на поселении".into(),
+        Novelty::Tamed => "приручает зверя".into(),
+        Novelty::Enlisted => "вписывает мертвеца в легион".into(),
         Novelty::Sacrificed => "отдаёт предмет богу".into(),
         Novelty::Hid => "уходит в тень".into(),
         Novelty::FinishedLine => "доводит до конца свою историю".into(),
@@ -238,6 +240,13 @@ pub fn great_deed(d: necromy_rules::GreatDeed) -> (&'static str, String) {
                 necromy_rules::CITY
             ),
         ),
+        GreatDeed::Legion => (
+            "Легион",
+            format!(
+                "{} мертвецов твоего легиона идут за тобой — два заката подряд.",
+                necromy_rules::LEGION
+            ),
+        ),
         GreatDeed::Reconciliation => (
             "Примирение",
             "Два бога, один из которых гасит другого, оба в свете, и твоё святилище обоих на стыке их земель — два заката подряд.".into(),
@@ -259,6 +268,7 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::CityHas => "таверна, кузня, святилище",
         CheckKind::PairLight => "боги пары в свете",
         CheckKind::SharedShrine => "святилище обоих",
+        CheckKind::LegionSize => "мертвецов в твоём легионе",
     }
 }
 
@@ -345,6 +355,14 @@ pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {
         Feature::City => (
             "Города",
             "поселение прирастает кварталом; поселения бок о бок — один город",
+        ),
+        Feature::Companions => (
+            "Спутники",
+            "зверя рядом можно приручить за Дух; спутник идёт за чемпионом и добавляет кость в бою",
+        ),
+        Feature::Legion => (
+            "Легион",
+            "мертвеца рядом можно вписать в свой легион; победитель в бою уводит спутника",
         ),
     }
 }
@@ -889,5 +907,14 @@ pub fn building(b: necromy_rules::Building) -> String {
         Building::Shrine([a, b]) => {
             format!("святилище {} и {}", god_genitive(a), god_genitive(b))
         }
+    }
+}
+
+/// A companion (§21.8): nominative, for the feed and the sheet.
+pub fn companion(c: necromy_rules::Companion) -> &'static str {
+    use necromy_rules::Companion;
+    match c {
+        Companion::Beast => "зверь",
+        Companion::Undead => "мертвец",
     }
 }

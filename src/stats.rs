@@ -563,8 +563,6 @@ fn stat_sheet(
         rows.push(r);
     }
 
-    // What the militia think of them (§20.4), in the colour of the pennant
-    // over every militia: whether they let this champion through.
     // What they carry (§21.8).
     if let Some(cargo) = g.cargo(player) {
         let line = label(
@@ -576,6 +574,32 @@ fn stat_sheet(
         );
         rows.push(line);
     }
+    // Who follows them (§21.8).
+    let retinue = g.companions(player);
+    if !retinue.is_empty() {
+        let mut kinds: Vec<(necromy_rules::Companion, usize)> = Vec::new();
+        for &c in retinue {
+            match kinds.iter_mut().find(|(k, _)| *k == c) {
+                Some((_, n)) => *n += 1,
+                None => kinds.push((c, 1)),
+            }
+        }
+        let list: Vec<String> = kinds
+            .iter()
+            .map(|(c, n)| format!("{} ×{n}", names::companion(*c)))
+            .collect();
+        let dice = (retinue.len() as u8).min(necromy_rules::COMPANION_DICE);
+        let line = label(
+            commands,
+            font,
+            &format!("спутники: {} (+{dice} к.)", list.join(", ")),
+            12.0,
+            true,
+        );
+        rows.push(line);
+    }
+    // What the militia think of them (§20.4), in the colour of the pennant
+    // over every militia: whether they let this champion through.
     // Only in a world with militia (§21.2).
     if g.has(necromy_rules::Feature::Militia) {
         let standing = g.standing(player);

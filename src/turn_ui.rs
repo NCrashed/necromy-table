@@ -71,6 +71,8 @@ enum ActionButton {
     Lay,
     /// Build on the settlement underfoot, or grow its city (§21.8).
     Build(necromy_rules::Building),
+    /// Tame the beast or enlist the undead next to you (§21.8).
+    Recruit(u32),
     Quarter(hexx::Hex),
 }
 
@@ -485,6 +487,17 @@ fn rebuild_action(
                 ));
             }
         }
+        for id in g.recruitable(human) {
+            let Some(m) = g.mobs().iter().find(|m| m.id == id) else {
+                continue;
+            };
+            let label = if m.is_undead() {
+                format!("В легион\n{} Духа", necromy_rules::ENLIST_SPIRIT)
+            } else {
+                format!("Приручить\n{} Духа", necromy_rules::TAME_SPIRIT)
+            };
+            buttons.push((ActionButton::Recruit(id), label));
+        }
         if spirit >= necromy_rules::QUARTER_SPIRIT
             && let Some(&hex) = g.quarters(human).first()
         {
@@ -540,6 +553,7 @@ fn action_buttons(
                 building: *building,
             },
             ActionButton::Quarter(hex) => Intent::Quarter { hex: *hex },
+            ActionButton::Recruit(mob) => Intent::Recruit { mob: *mob },
             ActionButton::Cycle => Intent::Cycle {
                 cards: selection.sift.take().unwrap_or_default(),
             },

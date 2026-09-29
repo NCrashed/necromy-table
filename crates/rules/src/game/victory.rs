@@ -34,18 +34,21 @@ pub enum GreatDeed {
     /// Two gods of a quenching pair both in their light, and a shrine of
     /// both of yours, two dusks running.
     Reconciliation,
+    /// Five undead of your legion following you.
+    Legion,
     /// A whole region of another god gone into the mist, but its temple and
     /// the champions' homes, and fifteen hexes of it at least.
     DissolvedLand,
 }
 
 impl GreatDeed {
-    pub const ALL: [GreatDeed; 5] = [
+    pub const ALL: [GreatDeed; 6] = [
         GreatDeed::WorldTree,
         GreatDeed::Island,
         GreatDeed::DissolvedLand,
         GreatDeed::City,
         GreatDeed::Reconciliation,
+        GreatDeed::Legion,
     ];
 
     /// The god whose deed it is: its card's colour, its voice.
@@ -54,7 +57,7 @@ impl GreatDeed {
             GreatDeed::WorldTree => God::Bhava,
             GreatDeed::Island | GreatDeed::DissolvedLand => God::Maya,
             GreatDeed::City => God::Trishna,
-            GreatDeed::Reconciliation => God::Zaga,
+            GreatDeed::Reconciliation | GreatDeed::Legion => God::Zaga,
         }
     }
 
@@ -67,6 +70,12 @@ impl GreatDeed {
             GreatDeed::DissolvedLand => &[],
             GreatDeed::City => &[Feature::Settlements, Feature::Buildings, Feature::City],
             GreatDeed::Reconciliation => &[Feature::Settlements, Feature::Buildings],
+            GreatDeed::Legion => &[
+                Feature::Bodies,
+                Feature::Undead,
+                Feature::Companions,
+                Feature::Legion,
+            ],
         }
     }
 }
@@ -96,6 +105,8 @@ pub enum CheckKind {
     PairLight,
     /// A shrine of both, yours.
     SharedShrine,
+    /// Undead of your legion following you.
+    LegionSize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,6 +124,8 @@ impl Check {
 
 /// Settlements side by side a City needs.
 pub const CITY: usize = 7;
+/// Undead in a legion for the Legion.
+pub const LEGION: usize = 5;
 
 /// Hexes an Island needs.
 pub const ISLAND: usize = 7;
@@ -131,10 +144,9 @@ pub const REFUSAL_THREAT: i8 = 2;
 pub struct Progress {
     /// Dusks the Crown was theirs in a row (the storyteller's boredom).
     pub crown_streak: u8,
-    /// Dusks in a row their World Tree has stood whole.
-    pub tree_dusks: u8,
-    /// Dusks in a row their reconciled pair has kept the peace.
-    pub peace_dusks: u8,
+    /// Dusks in a row their deed has held but for its dusks (a World Tree
+    /// standing, a pair at peace, a legion together).
+    pub held_dusks: u8,
 }
 
 /// Three deeds for each player: of different patrons where it can, and none
@@ -231,7 +243,7 @@ impl Game {
                     check(CheckKind::BeastsNear, usize::from(beasts), 1),
                     check(
                         CheckKind::Dusks,
-                        usize::from(self.progress[player.0 as usize].tree_dusks),
+                        usize::from(self.progress[player.0 as usize].held_dusks),
                         2,
                     ),
                 ]
@@ -262,6 +274,21 @@ impl Game {
                     check(CheckKind::CityHas, has, 3),
                 ]
             }
+            GreatDeed::Legion => {
+                let legion = self
+                    .companions(player)
+                    .iter()
+                    .filter(|&&c| c == super::Companion::Undead)
+                    .count();
+                vec![
+                    check(CheckKind::LegionSize, legion, LEGION),
+                    check(
+                        CheckKind::Dusks,
+                        usize::from(self.progress[player.0 as usize].held_dusks),
+                        2,
+                    ),
+                ]
+            }
             GreatDeed::Reconciliation => {
                 let (light, shrine) = self.best_peace(player);
                 vec![
@@ -269,7 +296,7 @@ impl Game {
                     check(CheckKind::SharedShrine, usize::from(shrine), 1),
                     check(
                         CheckKind::Dusks,
-                        usize::from(self.progress[player.0 as usize].peace_dusks),
+                        usize::from(self.progress[player.0 as usize].held_dusks),
                         2,
                     ),
                 ]
@@ -456,28 +483,19 @@ impl Game {
     /// pair kept in peace.
     fn count_trees(&mut self) {
         for p in self.players().collect::<Vec<_>>() {
-            if self.deed(p) != Some(GreatDeed::Reconciliation) {
+            let Some(deed) = self.deed(p) else {
+                continue;
+            };
+            let checks = self.checks(p, deed);
+            if !checks.iter().any(|c| c.kind == CheckKind::Dusks) {
                 continue;
             }
-            let holding = self
-                .checks(p, GreatDeed::Reconciliation)
+            let holding = checks
                 .iter()
                 .filter(|c| c.kind != CheckKind::Dusks)
                 .all(Check::met);
-            let dusks = &mut self.progress[p.0 as usize].peace_dusks;
+            let dusks = &mut self.progress[p.0 as usize].held_dusks;
             *dusks = if holding { dusks.saturating_add(1) } else { 0 };
-        }
-        for p in self.players().collect::<Vec<_>>() {
-            if self.deed(p) != Some(GreatDeed::WorldTree) {
-                continue;
-            }
-            let standing = self
-                .checks(p, GreatDeed::WorldTree)
-                .iter()
-                .filter(|c| c.kind != CheckKind::Dusks)
-                .all(Check::met);
-            let dusks = &mut self.progress[p.0 as usize].tree_dusks;
-            *dusks = if standing { dusks.saturating_add(1) } else { 0 };
         }
     }
 
