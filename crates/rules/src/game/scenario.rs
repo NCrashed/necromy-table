@@ -8,7 +8,7 @@ use hexx::Hex;
 
 use serde::{Deserialize, Serialize};
 
-use super::victory::Condition;
+use super::victory::GreatDeed;
 use super::{Event, Game, PlayerId, Setup, TimeOfDay};
 use crate::board::{Board, Corpse, Terrain};
 use crate::cards::{CardId, DefId, POOL};
@@ -72,15 +72,16 @@ pub struct Scenario {
     pub stages: [u8; 5],
     /// Each god's pressure towards the next stage (§5.1).
     pub pressure: [i8; 5],
-    /// Open victory conditions; none by default, so nobody wins.
-    pub open: Vec<Condition>,
+    /// The first seat's Great Deed, already chosen; none by default, so
+    /// nobody wins.
+    pub deed: Option<GreatDeed>,
     pub world: SceneWorld,
 }
 
 /// What of the world's own moves a scene lets happen.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SceneWorld {
-    /// Dawn: Style for land, the Crown, the Dominant's wish.
+    /// Dawn and dusk: Style for the Table, the Crown, everyone's wish.
     pub dawn: bool,
     /// The royal guard marches on the loudest (§6.5).
     pub guard: bool,
@@ -96,7 +97,7 @@ impl Scenario {
             // Light: the gentlest laws, none that hides or harms by itself.
             stages: [0; 5],
             pressure: [0; 5],
-            open: Vec::new(),
+            deed: None,
             world: SceneWorld::default(),
         }
     }
@@ -129,14 +130,16 @@ impl Game {
         }
         for &hex in &scene.corpses {
             if let Some(tile) = game.board.tile_mut(hex) {
-                tile.corpse = Some(Corpse { age: 0 });
+                tile.corpse = Some(Corpse::fresh());
             }
         }
         game.deck.clear();
         game.discard.clear();
         game.traps.clear();
-        game.open = scene.open.clone();
-        game.secrets = vec![None; scene.seats.len()];
+        // No deeds to pick: the scene gives the first seat its own, if any.
+        game.offers = vec![Vec::new(); scene.seats.len()];
+        game.chosen = vec![None; scene.seats.len()];
+        game.chosen[0] = scene.deed;
         game.lines.clear();
         game.guard = None;
         game.dominant = None;

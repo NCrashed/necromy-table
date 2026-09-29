@@ -1,70 +1,81 @@
-//! Victory conditions (docs/design.md §10).
+//! Great Deeds (docs/design.md §21.7): how a match is won.
 //!
-//! Each match draws three open conditions from a pool, known to everyone,
-//! and one secret condition per player, known only to its owner. The first
-//! player to meet any of their conditions wins and the match stops.
+//! At the start everyone is offered three deeds and picks one; all are open
+//! to the table. A deed builds or changes the world and needs mechanics a
+//! new world does not have, so whoever wants it must bring them in. When
+//! every step of a deed holds, its eve begins and the table hears of it;
+//! the deed is done at the next dusk if everything still holds then. The
+//! others have that day to break it.
 //!
-//! A condition is a list of checks with a number to reach, so the client can
-//! show progress without knowing the rules behind it.
+//! A deed is a list of checks with a number to reach, so the client can
+//! show everyone's progress without knowing the rules behind it.
 
+use hexx::Hex;
 use serde::{Deserialize, Serialize};
 
-use super::{Event, Game, PlayerId};
+use super::{Event, Game, PlayerId, RuleError};
 use crate::board::Terrain;
+use crate::features::Feature;
 use crate::gods::God;
 use crate::rng::Rng;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Condition {
-    /// Hold a settlement or temple in this many regions.
-    Registry { regions: u8 },
-    /// Serve one god fanatically while that god is at its darkest.
-    GodLimit,
-    /// Serve two gods next to each other on the ring of generation, neither
-    /// of them in its light stage.
-    Fusion,
-    /// Keep your favour balanced near the centre with no god dark, for this
-    /// many dawns in a row.
-    MiddlePath { dawns: u8 },
-    /// Beat the Dominant in battle this many times.
-    Overthrow { wins: u8 },
-    /// Most Style at the dawn of this round.
-    FirstAtTable { round: u32 },
-    /// As the Dominant, refuse the wish this many dawns in a row (§6, §7):
-    /// keep winning the table and turn down what it pays. Each refusal
-    /// costs `REFUSAL_THREAT`, and falling in between starts it over.
-    Wager { refusals: u8 },
+/// A late-game goal that makes the world (§21.7).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum GreatDeed {
+    /// A grove grown from a champion's body, ringed by woods, with beasts
+    /// near, standing through two dusks.
+    WorldTree,
+    /// Land of seven hexes or more cut off from the Table by the mist, with a
+    /// settlement of yours on it, and you there.
+    Island,
+    /// A whole region of another god gone into the mist, but its temple and
+    /// the champions' homes, and fifteen hexes of it at least.
+    DissolvedLand,
+}
+
+impl GreatDeed {
+    pub const ALL: [GreatDeed; 3] = [
+        GreatDeed::WorldTree,
+        GreatDeed::Island,
+        GreatDeed::DissolvedLand,
+    ];
+
+    /// The god whose deed it is: its card's colour, its voice.
+    pub const fn patron(self) -> God {
+        match self {
+            GreatDeed::WorldTree => God::Bhava,
+            GreatDeed::Island | GreatDeed::DissolvedLand => God::Maya,
+        }
+    }
+
+    /// What the world must have for it: on the card, so it says what to
+    /// bring in.
+    pub const fn needs(self) -> &'static [Feature] {
+        match self {
+            GreatDeed::WorldTree => &[Feature::Bodies, Feature::Groves, Feature::Beasts],
+            GreatDeed::Island => &[Feature::Settlements],
+            GreatDeed::DissolvedLand => &[],
+        }
+    }
 }
 
 /// What a check measures; the client names and draws it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CheckKind {
-    RegionsHeld,
-    /// Favour with your most favoured god.
-    TopFavor,
-    /// Favour with your second god, next to the first on the ring.
-    SecondFavor,
-    /// Share of all your favour held by the pair, in percent.
-    PairShare,
-    TotalFavor,
-    /// Length of your favour vector, in hundredths (§5).
-    Fanaticism,
-    /// Closeness to the centre: 100 minus the vector length in hundredths.
-    Balance,
-    /// Stage of your most favoured god (2 is dark).
-    GodStage,
-    /// Both gods of the pair past their light stage (0 or 1 of them).
-    PairNotLight,
-    /// Gods not in their dark stage, out of five.
-    GodsNotDark,
-    Streak,
-    Overthrows,
-    /// Rounds reached.
-    Round,
-    /// 1 if you lead in Style right now.
-    StyleLead,
-    /// Wishes refused in a row as the Dominant.
-    Refusals,
+    /// A grove grown from a champion's body stands.
+    HeroGrove,
+    /// Woods and groves round it, of six.
+    WoodsAround,
+    /// A beast within two hexes of it.
+    BeastsNear,
+    /// Dusks in a row it has stood so.
+    Dusks,
+    /// Hexes of the land cut off from the Table that you stand on.
+    IslandSize,
+    /// A settlement of yours on it.
+    IslandSettled,
+    /// Hexes of another god's region gone into the mist.
+    RegionInMist,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,248 +91,329 @@ impl Check {
     }
 }
 
-const OPEN_POOL: [Condition; 6] = [
-    Condition::Registry { regions: 4 },
-    Condition::GodLimit,
-    Condition::Fusion,
-    Condition::MiddlePath { dawns: 2 },
-    Condition::Overthrow { wins: 3 },
-    Condition::FirstAtTable { round: 19 },
-];
+/// Hexes an Island needs.
+pub const ISLAND: usize = 7;
+/// Hexes of a region the mist must take at least: all of it, and a small
+/// one must first grow.
+pub const DISSOLVED: usize = 15;
 
-/// Secret conditions are a fallback, not a shortcut (§10): nobody else
-/// can see them coming, so they ask for more than any open one and count
-/// only from `SECRET_FROM_ROUND`, once the open race has had its chance.
-const SECRET_POOL: [Condition; 3] = [
-    Condition::Wager { refusals: 3 },
-    Condition::Overthrow { wins: 4 },
-    Condition::Registry { regions: 5 },
-];
+/// Deeds offered to each player to pick from.
+pub const OFFERED: usize = 3;
 
-/// The round from which a secret condition can win.
-pub const SECRET_FROM_ROUND: u32 = 8;
-
-/// Threat a refused wish costs: turning the table down is loud.
+/// Threat a refused wish costs the Crown: turning the table down is loud.
 pub const REFUSAL_THREAT: i8 = 2;
-
-pub const OPEN_COUNT: usize = 3;
-
-/// Same kind of condition, whatever its numbers.
-fn same_kind(a: Condition, b: Condition) -> bool {
-    std::mem::discriminant(&a) == std::mem::discriminant(&b)
-}
 
 /// Per-player counters the checks need.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Progress {
+    /// Dusks the Crown was theirs in a row (the storyteller's boredom).
     pub crown_streak: u8,
-    pub middle_streak: u8,
-    pub overthrows: u8,
-    /// Wishes refused in a row as the Dominant (the Wager, §10); a wish
-    /// made, a dawn without the Crown, or a fall starts it over.
-    pub refusals: u8,
+    /// Dusks in a row their World Tree has stood whole.
+    pub tree_dusks: u8,
 }
 
-/// Draws this match's conditions: open ones, then one secret per player of
-/// a kind not already open.
-pub fn draw(rng: &mut Rng, players: usize) -> (Vec<Condition>, Vec<Condition>) {
-    let mut open = OPEN_POOL.to_vec();
-    rng.shuffle(&mut open);
-    open.truncate(OPEN_COUNT);
-    let allowed: Vec<Condition> = SECRET_POOL
-        .into_iter()
-        .filter(|s| !open.iter().any(|o| same_kind(*o, *s)))
-        .collect();
-    let secrets = (0..players)
-        .map(|_| *rng.pick(&allowed).unwrap_or(&SECRET_POOL[0]))
-        .collect();
-    (open, secrets)
+/// Three deeds for each player: of different patrons where it can, and none
+/// offered twice at the table while the pool lasts.
+pub fn deal(rng: &mut Rng, players: usize) -> Vec<Vec<GreatDeed>> {
+    let mut pool = GreatDeed::ALL.to_vec();
+    rng.shuffle(&mut pool);
+    let mut dealt: Vec<GreatDeed> = Vec::new();
+    (0..players)
+        .map(|_| {
+            let mut hand: Vec<GreatDeed> = Vec::new();
+            // Fresh ones of new patrons first, then fresh ones, then any.
+            type Pass<'a> = &'a dyn Fn(&GreatDeed, &[GreatDeed]) -> bool;
+            let passes: [Pass; 3] = [
+                &|d, hand| !dealt.contains(d) && !hand.iter().any(|h| h.patron() == d.patron()),
+                &|d, _| !dealt.contains(d),
+                &|_, _| true,
+            ];
+            for pass in passes {
+                for &d in &pool {
+                    if hand.len() < OFFERED && !hand.contains(&d) && pass(&d, &hand) {
+                        hand.push(d);
+                    }
+                }
+            }
+            dealt.extend(hand.iter().copied());
+            hand
+        })
+        .collect()
 }
 
 impl Game {
-    pub fn open_conditions(&self) -> &[Condition] {
-        &self.open
+    /// The deeds `player` was offered to pick from.
+    pub fn offers(&self, player: PlayerId) -> &[GreatDeed] {
+        self.offers
+            .get(player.0 as usize)
+            .map_or(&[][..], Vec::as_slice)
     }
 
-    /// A player's secret condition; `None` in a view that hides it.
-    pub fn secret(&self, player: PlayerId) -> Option<Condition> {
-        self.secrets.get(player.0 as usize).copied().flatten()
+    /// The deed `player` chose, once they have.
+    pub fn deed(&self, player: PlayerId) -> Option<GreatDeed> {
+        self.chosen.get(player.0 as usize).copied().flatten()
     }
 
-    /// The winner and the condition they met, once the match is over.
-    pub fn winner(&self) -> Option<(PlayerId, Condition)> {
+    /// `player`'s deed holds and waits for dusk to be done.
+    pub fn on_eve(&self, player: PlayerId) -> bool {
+        self.eves
+            .get(player.0 as usize)
+            .is_some_and(Option::is_some)
+    }
+
+    /// The winner and their deed, once the match is over.
+    pub fn winner(&self) -> Option<(PlayerId, GreatDeed)> {
         self.winner
     }
 
-    /// Where `player` stands on `condition`.
-    pub fn checks(&self, player: PlayerId, condition: Condition) -> Vec<Check> {
-        let progress = &self.progress[player.0 as usize];
-        let favor = |g: God| self.favor(player, g);
-        // Gods by favour, most first; ties by ring order.
-        let mut ranked: Vec<God> = God::ALL.to_vec();
-        ranked.sort_by_key(|&g| (std::cmp::Reverse(favor(g)), g.index()));
-        let top = ranked[0];
-        let [x, y] = self.favor_vector(player);
-        let length = ((x * x + y * y).sqrt() * 100.0).round() as u16;
-        let total: u16 = God::ALL.iter().map(|&g| favor(g)).sum();
-        let not_dark = God::ALL.iter().filter(|&&g| self.stage(g) < 2).count() as u16;
-        let check = |kind, have, need| Check { kind, have, need };
+    /// Those who still have to pick their deed.
+    pub fn choosing(&self) -> Vec<PlayerId> {
+        self.order
+            .iter()
+            .copied()
+            .filter(|&p| self.deed(p).is_none() && !self.offers(p).is_empty())
+            .collect()
+    }
 
-        match condition {
-            Condition::Registry { regions } => {
-                let held = God::ALL
+    /// `player` picks the deed of the match, one of their offers.
+    pub(super) fn choose_deed(
+        &mut self,
+        player: PlayerId,
+        deed: GreatDeed,
+        events: &mut Vec<Event>,
+    ) -> Result<(), RuleError> {
+        if self.deed(player).is_some() || !self.offers(player).contains(&deed) {
+            return Err(RuleError::InvalidDeed);
+        }
+        self.chosen[player.0 as usize] = Some(deed);
+        events.push(Event::DeedChosen { player, deed });
+        Ok(())
+    }
+
+    /// Where `player` stands on `deed`.
+    pub fn checks(&self, player: PlayerId, deed: GreatDeed) -> Vec<Check> {
+        let check = |kind, have: usize, need: usize| Check {
+            kind,
+            have: have.min(u16::MAX as usize) as u16,
+            need: need as u16,
+        };
+        match deed {
+            GreatDeed::WorldTree => {
+                let (grove, woods, beasts) = self.best_tree();
+                vec![
+                    check(CheckKind::HeroGrove, usize::from(grove.is_some()), 1),
+                    check(CheckKind::WoodsAround, woods, 6),
+                    check(CheckKind::BeastsNear, usize::from(beasts), 1),
+                    check(
+                        CheckKind::Dusks,
+                        usize::from(self.progress[player.0 as usize].tree_dusks),
+                        2,
+                    ),
+                ]
+            }
+            GreatDeed::Island => {
+                let island = self.island_of(player);
+                let settled = island.iter().any(|&h| {
+                    self.owner(h) == Some(player)
+                        && self
+                            .board
+                            .tile(h)
+                            .is_some_and(|t| t.terrain == Terrain::Settlement)
+                });
+                vec![
+                    check(CheckKind::IslandSize, island.len(), ISLAND),
+                    check(CheckKind::IslandSettled, usize::from(settled), 1),
+                ]
+            }
+            GreatDeed::DissolvedLand => {
+                // A land worth the name: a small region must grow before it goes.
+                let (gone, all) = self.dissolved_for(player);
+                vec![check(CheckKind::RegionInMist, gone, all.max(DISSOLVED))]
+            }
+        }
+    }
+
+    /// The grove grown from a champion that is nearest a World Tree.
+    pub fn hero_grove(&self) -> Option<Hex> {
+        self.best_tree().0
+    }
+
+    /// The best grove grown from a champion: woods round it, a beast near.
+    fn best_tree(&self) -> (Option<Hex>, usize, bool) {
+        self.hero_groves
+            .iter()
+            .map(|&(x, y)| Hex::new(x, y))
+            .filter(|&h| {
+                self.board
+                    .tile(h)
+                    .is_some_and(|t| t.terrain == Terrain::Grove)
+            })
+            .map(|h| {
+                let woods = h
+                    .all_neighbors()
                     .iter()
-                    .filter(|&&god| {
-                        self.claims().any(|(hex, p)| {
-                            p == player
-                                && self.board.tile(hex).is_some_and(|t| {
-                                    t.region == Some(god)
-                                        && matches!(
-                                            t.terrain,
-                                            Terrain::Settlement | Terrain::Temple
-                                        )
-                                })
-                        })
+                    .filter(|&&n| {
+                        self.board
+                            .tile(n)
+                            .is_some_and(|t| matches!(t.terrain, Terrain::Forest | Terrain::Grove))
                     })
-                    .count() as u16;
-                vec![check(CheckKind::RegionsHeld, held, u16::from(regions))]
-            }
-            Condition::GodLimit => vec![
-                check(CheckKind::TopFavor, favor(top), 8),
-                check(CheckKind::Fanaticism, length, 60),
-                check(CheckKind::GodStage, u16::from(self.stage(top)), 2),
-            ],
-            Condition::Fusion => {
-                // The best adjacent pair on the ring: by the weaker of the two.
-                let (a, b) = God::ALL
+                    .count();
+                let beasts = self
+                    .mobs
                     .iter()
-                    .map(|&g| (g, God::from_index(g.index() + 1)))
-                    .max_by_key(|&(a, b)| (favor(a).min(favor(b)), favor(a).max(favor(b))))
-                    .expect("five pairs");
-                let weaker = favor(a).min(favor(b));
-                let past_light = u16::from(self.stage(a) >= 1) + u16::from(self.stage(b) >= 1);
-                let share = ((favor(a) + favor(b)) * 100)
-                    .checked_div(total)
-                    .unwrap_or(0);
-                vec![
-                    check(CheckKind::SecondFavor, weaker, 8),
-                    check(CheckKind::PairShare, share, 60),
-                    check(CheckKind::PairNotLight, past_light, 2),
-                ]
+                    .any(|m| m.is_beast() && m.hex.unsigned_distance_to(h) <= 2);
+                (Some(h), woods, beasts)
+            })
+            .max_by_key(|&(h, woods, beasts)| {
+                (woods + 6 * usize::from(beasts), h.map(|h| (-h.x(), -h.y())))
+            })
+            .unwrap_or((None, 0, false))
+    }
+
+    /// The land `player` stands on, if the mist cuts it off from the Table.
+    fn island_of(&self, player: PlayerId) -> Vec<Hex> {
+        let start = self.hex_of(player);
+        let mut seen = vec![start];
+        let mut i = 0;
+        while i < seen.len() {
+            for n in seen[i].all_neighbors() {
+                if self.board.contains(n) && !seen.contains(&n) {
+                    seen.push(n);
+                }
             }
-            Condition::MiddlePath { dawns } => vec![
-                check(CheckKind::TotalFavor, total, 10),
-                check(CheckKind::Balance, 100u16.saturating_sub(length), 75),
-                check(CheckKind::GodsNotDark, not_dark, 5),
-                check(
-                    CheckKind::Streak,
-                    u16::from(progress.middle_streak),
-                    u16::from(dawns),
-                ),
-            ],
-            Condition::Overthrow { wins } => vec![check(
-                CheckKind::Overthrows,
-                u16::from(progress.overthrows),
-                u16::from(wins),
-            )],
-            Condition::FirstAtTable { round } => {
-                let best = self.players().map(|p| self.style(p)).max().unwrap_or(0);
-                let sole = self.players().filter(|&p| self.style(p) == best).count() == 1;
-                let leads = u16::from(best > 0 && sole && self.style(player) == best);
-                vec![
-                    check(CheckKind::Round, self.round.min(round) as u16, round as u16),
-                    check(CheckKind::StyleLead, leads, 1),
-                ]
-            }
-            Condition::Wager { refusals } => vec![check(
-                CheckKind::Refusals,
-                u16::from(progress.refusals),
-                u16::from(refusals),
-            )],
+            i += 1;
         }
-    }
-
-    pub fn meets(&self, player: PlayerId, condition: Condition) -> bool {
-        self.checks(player, condition).iter().all(Check::met)
-    }
-
-    /// Where `player` stands on their secret `condition`: its own checks,
-    /// then the round from which a secret may win.
-    pub fn secret_checks(&self, player: PlayerId, condition: Condition) -> Vec<Check> {
-        let mut checks = self.checks(player, condition);
-        checks.push(Check {
-            kind: CheckKind::Round,
-            have: self.round.min(SECRET_FROM_ROUND) as u16,
-            need: SECRET_FROM_ROUND as u16,
-        });
-        checks
-    }
-
-    /// `player`'s checks on `condition`, secret or open.
-    pub fn checks_as(&self, player: PlayerId, condition: Condition, secret: bool) -> Vec<Check> {
-        if secret {
-            self.secret_checks(player, condition)
+        if seen.contains(&Hex::ZERO) {
+            Vec::new()
         } else {
-            self.checks(player, condition)
+            seen
         }
     }
 
-    /// Dawn streaks: the Crown and the middle path.
-    pub(super) fn count_dawn(&mut self) {
+    /// Of another god's region, the one most gone: hexes in the mist, and
+    /// all that can go (its temple and the champions' homes stay).
+    fn dissolved_for(&self, player: PlayerId) -> (usize, usize) {
+        let (_, gone, all) = self.dissolving(player);
+        (gone, all)
+    }
+
+    /// The land of the region `player` dissolves nearest them, still out of
+    /// the mist.
+    pub fn left_to_dissolve(&self, player: PlayerId) -> Option<Hex> {
+        let (god, ..) = self.dissolving(player);
+        let me = self.hex_of(player);
+        self.board
+            .land()
+            .filter(|(h, t)| {
+                t.region == Some(god)
+                    && *h != self.board.temple_of(god)
+                    && !God::ALL.iter().any(|&o| self.board.start_of(o) == *h)
+            })
+            .map(|(h, _)| h)
+            .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
+    }
+
+    /// The region `player` is dissolving best (another god's): its god, hexes
+    /// in the mist, and all that can go.
+    pub fn dissolving(&self, player: PlayerId) -> (God, usize, usize) {
+        let own = self.champions[player.0 as usize].god;
+        God::ALL
+            .into_iter()
+            .filter(|&g| g != own)
+            .map(|g| {
+                let mut gone = 0;
+                let mut all = 0;
+                for (h, t) in self.board.tiles() {
+                    let home = God::ALL.iter().any(|&o| self.board.start_of(o) == h);
+                    if t.region != Some(g) || h == self.board.temple_of(g) || home {
+                        continue;
+                    }
+                    all += 1;
+                    if !t.terrain.is_land() {
+                        gone += 1;
+                    }
+                }
+                (g, gone, all)
+            })
+            .max_by_key(|&(g, gone, all)| {
+                (gone * 1000 / all.max(1), gone, std::cmp::Reverse(g.index()))
+            })
+            .expect("four other gods")
+    }
+
+    fn deed_holds(&self, player: PlayerId) -> bool {
+        self.deed(player)
+            .is_some_and(|d| self.checks(player, d).iter().all(Check::met))
+    }
+
+    /// Dusk: the Crown's streak.
+    pub(super) fn count_crown(&mut self) {
         for p in self.players().collect::<Vec<_>>() {
             let crowned = self.dominant == Some(p);
-            let centred = {
-                let checks = self.checks(p, Condition::MiddlePath { dawns: 0 });
-                checks
-                    .iter()
-                    .filter(|c| c.kind != CheckKind::Streak)
-                    .all(Check::met)
-            };
             let progress = &mut self.progress[p.0 as usize];
             progress.crown_streak = if crowned {
-                progress.crown_streak + 1
+                progress.crown_streak.saturating_add(1)
             } else {
                 0
             };
-            if !crowned {
-                progress.refusals = 0;
+        }
+    }
+
+    /// Dusk: a World Tree that stood whole counts another dusk.
+    fn count_trees(&mut self) {
+        for p in self.players().collect::<Vec<_>>() {
+            if self.deed(p) != Some(GreatDeed::WorldTree) {
+                continue;
             }
-            progress.middle_streak = if centred {
-                progress.middle_streak + 1
-            } else {
-                0
-            };
+            let standing = self
+                .checks(p, GreatDeed::WorldTree)
+                .iter()
+                .filter(|c| c.kind != CheckKind::Dusks)
+                .all(Check::met);
+            let dusks = &mut self.progress[p.0 as usize].tree_dusks;
+            *dusks = if standing { dusks.saturating_add(1) } else { 0 };
         }
     }
 
-    pub(super) fn count_overthrow(&mut self, winner: PlayerId, loser: PlayerId) {
-        if self.dominant == Some(loser) {
-            self.progress[winner.0 as usize].overthrows += 1;
-        }
-    }
-
-    /// Ends the match if someone meets a condition. Checked in initiative
-    /// order, so simultaneous wins go to whoever acts first.
+    /// After every intent: a deed that holds begins its eve, one that no
+    /// longer holds loses it.
     pub(super) fn check_victory(&mut self, events: &mut Vec<Event>) {
         if self.winner.is_some() {
             return;
         }
-        let order = self.order.clone();
-        for p in order {
-            let mine = self
-                .open
-                .iter()
-                .copied()
-                .map(|c| (c, false))
-                .chain(self.secret(p).map(|c| (c, true)))
-                .find(|&(c, secret)| self.checks_as(p, c, secret).iter().all(Check::met))
-                .map(|(c, _)| c);
-            if let Some(condition) = mine {
-                self.winner = Some((p, condition));
-                events.push(Event::Victory {
-                    player: p,
-                    condition,
-                });
+        for p in self.order.clone() {
+            let Some(deed) = self.deed(p) else {
+                continue;
+            };
+            let holds = self.deed_holds(p);
+            let eve = &mut self.eves[p.0 as usize];
+            match (holds, *eve) {
+                (true, None) => {
+                    *eve = Some(self.dusks);
+                    events.push(Event::DeedEve { player: p, deed });
+                }
+                (false, Some(_)) => {
+                    *eve = None;
+                    events.push(Event::EveBroken { player: p, deed });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Dusk falls: trees count their dusk, and a deed whose eve began before
+    /// this dusk and still holds is done. Initiative settles a tie.
+    pub(super) fn dusk_of_deeds(&mut self, events: &mut Vec<Event>) {
+        self.dusks += 1;
+        self.count_trees();
+        self.check_victory(events);
+        for p in self.order.clone() {
+            let (Some(deed), Some(since)) = (self.deed(p), self.eves[p.0 as usize]) else {
+                continue;
+            };
+            if since < self.dusks && self.deed_holds(p) {
+                self.winner = Some((p, deed));
+                events.push(Event::Victory { player: p, deed });
                 return;
             }
         }

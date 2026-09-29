@@ -67,6 +67,19 @@ impl Terrain {
 pub struct Corpse {
     /// Rounds since it appeared.
     pub age: u8,
+    /// A champion fell here: what grows of it is theirs to tell (a World
+    /// Tree, §21.7).
+    pub hero: bool,
+}
+
+impl Corpse {
+    /// A body just laid, not a champion's.
+    pub const fn fresh() -> Corpse {
+        Corpse {
+            age: 0,
+            hero: false,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

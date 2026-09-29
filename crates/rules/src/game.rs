@@ -161,6 +161,11 @@ pub enum Intent {
     },
     /// On your turn on the ruins of a settlement: build it again (§20.4).
     Rebuild,
+    /// At the start: pick the Great Deed of the match from those offered
+    /// (§21.7).
+    ChooseDeed {
+        deed: victory::GreatDeed,
+    },
     /// Once a turn: let these cards go and draw one fewer, as many at a
     /// temple (§21.2).
     Cycle {
@@ -569,7 +574,7 @@ pub enum Event {
         player: PlayerId,
         price: wish::Price,
     },
-    /// A wish told `player` the secret condition of `about` (§7.3).
+    /// A wish told `player` what `about` sealed for tonight (§7.3).
     SecretLearned {
         player: PlayerId,
         about: PlayerId,
@@ -802,7 +807,23 @@ pub enum Event {
     /// The match is over.
     Victory {
         player: PlayerId,
-        condition: victory::Condition,
+        deed: victory::GreatDeed,
+    },
+    /// `player` picked the deed of their match (§21.7).
+    DeedChosen {
+        player: PlayerId,
+        deed: victory::GreatDeed,
+    },
+    /// Every step of `player`'s deed holds: done at the next dusk, if it
+    /// still does.
+    DeedEve {
+        player: PlayerId,
+        deed: victory::GreatDeed,
+    },
+    /// The eve is broken: a step no longer holds.
+    EveBroken {
+        player: PlayerId,
+        deed: victory::GreatDeed,
     },
 
     // Hidden information below (draws, traps, choices): a table sends each
@@ -1012,6 +1033,8 @@ pub enum RuleError {
     NotRuins,
     /// The hand goes through once a turn, and only cards in it.
     NoCycle,
+    /// Not a deed this player was offered, or one is chosen already.
+    InvalidDeed,
 }
 
 impl std::fmt::Display for RuleError {
@@ -1020,6 +1043,7 @@ impl std::fmt::Display for RuleError {
             RuleError::NotYourTurn => write!(f, "not your turn"),
             RuleError::NotAtTemple => write!(f, "not at a temple"),
             RuleError::NotRuins => write!(f, "not the ruins of a settlement"),
+            RuleError::InvalidDeed => write!(f, "not a deed to choose"),
             RuleError::NoCycle => write!(f, "the hand went through already or holds no such card"),
             RuleError::NothingWorn => write!(f, "nothing worn there"),
             RuleError::UnknownPlayer => write!(f, "unknown player"),
@@ -1093,12 +1117,16 @@ pub struct Game {
     /// Per player, what they did since the last dusk.
     deeds: Vec<Vec<style::Deed>>,
     guard: Option<guard::Guard>,
-    /// Victory conditions (§10): open to all, and one secret per player.
-    open: Vec<victory::Condition>,
-    /// `None` where a view hides someone else's secret (`view_for`).
-    secrets: Vec<Option<victory::Condition>>,
+    /// Great Deeds (§21.7): those offered to each player, the one chosen,
+    /// the dusk count an eve began at, dusks so far.
+    offers: Vec<Vec<victory::GreatDeed>>,
+    chosen: Vec<Option<victory::GreatDeed>>,
+    eves: Vec<Option<u32>>,
+    dusks: u32,
+    /// Groves grown from champions' bodies (a World Tree).
+    hero_groves: std::collections::BTreeSet<(i32, i32)>,
     progress: Vec<victory::Progress>,
-    winner: Option<(PlayerId, victory::Condition)>,
+    winner: Option<(PlayerId, victory::GreatDeed)>,
     /// Per player, tonight's wish (§21.4).
     seals: Vec<dusk::Seal>,
     /// Dusk under way, waiting on wishes or tributes.
@@ -1123,7 +1151,7 @@ pub struct Game {
     pending_story: Vec<(PlayerId, style::Deed)>,
     /// Changes on single copies of cards (§7.3): blessed, blighted, forged.
     mods: BTreeMap<CardId, CardMod>,
-    /// Secrets learned through a wish: (who knows, whose secret).
+    /// Sealed wishes learned through a wish, until dusk: (who knows, whose).
     known: Vec<(PlayerId, PlayerId)>,
     /// Truces a wish made, until the next dusk.
     truces: Vec<wish::Truce>,
@@ -1182,7 +1210,7 @@ impl Game {
         // Gods start light or mid, never dark (§14).
         let stages = God::ALL.map(|_| rng.below(2) as u8);
         let taste = style::Taste::draw(&mut rng);
-        let (open, secrets) = victory::draw(&mut rng, setup.champions.len());
+        let offers = victory::deal(&mut rng, setup.champions.len());
         // Only cards of mechanics the world has (§21.2); a new world, fewer.
         let slice = match setup.mode {
             Mode::Full => cards::match_slice(&mut rng),
@@ -1244,8 +1272,11 @@ impl Game {
             taste,
             deeds: vec![Vec::new(); champions_len],
             guard: None,
-            open,
-            secrets: secrets.into_iter().map(Some).collect(),
+            offers,
+            chosen: vec![None; champions_len],
+            eves: vec![None; champions_len],
+            dusks: 0,
+            hero_groves: Default::default(),
             progress: vec![victory::Progress::default(); champions_len],
             winner: None,
             seals: vec![dusk::Seal::Open; champions_len],
@@ -1409,10 +1440,16 @@ impl Game {
     /// answer, and those free to take their turn.
     pub fn awaiting(&self) -> Vec<PlayerId> {
         let wishing = self.wishing();
+        let choosing = self.choosing();
         self.order
             .iter()
             .copied()
-            .filter(|&p| self.answering(p).is_some() || self.free_to_act(p) || wishing.contains(&p))
+            .filter(|&p| {
+                self.answering(p).is_some()
+                    || self.free_to_act(p)
+                    || wishing.contains(&p)
+                    || choosing.contains(&p)
+            })
             .collect()
     }
 
@@ -1722,6 +1759,8 @@ impl Game {
             self.seal_wish(player, dusk::Seal::Wish(Some(sealed)), &mut events)?;
         } else if intent == Intent::RefuseWish {
             self.seal_wish(player, dusk::Seal::Refused, &mut events)?;
+        } else if let Intent::ChooseDeed { deed } = intent {
+            self.choose_deed(player, deed, &mut events)?;
         } else if let Some(i) = self.answering(player) {
             self.apply_in_window(i, player, intent, &mut events)?;
         } else {
@@ -1931,6 +1970,11 @@ impl Game {
                     return;
                 }
                 events.push(Event::Dusk { round: self.round });
+                // A deed on its eve is done now, before anything else (§21.7).
+                self.dusk_of_deeds(events);
+                if self.winner.is_some() {
+                    return;
+                }
                 self.settle_the_day(events);
                 self.judge_the_day(events);
                 self.begin_dusk(events);
@@ -2245,6 +2289,7 @@ impl Game {
                 return Err(RuleError::WindowOpen);
             }
             Intent::Wish { .. } | Intent::RefuseWish => return Err(RuleError::InvalidWish),
+            Intent::ChooseDeed { .. } => return Err(RuleError::InvalidDeed),
         };
         let window = &mut self.windows[i];
         window.choices.insert(player, choice);
@@ -2650,8 +2695,20 @@ impl Game {
             }
             Effect::BodySeed => {
                 let hex = self.hex_of(caster);
+                let hero = self
+                    .board
+                    .tile(hex)
+                    .is_some_and(|t| t.corpse.is_some_and(|c| c.hero));
                 self.take_corpse(caster, events);
                 self.grow(hex, events);
+                if hero
+                    && self
+                        .board
+                        .tile(hex)
+                        .is_some_and(|t| t.terrain == Terrain::Grove)
+                {
+                    self.hero_groves.insert((hex.x(), hex.y()));
+                }
                 self.mend(caster, n(2), def.element, events);
             }
             Effect::Feast => self.feast(caster, n(1), events),
@@ -2805,15 +2862,14 @@ impl Game {
     /// Zero health: the champion leaves a body and wakes at home, whole.
     fn fall(&mut self, player: PlayerId, events: &mut Vec<Event>) {
         self.note_bet(player, wish::Bet::Fall);
-        // The Wager wants the Dominant standing through all its refusals.
-        self.progress[player.0 as usize].refusals = 0;
         let at = self.hex_of(player);
         let bodies = self.has(Feature::Bodies);
         if bodies
             && let Some(tile) = self.board.tile_mut(at)
             && tile.corpse.is_none()
         {
-            tile.corpse = Some(Corpse { age: 0 });
+            // A champion's body: what grows of it may be a World Tree.
+            tile.corpse = Some(Corpse { age: 0, hero: true });
         }
         let home = self.board.start_of(self.champions[player.0 as usize].god);
         let respawn = (0..=self.board.extent() * 2)
@@ -2991,11 +3047,14 @@ impl Game {
             let tile = self.board.tile_mut(hex).expect("corpse on the board");
             let age = corpse.age + 1;
             if age < ripe {
-                tile.corpse = Some(Corpse { age });
+                tile.corpse = Some(Corpse { age, ..corpse });
             } else if groves && tile.terrain.can_grow_grove() {
                 tile.corpse = None;
                 tile.terrain = Terrain::Grove;
                 events.push(Event::GroveGrew { hex });
+                if corpse.hero {
+                    self.hero_groves.insert((hex.x(), hex.y()));
+                }
                 // An untouched body is Bhava's offering (§3).
                 self.offer(None, God::Bhava, 1, events);
             } else {
@@ -3040,7 +3099,7 @@ impl Game {
             .map(|(h, _)| h)
             .collect();
         if let Some(&hex) = self.rng.pick(&free) {
-            self.board.tile_mut(hex).expect("free hex").corpse = Some(Corpse { age: 0 });
+            self.board.tile_mut(hex).expect("free hex").corpse = Some(Corpse::fresh());
             events.push(Event::CorpseAppeared { hex });
         }
     }
@@ -3086,7 +3145,7 @@ pub use stealth::RevealReason;
 pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
 pub use trial::{Boon, TRIAL_ROUNDS, TRIALS_ON_BOARD, Trial, trial_face};
-pub use victory::{Check, CheckKind, Condition, OPEN_COUNT, REFUSAL_THREAT, SECRET_FROM_ROUND};
+pub use victory::{Check, CheckKind, DISSOLVED, GreatDeed, ISLAND, OFFERED, REFUSAL_THREAT};
 pub use wish::{
     Act, Bet, FORESEE, FORGED_LINE, FORGED_NAME, MAX_ACTS, Price, Said, TRIBUTE_THREAT, Truce,
     WAGER_STAKE, Wager, Wish, WishKind, forge_template, god_terrain, likes_a_stake, taste_for,

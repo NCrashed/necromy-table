@@ -85,7 +85,7 @@ fn spawn(mut commands: Commands) {
     ));
 }
 
-fn god_color(god: God) -> Color {
+pub(crate) fn god_color(god: God) -> Color {
     let [r, g, b] = god.accent();
     Color::srgb_u8(r, g, b)
 }

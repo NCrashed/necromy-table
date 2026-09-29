@@ -118,6 +118,8 @@ impl Game {
     /// Once everyone has sealed: the gods answer, least Style first, the
     /// Crown last (§21.4).
     pub(super) fn answer_wishes(&mut self, events: &mut Vec<Event>) {
+        // What a wish told of a rival's wish lasts from dusk to dusk.
+        self.known.clear();
         let mut order: Vec<PlayerId> = self.order.clone();
         order.sort_by_key(|&p| (self.dominant == Some(p), self.style(p)));
         for p in order {
@@ -167,10 +169,8 @@ impl Game {
                 }
                 Seal::Refused | Seal::Open | Seal::Wish(None) => {
                     events.push(Event::WishRefused { player: p });
-                    // The Crown turning down what the table pays is loud
-                    // (§10): a refusal counts for the Wager.
+                    // The Crown turning down what the table pays is loud.
                     if self.dominant == Some(p) {
-                        self.progress[p.0 as usize].refusals += 1;
                         self.add_threat(p, REFUSAL_THREAT, events);
                     }
                 }
@@ -192,7 +192,7 @@ impl Game {
         };
         self.dominant = crowned;
         events.push(Event::Crowned { player: crowned });
-        self.count_dawn();
+        self.count_crown();
         if let Some(d) = crowned {
             // The Crown draws the guard's eye (§6.1).
             self.add_threat(d, 1, events);

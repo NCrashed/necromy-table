@@ -52,7 +52,7 @@ pub enum WishKind {
     Fortune,
     /// "Give me victory": crude.
     Doom,
-    /// "Let me know what they want": a rival's secret condition.
+    /// "Let me know what they want": what a rival sealed for tonight.
     Secret,
     /// "Show me what they hold": a rival's hand, once.
     Hand,
@@ -85,6 +85,9 @@ pub enum WishKind {
     Veil,
     /// "Lift the mist": mist near the asker gives the land back.
     Unveil,
+    /// "Cut my land off": the mist two hexes round the asker, the side
+    /// towards the Table first.
+    Cut,
     /// "Let people settle here": a settlement near the asker.
     Settle,
     /// "Raise the stones": a ring of standing stones near the asker.
@@ -94,7 +97,7 @@ pub enum WishKind {
 }
 
 impl WishKind {
-    pub const ALL: [WishKind; 26] = [
+    pub const ALL: [WishKind; 27] = [
         WishKind::Strength,
         WishKind::Weaken,
         WishKind::Land,
@@ -118,6 +121,7 @@ impl WishKind {
         WishKind::Rise,
         WishKind::Veil,
         WishKind::Unveil,
+        WishKind::Cut,
         WishKind::Settle,
         WishKind::Stones,
         WishKind::Awaken,
@@ -156,7 +160,7 @@ pub enum Act {
     Peace,
     Fortune,
     Doom,
-    /// Learn the rival's secret condition, for good.
+    /// Learn what the rival sealed for tonight (§7.3).
     Secret {
         target: PlayerId,
     },
@@ -214,6 +218,9 @@ pub enum Act {
     },
     /// The mist nearest the asker lifts.
     Unveil,
+    /// The ring two hexes round the asker goes into the mist, the side
+    /// towards the Table first: their ground cut off from the world.
+    Cut,
     /// A settlement on free land near the asker.
     Settle,
     /// Standing stones on free land near the asker.
@@ -251,6 +258,7 @@ impl Act {
             Act::Rise { .. } => WishKind::Rise,
             Act::Veil { .. } => WishKind::Veil,
             Act::Unveil => WishKind::Unveil,
+            Act::Cut => WishKind::Cut,
             Act::Settle => WishKind::Settle,
             Act::Stones => WishKind::Stones,
             Act::Awaken { .. } => WishKind::Awaken,
@@ -278,7 +286,7 @@ impl Act {
     pub const fn cost(self) -> u8 {
         match self {
             Act::Awaken { .. } => AWAKEN_COST,
-            Act::Forge | Act::Swap { .. } | Act::Tribute | Act::Plant | Act::Settle => 2,
+            Act::Forge | Act::Swap { .. } | Act::Tribute | Act::Plant | Act::Settle | Act::Cut => 2,
             _ => 1,
         }
     }
@@ -290,6 +298,7 @@ impl Act {
             Act::Rise { .. }
                 | Act::Veil { .. }
                 | Act::Unveil
+                | Act::Cut
                 | Act::Settle
                 | Act::Stones
                 | Act::Awaken { .. }
@@ -321,6 +330,7 @@ impl Act {
             WishKind::Rise => Act::Rise { terrain: None },
             WishKind::Veil => Act::Veil { target },
             WishKind::Unveil => Act::Unveil,
+            WishKind::Cut => Act::Cut,
             WishKind::Settle => Act::Settle,
             WishKind::Stones => Act::Stones,
             WishKind::Awaken => Act::Awaken { feature: None },
@@ -466,10 +476,10 @@ pub const fn taste_for(god: God, kind: WishKind) -> i8 {
         // Order loves land, judgement, a contract and the registry of
         // secrets; the dead are paperwork, a swap is disorder.
         (God::Ahamar, Land | Weaken | Truce | Secret | Wager | Foresee | Settle | Stones) => 1,
-        (God::Ahamar, Dead | Swap | Veil) => -1,
+        (God::Ahamar, Dead | Swap | Veil | Cut) => -1,
         // Dissolution loves letting go, loosening a grip, seeing through,
         // one thing becoming another; not strength, not a new thing to hold.
-        (God::Maya, Peace | Weaken | Swap | Hand | Rot | Veil | Unveil) => 1,
+        (God::Maya, Peace | Weaken | Swap | Hand | Rot | Veil | Unveil | Cut) => 1,
         (God::Maya, Strength | Forge | Tribute | Settle) => -1,
         // Renunciation loves quiet, the dead at rest and the price a desire
         // exacts; not strength, not blessing what is held.
@@ -632,7 +642,6 @@ impl Game {
         for act in &granted {
             self.first(player, super::Novelty::Wished(act.kind()), events);
         }
-        self.progress[player.0 as usize].refusals = 0;
         events.push(Event::WishGranted {
             player,
             god,
@@ -737,6 +746,7 @@ impl Game {
             Act::Rise { .. }
             | Act::Veil { .. }
             | Act::Unveil
+            | Act::Cut
             | Act::Settle
             | Act::Stones
             | Act::Awaken { .. } => self.create(player, god, act, power, events),
@@ -753,7 +763,7 @@ impl Game {
                     .collect();
                 for hex in free {
                     if let Some(tile) = self.board.tile_mut(hex) {
-                        tile.corpse = Some(crate::board::Corpse { age: 0 });
+                        tile.corpse = Some(crate::board::Corpse::fresh());
                     }
                     events.push(Event::CorpseAppeared { hex });
                 }
@@ -1091,8 +1101,8 @@ impl Game {
         &self.truces
     }
 
-    /// Whether `viewer` has learned `player`'s secret through a wish.
-    pub fn knows_secret(&self, viewer: PlayerId, player: PlayerId) -> bool {
+    /// Whether `viewer` has learned what `player` sealed for tonight.
+    pub fn knows_seal(&self, viewer: PlayerId, player: PlayerId) -> bool {
         self.known.contains(&(viewer, player))
     }
 }

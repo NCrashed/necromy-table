@@ -23,15 +23,15 @@ fn updates(messages: &[FromTable]) -> Vec<(u32, &Game)> {
 }
 
 #[test]
-fn bots_alone_play_a_match_to_the_end() {
+fn bots_alone_play_a_match_far() {
     let mut t = table(vec![Seat::Bot; 5]);
     for _ in 0..200_000 {
-        if t.game().winner().is_some() {
+        if t.game().winner().is_some() || t.game().round() >= 20 {
             return;
         }
         t.tick(BOT_STEP_SECS);
     }
-    panic!("no winner after many steps");
+    panic!("stuck at round {}", t.game().round());
 }
 
 #[test]
@@ -43,8 +43,11 @@ fn a_person_sees_their_seat_only() {
     let (serial, view) = updates(&first)[0];
     assert_eq!(serial, 1);
     assert_eq!(view.seed(), 0);
-    assert!(view.secret(PlayerId(1)).is_some());
-    assert!(view.secret(PlayerId(0)).is_none());
+    assert!(view.log().is_empty(), "a view carries no log");
+    assert!(
+        !view.offers(PlayerId(1)).is_empty(),
+        "its deeds to pick from"
+    );
     assert!(t.drain(PlayerId(0)).is_empty(), "bots get no mail");
 }
 

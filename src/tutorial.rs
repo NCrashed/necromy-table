@@ -15,7 +15,7 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use necromy_rules::board::Board;
 use necromy_rules::{
-    Condition, Event, Game, God, Hex, Intent, PlayerId, Scenario, SceneSeat, Target, Terrain,
+    Event, Game, God, GreatDeed, Hex, Intent, PlayerId, Scenario, SceneSeat, Target, Terrain,
 };
 
 use crate::hud::{INK, UiFont};
@@ -847,75 +847,101 @@ fn shadow_steps() -> Vec<Step> {
 
 // ---- Chapter 9: winning ----
 
-/// Two settlements in two different lands, one step and then two more from
-/// the start.
+/// The island: where the champion starts, the settlement in its middle (a
+/// wish cuts the land off round where one stands), and the one hex left
+/// of the ring round it, which ties it to the world.
 fn win_spots() -> (Hex, Hex, Hex) {
-    let board = Board::plain(3);
-    let start = Hex::new(0, 3);
-    let region = |h: Hex| board.tile(h).and_then(|t| t.region);
-    for first in start.all_neighbors() {
-        if !board.contains(first) || region(first).is_none() {
-            continue;
-        }
-        let second = Hex::ZERO.range(3).find(|&h| {
-            h != start
-                && region(h).is_some()
-                && region(h) != region(first)
-                && (1..=2).contains(&h.unsigned_distance_to(first))
-        });
-        if let Some(second) = second {
-            return (start, first, second);
-        }
-    }
-    unreachable!("two lands meet near every rim hex")
+    let town = Hex::new(0, 3);
+    let start = town + Hex::new(-1, 0);
+    // The ring two out, nearest the Table first: the bridge is its first.
+    let mut ring: Vec<Hex> = town.ring(2).filter(|h| h.ulength() <= 4).collect();
+    ring.sort_by_key(|h| (h.ulength(), h.x(), h.y()));
+    (start, town, ring[0])
 }
 
 fn win_scene() -> Scenario {
-    let (start, first, second) = win_spots();
+    let (start, town, bridge) = win_spots();
     let mut s = Scenario::new(
-        3,
-        vec![SceneSeat::new(God::Trishna, start), seat(God::Zaga, -3, 0)],
+        4,
+        vec![SceneSeat::new(God::Trishna, start), seat(God::Zaga, -4, 1)],
     );
-    s.terrain = vec![
-        (first, Terrain::Settlement),
-        (second, Terrain::Settlement),
-        (Hex::new(-1, 1), Terrain::Forest),
-    ];
-    s.open = vec![Condition::Registry { regions: 2 }];
+    // The ring round the island is mist already, but for the bridge.
+    s.terrain = town
+        .ring(2)
+        .filter(|&h| h != bridge && h.ulength() <= 4)
+        .map(|h| (h, Terrain::Mist))
+        .chain([(town, Terrain::Settlement)])
+        .collect();
+    s.deed = Some(GreatDeed::Island);
+    s.world.dawn = true;
     s
 }
 
 fn win_steps() -> Vec<Step> {
-    let (_, first, second) = win_spots();
+    let (_, town, _) = win_spots();
     vec![
         Step::read(
-            "Справа — условия победы. В партии их три открытых, общих для всех, и \
-             одно тайное, только твоё. Кто первым выполнит любое своё — побеждает. \
-             Наведи на условие — оно объяснит себя.",
+            "Справа — Великие деяния. В начале партии каждый выбирает одно из трёх; \
+             деяния видят все. Кто первым свершит своё — побеждает. Наведи на \
+             деяние — оно объяснит себя.",
         ),
         Step::read(
-            "Здесь одно условие: «Реестр» — держать поселения в двух краях. Край — \
-             земля одного бога; края видны по цвету клеток.",
+            "Твоё деяние — «Остров»: земля в семь клеток, отрезанная мглой от Стола, \
+             на ней твоё поселение, и ты на ней. Мгла уже почти окружила тебя: \
+             осталась одна перемычка.",
         ),
         Step::act(
-            "Займи первое поселение.",
-            move |e, _| matches!(e, Event::Claimed { player, hex, .. } if *player == ME && *hex == first),
-            is_move_to(first),
+            "Займи поселение на острове.",
+            move |e, _| matches!(e, Event::Claimed { player, hex, .. } if *player == ME && *hex == town),
+            is_move_to(town),
             "Войди в отмеченное поселение.",
-            move |_, _| Some(Intent::Move { to: first }),
+            move |_, _| Some(Intent::Move { to: town }),
         )
-        .hexes(&[first]),
+        .hexes(&[town]),
         Step::act(
-            "Теперь второе — в другом краю. Кликни по нему, путь проложится сам.",
+            "Теперь желание. Майя любит мглу: попроси её «Отрежь мою землю от мира».",
+            |e, _| matches!(e, Event::WishSealed { player } if *player == ME),
+            |_, _, i| matches!(i, Intent::Wish { .. }),
+            "Нажми «Загадать желание», выбери Майю и «Отрежь мою землю от мира».",
+            |_, _| {
+                Some(Intent::Wish {
+                    god: God::Maya,
+                    wish: necromy_rules::Wish::one(necromy_rules::Act::Cut),
+                    said: None,
+                })
+            },
+        ),
+        Step::act(
+            "Закончи ход: на закате Майя ответит.",
+            |e, _| matches!(e, Event::DeedEve { player, .. } if *player == ME),
+            |_, _, i| matches!(i, Intent::EndTurn | Intent::Pass | Intent::RefuseWish),
+            "Закончи ход: пробел или кнопка наверху.",
+            |g, p| {
+                Some(if g.wishing().contains(&p) {
+                    Intent::RefuseWish
+                } else {
+                    Intent::EndTurn
+                })
+            },
+        ),
+        Step::act(
+            "Канун! Все шаги выполнены: деяние свершится на следующем закате, если \
+             его не сорвут. В настоящей партии у соперников будет день, чтобы \
+             помешать. Доиграй до заката.",
             |e, _| matches!(e, Event::Victory { player, .. } if *player == ME),
-            |_, _, i| matches!(i, Intent::Move { .. } | Intent::Pass),
-            "Иди ко второму поселению.",
-            move |g, p| step_towards(g, p, second),
-        )
-        .hexes(&[second]),
+            |_, _, i| matches!(i, Intent::EndTurn | Intent::Pass | Intent::RefuseWish),
+            "Закончи ход, и ещё раз, до заката.",
+            |g, p| {
+                Some(if g.wishing().contains(&p) {
+                    Intent::RefuseWish
+                } else {
+                    Intent::EndTurn
+                })
+            },
+        ),
         Step::read(
-            "Победа! В настоящей партии условия труднее, а тайное засчитывается только \
-             с 8-го раунда — это запасной путь. Обучение пройдено: садись за стол!",
+            "Победа! В настоящей партии деяния просят больше, и нужное для них \
+             придётся принести в мир самому. Обучение пройдено: садись за стол!",
         ),
     ]
 }

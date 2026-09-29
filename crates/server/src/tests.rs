@@ -105,13 +105,7 @@ fn friends_meet_by_code_and_play_against_bots() {
         for (c, seat) in [(&anna, anna_seat), (&boris, boris_seat)] {
             while let Some(m) = c.poll() {
                 if let ServerMsg::Table(FromTable::Update { serial, view, .. }) = m {
-                    assert!(view.secret(seat).is_some());
-                    let rival = if seat == anna_seat {
-                        boris_seat
-                    } else {
-                        anna_seat
-                    };
-                    assert!(view.secret(rival).is_none());
+                    assert!(view.log().is_empty(), "a view carries no log");
                     round = view.round();
                     c.send(ClientMsg::Table(ToTable::Shown(serial)));
                     if view.awaiting().contains(&seat) {
@@ -243,7 +237,7 @@ fn a_lost_player_sits_back_down_by_ticket() {
         ServerMsg::Table(FromTable::Update { view, .. }) => Some(view),
         _ => None,
     });
-    assert!(view.secret(seat).is_some());
+    assert!(!view.offers(seat).is_empty());
 }
 
 #[test]

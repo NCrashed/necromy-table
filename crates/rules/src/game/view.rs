@@ -7,7 +7,7 @@
 //!
 //! Hidden: the seed and the generator (with them the rest of the match could
 //! be predicted), the deck's order, rivals' hands and face-down traps, rivals'
-//! secret conditions, rivals' choices in an open window, where hidden rivals
+//! sealed wishes, rivals' choices in an open window, where hidden rivals
 //! are (§11.6: they stand where last seen), and the log. Hidden
 //! cards keep their ids, so hands keep their size, but their definitions are
 //! shuffled among themselves with the server's salt: a client learns what is
@@ -64,13 +64,6 @@ impl Game {
                 c.hex = c.seen_at;
             }
         }
-        // Rivals' secrets stay hidden, unless a wish told this viewer (§7.3).
-        for (i, secret) in v.secrets.iter_mut().enumerate() {
-            let p = PlayerId(i as u8);
-            if !mine(p) && !viewer.is_some_and(|w| self.knows_secret(w, p)) {
-                *secret = None;
-            }
-        }
         v.known.retain(|&(who, _)| mine(who));
         // Land in Maya's fog is mist to all but the one it rose for (§21.9).
         for (&(x, y), &owner) in &self.fog {
@@ -83,7 +76,9 @@ impl Game {
         v.fog.retain(|_, owner| viewer == Some(*owner));
         // Rivals' sealed wishes: that they wished, not what (§21.4).
         for (i, seal) in v.seals.iter_mut().enumerate() {
-            if !mine(PlayerId(i as u8)) && matches!(seal, super::Seal::Wish(Some(_))) {
+            let p = PlayerId(i as u8);
+            let told = viewer.is_some_and(|w| self.knows_seal(w, p));
+            if !mine(p) && !told && matches!(seal, super::Seal::Wish(Some(_))) {
                 *seal = super::Seal::Wish(None);
             }
         }
@@ -206,8 +201,6 @@ mod tests {
         let v = g.view_for(Some(me), 42);
         assert_eq!(v.seed(), 0);
         assert!(v.log().is_empty());
-        assert_eq!(v.secret(me), g.secret(me));
-        assert!(v.secret(PlayerId(0)).is_none());
         let defs =
             |g: &Game, p: PlayerId| g.hand(p).iter().map(|&c| g.def_id(c)).collect::<Vec<_>>();
         assert_eq!(defs(&v, me), defs(&g, me));
@@ -264,7 +257,23 @@ mod tests {
 
     #[test]
     fn rivals_choices_in_a_window_stay_hidden() {
-        let mut g = game();
+        for seed in 0..10 {
+            if window_with_a_play_stays_hidden(seed) {
+                return;
+            }
+        }
+        panic!("no window with a played card in ten matches");
+    }
+
+    /// Plays seed `seed` until a window holds a played card, and checks a
+    /// rival's view of it; false if none came.
+    fn window_with_a_play_stays_hidden(seed: u64) -> bool {
+        let mut g = Game::new(Setup {
+            seed,
+            champions: God::ALL.to_vec(),
+            mode: Default::default(),
+        })
+        .0;
         for _ in 0..2000 {
             if let Some(w) = g.windows().first()
                 && w.choices.values().any(|c| *c != Choice::Pass)
@@ -284,7 +293,7 @@ mod tests {
                         .iter()
                         .all(|(p, c)| *p == viewer || *c == Choice::Pass)
                 );
-                return;
+                return true;
             }
             if g.winner().is_some() {
                 break;
@@ -293,6 +302,6 @@ mod tests {
             let i = bot::choose(&g, p);
             g.apply(p, i).unwrap();
         }
-        panic!("no window with a played card in 2000 steps");
+        false
     }
 }

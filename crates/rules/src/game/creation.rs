@@ -42,13 +42,25 @@ impl Game {
     }
 
     /// The land on `hex` goes into the mist, with whatever lay on it: a
-    /// body, traps, a trial, items, a claim, the militia at home there.
-    /// Never where someone stands, a mob walks or a temple is.
+    /// body, traps, a trial, items, a claim, the militia there, the undead
+    /// or a beast it swallows. Never where a champion stands, the royal
+    /// guard marches or a temple is.
     pub(super) fn veil(&mut self, hex: Hex, events: &mut Vec<Event>) -> bool {
-        if self.champion_at(hex).is_some() || self.mob_at(hex) || !self.board.veil(hex) {
+        if self.champion_at(hex).is_some() || self.guard_at(hex) || !self.board.veil(hex) {
             return false;
         }
         let key = (hex.x(), hex.y());
+        let swallowed: Vec<u32> = self
+            .mobs
+            .iter()
+            .filter(|m| m.hex == hex)
+            .map(|m| m.id)
+            .collect();
+        for id in swallowed {
+            self.mobs.retain(|m| m.id != id);
+            events.push(Event::MobLeft { id });
+        }
+        self.militia.retain(|_, m| m.at != Some(hex));
         self.traps.retain(|t| t.hex != hex);
         self.trials.retain(|t| t.hex != hex);
         self.ground.retain(|(h, _)| *h != hex);
@@ -225,7 +237,7 @@ impl Game {
                         .free_land_near(near, 1, |_, t| t.corpse.is_none() && !t.terrain.crowded());
                     if let Some(hex) = spot {
                         self.board.tile_mut(hex).expect("found on the board").corpse =
-                            Some(Corpse { age: 0 });
+                            Some(Corpse::fresh());
                         events.push(Event::CorpseAppeared { hex });
                     }
                 }
@@ -355,14 +367,38 @@ impl Game {
         raised
     }
 
-    /// Land around `centre` goes into the mist: `count` hexes, nearest first,
-    /// never where someone stands.
-    pub(super) fn veil_around(&mut self, centre: Hex, count: usize, events: &mut Vec<Event>) {
-        let spots: Vec<Hex> = (1..=2)
+    /// Land around `centre` goes into the mist: `count` hexes, nearest first
+    /// from ring `from` out, never where someone stands. Round a rival it
+    /// closes in (from 1); round the asker it keeps their ground and cuts
+    /// it off (from 2).
+    pub(super) fn veil_around(
+        &mut self,
+        centre: Hex,
+        from: u32,
+        count: usize,
+        events: &mut Vec<Event>,
+    ) {
+        let spots: Vec<Hex> = (from..=from + 1)
             .flat_map(|r| centre.ring(r).collect::<Vec<_>>())
             .collect();
         let mut done = 0;
         for hex in spots {
+            if done == count {
+                break;
+            }
+            if self.veil(hex, events) {
+                done += 1;
+            }
+        }
+    }
+
+    /// The ring two hexes round `centre` goes into the mist, `count` hexes of
+    /// it, those nearest the Table first: the ground within is cut off.
+    pub(super) fn cut_off(&mut self, centre: Hex, count: usize, events: &mut Vec<Event>) {
+        let mut ring: Vec<Hex> = centre.ring(2).collect();
+        ring.sort_by_key(|h| (h.ulength(), h.x(), h.y()));
+        let mut done = 0;
+        for hex in ring {
             if done == count {
                 break;
             }
@@ -453,9 +489,10 @@ impl Game {
             }
             Act::Veil { target } => {
                 let centre = target.map_or(me, |t| self.hex_of(t));
-                self.veil_around(centre, usize::from(power), events);
+                self.veil_around(centre, 1, usize::from(power), events);
             }
             Act::Unveil => self.unveil_near(me, usize::from(power), events),
+            Act::Cut => self.cut_off(me, usize::from(power) + 2, events),
             Act::Settle => {
                 if self.has(Feature::Settlements) {
                     self.settle_near(me, events);

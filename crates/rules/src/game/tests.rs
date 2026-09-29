@@ -3,7 +3,12 @@ use crate::board::GROVE_AGE;
 use crate::cards::POOL;
 use necromy_dice::Face;
 
-use crate::game::Condition;
+/// A match with no deeds to pick first: most tests are about the moves.
+fn started(setup: Setup) -> (Game, Vec<Event>) {
+    let (mut g, events) = Game::new(setup);
+    g.offers = vec![Vec::new(); g.champions.len()];
+    (g, events)
+}
 
 fn five() -> Setup {
     Setup {
@@ -97,7 +102,7 @@ impl Game {
 /// The current player and the next one, standing `distance` apart near the
 /// centre with empty hands.
 fn duel(distance: i32) -> (Game, PlayerId, PlayerId) {
-    let (mut g, _) = Game::new(five());
+    let (mut g, _) = started(five());
     let me = g.current_player();
     let foe = g.order()[1];
     for p in g.players().collect::<Vec<_>>() {
@@ -134,8 +139,8 @@ fn duel(distance: i32) -> (Game, PlayerId, PlayerId) {
 
 #[test]
 fn same_seed_same_match() {
-    let (a, ea) = Game::new(five());
-    let (b, eb) = Game::new(five());
+    let (a, ea) = started(five());
+    let (b, eb) = started(five());
     assert_eq!(ea, eb);
     assert_eq!(a.order(), b.order());
     assert_eq!(a.slice(), b.slice());
@@ -143,7 +148,7 @@ fn same_seed_same_match() {
 
 #[test]
 fn replay_from_intents_matches() {
-    let (mut a, _) = Game::new(five());
+    let (mut a, _) = started(five());
     let mut intents = Vec::new();
     for _ in 0..400 {
         if a.winner().is_some() {
@@ -154,7 +159,7 @@ fn replay_from_intents_matches() {
         intents.push((p, intent.clone()));
         a.apply(p, intent).unwrap();
     }
-    let (mut b, _) = Game::new(five());
+    let (mut b, _) = started(five());
     for (p, intent) in intents {
         b.apply(p, intent).unwrap();
     }
@@ -164,7 +169,7 @@ fn replay_from_intents_matches() {
 
 #[test]
 fn everyone_starts_with_a_hand() {
-    let (g, _) = Game::new(five());
+    let (g, _) = started(five());
     for p in g.players() {
         assert_eq!(g.hand(p).len(), g.champion(p).unwrap().hand_limit());
     }
@@ -172,7 +177,7 @@ fn everyone_starts_with_a_hand() {
 
 #[test]
 fn everyone_takes_their_turn_at_once() {
-    let (mut game, _) = Game::new(five());
+    let (mut game, _) = started(five());
     assert_eq!(game.acting().len(), 5);
     assert_eq!(game.awaiting().len(), 5);
     let p = game.order()[2];
@@ -248,7 +253,7 @@ fn a_rival_who_is_done_is_no_obstacle() {
 
 #[test]
 fn the_round_ends_when_everyone_is_done() {
-    let (mut game, _) = Game::new(five());
+    let (mut game, _) = started(five());
     for p in game.order().to_vec() {
         assert_eq!(game.round(), 1);
         game.apply(p, Intent::EndTurn).unwrap();
@@ -260,7 +265,7 @@ fn the_round_ends_when_everyone_is_done() {
 
 #[test]
 fn moves_cost_points_and_must_be_adjacent() {
-    let (mut game, _) = Game::new(five());
+    let (mut game, _) = started(five());
     let p = game.current_player();
     let at = game.champion(p).unwrap().hex;
     assert_eq!(
@@ -279,7 +284,7 @@ fn moves_cost_points_and_must_be_adjacent() {
 
 #[test]
 fn rounds_alternate_and_initiative_rotates() {
-    let (mut game, _) = Game::new(five());
+    let (mut game, _) = started(five());
     assert_eq!((game.round(), game.time()), (1, TimeOfDay::Day));
     let first = game.order()[0];
     for _ in 0..5 {
@@ -291,7 +296,7 @@ fn rounds_alternate_and_initiative_rotates() {
 
 #[test]
 fn untouched_corpses_grow_groves() {
-    let (mut game, _) = Game::new(five());
+    let (mut game, _) = started(five());
     let mut grew = false;
     for _ in 0..(5 * GROVE_AGE as usize) {
         game.end_turn_and_settle();
@@ -622,7 +627,7 @@ fn root_on_a_champion_who_is_done_costs_the_next_turn() {
 fn body_cards_consume_the_corpse_underfoot() {
     let (mut g, me, _) = duel(3);
     let here = g.champion(me).unwrap().hex;
-    g.board.tile_mut(here).unwrap().corpse = Some(Corpse { age: 0 });
+    g.board.tile_mut(here).unwrap().corpse = Some(Corpse::fresh());
     let fuel = g.give(me, "Сжечь как топливо");
     g.champ_mut(me).spirit_points = 0;
     g.apply(
@@ -815,7 +820,7 @@ fn burns_are_checked() {
 #[test]
 fn battle_damage_follows_the_faces_both_ways() {
     for seed in 0..40 {
-        let (mut g, _) = Game::new(Setup {
+        let (mut g, _) = started(Setup {
             seed,
             champions: God::ALL.to_vec(),
             mode: Default::default(),
@@ -1051,7 +1056,7 @@ fn a_gods_stage_bends_its_cards() {
 fn played_cards_are_offerings_and_bodies_weigh_double() {
     let (mut g, me, _) = duel(3);
     let here = g.champion(me).unwrap().hex;
-    g.board.tile_mut(here).unwrap().corpse = Some(Corpse { age: 0 });
+    g.board.tile_mut(here).unwrap().corpse = Some(Corpse::fresh());
     let legion = g.give(me, "Вписать в легион");
     g.apply(
         me,
@@ -1126,7 +1131,7 @@ fn feast_reads_trishnas_stage() {
     g.champ_mut(me).spirit_points = 0;
     g.champ_mut(me).spirit = 4;
     for hex in [Hex::ZERO, Hex::new(0, 1)] {
-        g.board.tile_mut(hex).unwrap().corpse = Some(Corpse { age: 0 });
+        g.board.tile_mut(hex).unwrap().corpse = Some(Corpse::fresh());
     }
     let hp = g.champion(me).unwrap().hp;
     let feast = g.give(me, "Пир урожая");
@@ -1193,9 +1198,10 @@ fn stages_move_in_bot_games() {
         trishna_dark += usize::from(g.stage(God::Trishna) == 2);
     }
     assert!(changes > 0);
-    // The default drift: most untended worlds end in Trishna's dark.
+    // The default drift: a world nobody cools ends in Trishna's dark. Bots
+    // now wish Maya's mist for their deeds, and water cools fire: fewer do.
     assert!(
-        trishna_dark >= 10,
+        trishna_dark >= 4,
         "only {trishna_dark} of 20 ended in Devouring"
     );
 }
@@ -1283,7 +1289,7 @@ fn the_crown_goes_to_the_leader_and_ties_keep_it() {
 
 #[test]
 fn nobody_is_crowned_with_no_style() {
-    let (mut g, _) = Game::new(five());
+    let (mut g, _) = started(five());
     to_next_dusk(&mut g);
     assert_eq!(g.dominant(), None);
     assert!(
@@ -1296,7 +1302,7 @@ fn nobody_is_crowned_with_no_style() {
 #[test]
 fn battle_winner_takes_style_double_from_the_dominant() {
     for seed in 0..40 {
-        let (mut g, _) = Game::new(Setup {
+        let (mut g, _) = started(Setup {
             seed,
             champions: God::ALL.to_vec(),
             mode: Default::default(),
@@ -1371,7 +1377,7 @@ fn manner_pays_and_a_broken_oath_costs_at_dusk() {
 fn zaga_quiets_and_the_dead_used_are_noticed() {
     let (mut g, me, _) = duel(3);
     let here = g.champion(me).unwrap().hex;
-    g.board.tile_mut(here).unwrap().corpse = Some(Corpse { age: 0 });
+    g.board.tile_mut(here).unwrap().corpse = Some(Corpse::fresh());
     let fuel = g.give(me, "Сжечь как топливо");
     g.apply(
         me,
@@ -1490,174 +1496,6 @@ fn crowns_and_guards_happen_in_bot_games() {
 }
 
 // ---- Victory (§10) ----
-
-#[test]
-fn conditions_are_drawn_open_and_secret() {
-    for seed in 0..100 {
-        let (g, _) = Game::new(Setup {
-            seed,
-            champions: God::ALL.to_vec(),
-            mode: Default::default(),
-        });
-        let open = g.open_conditions();
-        assert_eq!(open.len(), crate::game::OPEN_COUNT);
-        for (i, a) in open.iter().enumerate() {
-            for b in &open[i + 1..] {
-                assert_ne!(
-                    std::mem::discriminant(a),
-                    std::mem::discriminant(b),
-                    "seed {seed}"
-                );
-            }
-        }
-        for p in g.players() {
-            let s = g.secret(p).unwrap();
-            assert!(
-                !open
-                    .iter()
-                    .any(|o| std::mem::discriminant(o) == std::mem::discriminant(&s)),
-                "seed {seed}: secret {s:?} repeats an open kind"
-            );
-        }
-    }
-}
-
-#[test]
-fn meeting_a_condition_wins_and_stops_the_match() {
-    let (mut g, me, foe) = duel(3);
-    g.open = vec![Condition::Registry { regions: 2 }];
-    g.secrets = vec![Some(Condition::Overthrow { wins: 99 }); 5];
-    let settlements: Vec<Hex> = [God::Bhava, God::Maya]
-        .iter()
-        .map(|&god| {
-            g.board()
-                .tiles()
-                .find(|(_, t)| t.region == Some(god) && t.terrain == Terrain::Settlement)
-                .unwrap()
-                .0
-        })
-        .collect();
-    g.claims
-        .insert((settlements[0].x(), settlements[0].y()), me);
-    assert!(!g.meets(me, Condition::Registry { regions: 2 }));
-    g.claims
-        .insert((settlements[1].x(), settlements[1].y()), me);
-    let events = g.apply(me, Intent::EndTurn).unwrap();
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, Event::Victory { player, .. } if *player == me))
-    );
-    assert_eq!(g.winner(), Some((me, Condition::Registry { regions: 2 })));
-    assert_eq!(g.apply(foe, Intent::Pass), Err(RuleError::GameOver));
-}
-
-#[test]
-fn beating_the_dominant_counts_towards_overthrow() {
-    let (mut g, me, foe) = duel(3);
-    g.dominant = Some(foe);
-    let mut ev = Vec::new();
-    g.battle_style(me, foe, &mut ev);
-    g.battle_style(me, foe, &mut ev);
-    let third = g.players().find(|&p| p != me && p != foe).unwrap();
-    g.battle_style(me, third, &mut ev);
-    assert_eq!(
-        g.progress[me.0 as usize].overthrows, 2,
-        "only wins over the Dominant count"
-    );
-    assert!(g.meets(me, Condition::Overthrow { wins: 2 }));
-}
-
-#[test]
-fn the_wager_needs_the_crown_dawn_after_dawn() {
-    let (mut g, me, foe) = duel(3);
-    let mut ev = Vec::new();
-    g.add_style(me, 5, StyleReason::Territory, &mut ev);
-    for _ in 0..3 {
-        g.crown(&mut ev);
-    }
-    assert_eq!(g.progress[me.0 as usize].crown_streak, 3);
-    g.add_style(foe, 9, StyleReason::Territory, &mut ev);
-    g.crown(&mut ev);
-    assert_eq!(
-        g.progress[me.0 as usize].crown_streak, 0,
-        "losing the Crown breaks the streak"
-    );
-    assert_eq!(g.progress[foe.0 as usize].crown_streak, 1);
-}
-
-#[test]
-fn god_limit_needs_fanaticism_and_a_dark_god() {
-    let (mut g, me, _) = duel(3);
-    g.favor[me.0 as usize] = [0, 9, 0, 0, 1];
-    g.pantheon.stages[God::Trishna.index()] = 1;
-    assert!(!g.meets(me, Condition::GodLimit), "Trishna is not dark yet");
-    g.pantheon.stages[God::Trishna.index()] = 2;
-    assert!(g.meets(me, Condition::GodLimit));
-    g.favor[me.0 as usize] = [9, 9, 9, 9, 9];
-    assert!(
-        !g.meets(me, Condition::GodLimit),
-        "serving everyone is not fanaticism"
-    );
-}
-
-#[test]
-fn fusion_needs_an_adjacent_pair_past_their_light() {
-    let (mut g, me, _) = duel(3);
-    // Wood (0) and fire (1) sit next to each other on the ring.
-    g.favor[me.0 as usize] = [8, 9, 0, 0, 2];
-    g.pantheon.stages = [1, 1, 1, 1, 1];
-    assert!(g.meets(me, Condition::Fusion));
-    g.pantheon.stages[God::Bhava.index()] = 0;
-    assert!(!g.meets(me, Condition::Fusion), "a light god does not fuse");
-    // Wood (0) and earth (2) are not neighbours.
-    g.pantheon.stages = [1, 1, 1, 1, 1];
-    g.favor[me.0 as usize] = [8, 0, 9, 0, 0];
-    assert!(!g.meets(me, Condition::Fusion));
-}
-
-#[test]
-fn first_at_table_waits_for_its_round() {
-    let (mut g, me, _) = duel(3);
-    let mut ev = Vec::new();
-    g.add_style(me, 3, StyleReason::Territory, &mut ev);
-    let c = Condition::FirstAtTable { round: 19 };
-    assert!(!g.meets(me, c));
-    g.round = 19;
-    assert!(g.meets(me, c));
-}
-
-#[test]
-fn bot_matches_end_in_many_ways() {
-    let mut kinds = std::collections::HashSet::new();
-    for seed in 0..60 {
-        let (mut g, _) = Game::new(Setup {
-            seed,
-            champions: God::ALL.to_vec(),
-            mode: Default::default(),
-        });
-        // The placeholder bots do not lighten a dark god on purpose, so a
-        // match whose open conditions want the gods out of the dark runs
-        // long (seed 16: Overthrow in round 333).
-        for _ in 0..10000 {
-            if g.winner().is_some() {
-                break;
-            }
-            let p = g.awaiting()[0];
-            let intent = crate::bot::choose(&g, p);
-            g.apply(p, intent).unwrap();
-        }
-        let (_, c) = g
-            .winner()
-            .unwrap_or_else(|| panic!("seed {seed}: nobody won"));
-        kinds.insert(std::mem::discriminant(&c));
-    }
-    assert!(
-        kinds.len() >= 4,
-        "only {} kinds of victory in 60 matches",
-        kinds.len()
-    );
-}
 
 // ---- Wishes (§7) ----
 
@@ -1910,80 +1748,6 @@ fn every_god_twists_the_wish() {
 }
 
 #[test]
-fn the_wager_is_won_by_refusing_the_crowned_wish() {
-    let (mut g, me, _) = duel(3);
-    g.open = vec![];
-    g.secrets = vec![Some(Condition::Wager { refusals: 2 }); 5];
-    g.round = crate::game::SECRET_FROM_ROUND;
-    crown(&mut g, me);
-    g.wishes(me, Intent::RefuseWish).unwrap();
-    assert_eq!(g.winner(), None, "one refusal is not the bet");
-    let mut ev = Vec::new();
-    g.crown(&mut ev);
-    let events = g.wishes(me, Intent::RefuseWish).unwrap();
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, Event::Victory { player, .. } if *player == me))
-    );
-}
-
-#[test]
-fn a_wish_made_starts_the_wager_over() {
-    let (mut g, me, _) = duel(3);
-    g.open = vec![];
-    g.secrets = vec![Some(Condition::Wager { refusals: 2 }); 5];
-    g.round = crate::game::SECRET_FROM_ROUND;
-    crown(&mut g, me);
-    g.wishes(me, Intent::RefuseWish).unwrap();
-    let mut ev = Vec::new();
-    g.crown(&mut ev);
-    let intent = crate::bot::choose(&g, me);
-    assert_eq!(
-        intent,
-        Intent::RefuseWish,
-        "a bot holding the Wager refuses"
-    );
-    g.secrets = vec![None; 5];
-    let intent = crate::bot::choose(&g, me);
-    g.wishes(me, intent).unwrap();
-    assert_eq!(g.progress[me.0 as usize].refusals, 0);
-    g.secrets = vec![Some(Condition::Wager { refusals: 2 }); 5];
-    g.crown(&mut ev);
-    g.wishes(me, Intent::RefuseWish).unwrap();
-    assert_eq!(g.winner(), None, "the wish in between broke the streak");
-}
-
-#[test]
-fn a_refusal_is_loud_and_a_fall_breaks_the_wager() {
-    let (mut g, me, _) = duel(3);
-    crown(&mut g, me);
-    let before = g.threat(me);
-    g.wishes(me, Intent::RefuseWish).unwrap();
-    assert_eq!(g.threat(me), before + crate::game::REFUSAL_THREAT as u8);
-    assert_eq!(g.progress[me.0 as usize].refusals, 1);
-    let mut ev = Vec::new();
-    g.fall(me, &mut ev);
-    assert_eq!(g.progress[me.0 as usize].refusals, 0);
-}
-
-#[test]
-fn a_secret_is_a_fallback_that_waits_for_its_round() {
-    let (mut g, me, foe) = duel(3);
-    g.open = vec![];
-    g.secrets = vec![Some(Condition::Overthrow { wins: 1 }); 5];
-    g.dominant = Some(foe);
-    let mut ev = Vec::new();
-    g.battle_style(me, foe, &mut ev);
-    g.round = crate::game::SECRET_FROM_ROUND - 1;
-    g.check_victory(&mut ev);
-    assert_eq!(g.winner(), None, "too early for a secret");
-    g.round = crate::game::SECRET_FROM_ROUND;
-    g.check_victory(&mut ev);
-    assert_eq!(g.winner(), Some((me, Condition::Overthrow { wins: 1 })));
-}
-
-#[test]
 fn bots_wish_in_many_ways() {
     let mut kinds = std::collections::HashSet::new();
     let mut gods = std::collections::HashSet::new();
@@ -2034,7 +1798,7 @@ fn line(g: &mut Game, owner: PlayerId, kind: LineKind, goal: Goal, stake: u8) ->
 
 #[test]
 fn dusk_tells_lines_to_those_lagging_within_limits() {
-    let (mut g, _) = Game::new(five());
+    let (mut g, _) = started(five());
     // Nobody lags at the start; lines come once the table spreads out.
     for _ in 0..600 {
         if g.winner().is_some() {
@@ -2705,17 +2469,6 @@ fn wish_now(g: &mut Game, me: PlayerId, god: God, act: Act) -> Vec<Event> {
 }
 
 #[test]
-fn a_learned_secret_is_seen_by_its_learner_only() {
-    let (mut g, me, foe) = duel(3);
-    let third = g.players().find(|&p| p != me && p != foe).unwrap();
-    assert!(g.view_for(Some(me), 1).secret(foe).is_none());
-    wish_now(&mut g, me, God::Ahamar, Act::Secret { target: foe });
-    assert_eq!(g.view_for(Some(me), 1).secret(foe), g.secret(foe));
-    assert!(g.view_for(Some(third), 1).secret(foe).is_none());
-    assert!(!g.view_for(Some(foe), 1).knows_secret(me, foe), "not told");
-}
-
-#[test]
 fn a_seen_hand_is_told_to_the_seer_only() {
     let (mut g, me, foe) = duel(3);
     g.give(foe, "Искра");
@@ -3152,7 +2905,7 @@ fn no_path_runs_through_a_trial() {
 
 #[test]
 fn the_gods_keep_trials_on_the_board_and_let_old_ones_fade() {
-    let (mut g, _) = Game::new(five());
+    let (mut g, _) = started(five());
     let mut events = Vec::new();
     g.trials_at_dusk(&mut events);
     assert_eq!(g.trials().len(), TRIALS_ON_BOARD);
@@ -3598,13 +3351,17 @@ fn untended_bodies_rise_where_no_grove_grows() {
     let tile = g.board.tile_mut(rock).unwrap();
     tile.terrain = Terrain::Mountain;
     tile.region = Some(God::Ahamar);
-    tile.corpse = Some(Corpse { age: UNDEAD_AGE });
+    tile.corpse = Some(Corpse {
+        age: UNDEAD_AGE,
+        hero: false,
+    });
     let meadow = Hex::new(3, -3);
     let tile = g.board.tile_mut(meadow).unwrap();
     tile.terrain = Terrain::Plains;
     tile.region = Some(God::Maya);
     tile.corpse = Some(Corpse {
         age: UNDEAD_AGE_DARK,
+        hero: false,
     });
     // Whatever the board drew there, no militia stand on the two.
     g.militia
@@ -3729,7 +3486,7 @@ fn the_militia_remember_what_is_done_near_them() {
     // stand aside: a champion and they never share a hex.)
     g.militia.get_mut(&(town.x(), town.y())).unwrap().at = None;
     g.place(me, town);
-    g.board.tile_mut(town).unwrap().corpse = Some(Corpse { age: 0 });
+    g.board.tile_mut(town).unwrap().corpse = Some(Corpse::fresh());
     let rest = g.give(me, "Упокоить");
     g.apply(
         me,
@@ -4692,4 +4449,183 @@ fn a_day_of_many_deeds_is_worth_more() {
     g.judge_variety(&mut ev);
     assert_eq!(g.style(me), 1);
     assert_eq!(g.style(foe), 0);
+}
+
+/// Tuning aid: how bot matches end now that deeds win them.
+/// `cargo test -p necromy-rules deeds_in_bot_games -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn deeds_in_bot_games() {
+    for mode in [Mode::Full, Mode::Creation] {
+        let mut wins: Vec<(GreatDeed, u32)> = Vec::new();
+        let mut eves = 0;
+        for seed in 0..40 {
+            let (mut g, _) = Game::new(Setup {
+                seed,
+                champions: God::ALL.to_vec(),
+                mode,
+            });
+            for _ in 0..6000 {
+                if g.winner().is_some() {
+                    break;
+                }
+                let p = g.awaiting()[0];
+                let intent = crate::bot::choose(&g, p);
+                g.apply(p, intent).unwrap();
+            }
+            eves += g
+                .log()
+                .iter()
+                .filter(|e| matches!(e, Event::DeedEve { .. }))
+                .count();
+            if let Some((_, deed)) = g.winner() {
+                wins.push((deed, g.round()));
+            }
+        }
+        println!("{mode:?}: {} wins of 40, eves {eves}: {wins:?}", wins.len());
+    }
+}
+
+// ---- Great Deeds (§21.7) ----
+
+#[test]
+fn everyone_is_offered_three_deeds_and_picks_one() {
+    let (mut g, _) = Game::new(five());
+    for p in g.players() {
+        let offers = g.offers(p);
+        assert_eq!(offers.len(), OFFERED.min(GreatDeed::ALL.len()));
+        let mut unique = offers.to_vec();
+        unique.dedup();
+        assert_eq!(unique.len(), offers.len(), "no deed twice in a hand");
+    }
+    let me = g.order()[0];
+    // Nothing waits on it: a turn may go before, but no deed, no win.
+    assert!(g.free_to_act(me));
+    assert!(g.choosing().contains(&me));
+    let not_mine = GreatDeed::ALL
+        .into_iter()
+        .find(|d| !g.offers(me).contains(d));
+    if let Some(d) = not_mine {
+        assert_eq!(
+            g.apply(me, Intent::ChooseDeed { deed: d }),
+            Err(RuleError::InvalidDeed)
+        );
+    }
+    let deed = g.offers(me)[0];
+    let events = g.apply(me, Intent::ChooseDeed { deed }).unwrap();
+    assert!(matches!(events.as_slice(), [Event::DeedChosen { .. }, ..]));
+    assert_eq!(g.deed(me), Some(deed));
+    assert!(!g.choosing().contains(&me));
+    assert_eq!(
+        g.apply(me, Intent::ChooseDeed { deed }),
+        Err(RuleError::InvalidDeed),
+        "once"
+    );
+}
+
+/// `me` on an island of `size` land hexes around `centre`, the rest of the
+/// board in the mist.
+fn island(g: &mut Game, me: PlayerId, centre: Hex) {
+    let keep: Vec<Hex> = centre.range(1).collect();
+    let all: Vec<Hex> = g.board().tiles().map(|(h, _)| h).collect();
+    for h in all {
+        if !keep.contains(&h)
+            && let Some(tile) = g.board.tile_mut(h)
+        {
+            tile.terrain = Terrain::Mist;
+        }
+    }
+    for p in g.players().collect::<Vec<_>>() {
+        if p != me {
+            g.champ_mut(p).hex = Hex::new(100, 100);
+        }
+    }
+    g.place(me, centre);
+}
+
+#[test]
+fn an_island_waits_on_its_eve_and_is_done_at_dusk() {
+    let (mut g, me, _) = duel(3);
+    g.chosen[me.0 as usize] = Some(GreatDeed::Island);
+    let centre = Hex::new(0, 4);
+    island(&mut g, me, centre);
+    let town = centre + Hex::new(1, 0);
+    g.board.tile_mut(town).unwrap().terrain = Terrain::Settlement;
+    g.claims.insert((town.x(), town.y()), me);
+    let checks = g.checks(me, GreatDeed::Island);
+    assert!(checks.iter().all(Check::met), "{checks:?}");
+    let mut ev = Vec::new();
+    g.check_victory(&mut ev);
+    assert!(matches!(ev.as_slice(), [Event::DeedEve { .. }]));
+    assert!(g.on_eve(me));
+    assert_eq!(g.winner(), None, "not before dusk");
+    let mut ev = Vec::new();
+    g.dusk_of_deeds(&mut ev);
+    assert_eq!(g.winner(), Some((me, GreatDeed::Island)));
+    assert!(ev.iter().any(|e| matches!(e, Event::Victory { .. })));
+}
+
+#[test]
+fn an_eve_is_broken_when_a_step_fails() {
+    let (mut g, me, _) = duel(3);
+    g.chosen[me.0 as usize] = Some(GreatDeed::Island);
+    let centre = Hex::new(0, 4);
+    island(&mut g, me, centre);
+    let town = centre + Hex::new(1, 0);
+    g.board.tile_mut(town).unwrap().terrain = Terrain::Settlement;
+    g.claims.insert((town.x(), town.y()), me);
+    let mut ev = Vec::new();
+    g.check_victory(&mut ev);
+    assert!(g.on_eve(me));
+    // A rival takes the settlement before dusk.
+    g.claims.remove(&(town.x(), town.y()));
+    let mut ev = Vec::new();
+    g.check_victory(&mut ev);
+    assert!(matches!(ev.as_slice(), [Event::EveBroken { .. }]));
+    g.dusk_of_deeds(&mut ev);
+    assert_eq!(g.winner(), None);
+}
+
+#[test]
+fn a_region_dissolves_but_its_temple_and_the_homes() {
+    let (mut g, me, _) = duel(3);
+    let own = g.champion(me).unwrap().god;
+    let other = God::ALL.into_iter().find(|&g2| g2 != own).unwrap();
+    // All of another god's land into the mist, but the temple and homes.
+    let spots: Vec<Hex> = g
+        .board()
+        .tiles()
+        .filter(|(_, t)| t.region == Some(other))
+        .map(|(h, _)| h)
+        .collect();
+    for h in spots {
+        let home = God::ALL.iter().any(|&o| g.board().start_of(o) == h);
+        if h != g.board().temple_of(other) && !home {
+            g.board.tile_mut(h).unwrap().terrain = Terrain::Mist;
+        }
+    }
+    let [check] = g.checks(me, GreatDeed::DissolvedLand)[..] else {
+        panic!("one check");
+    };
+    assert!(check.met(), "{check:?}");
+    assert!(check.need >= crate::game::DISSOLVED as u16);
+}
+
+#[test]
+fn a_champions_body_grows_into_the_grove_of_a_world_tree() {
+    let (mut g, me, foe) = duel(2);
+    let at = g.champion(foe).unwrap().hex;
+    g.board.tile_mut(at).unwrap().terrain = Terrain::Plains;
+    let mut ev = Vec::new();
+    g.fall(foe, &mut ev);
+    assert!(g.board().tile(at).unwrap().corpse.unwrap().hero);
+    for _ in 0..GROVE_AGE {
+        g.world_phase(&mut ev);
+    }
+    assert_eq!(g.board().tile(at).unwrap().terrain, Terrain::Grove);
+    assert_eq!(g.hero_grove(), Some(at));
+    let [grove, ..] = g.checks(me, GreatDeed::WorldTree)[..] else {
+        panic!("checks");
+    };
+    assert!(grove.met());
 }

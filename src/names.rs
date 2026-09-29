@@ -166,10 +166,7 @@ pub fn novelty(n: necromy_rules::Novelty) -> String {
         Novelty::FinishedLine => "доводит до конца свою историю".into(),
         Novelty::Wished(kind) => format!("просит «{}»", wish(kind).to_lowercase()),
         Novelty::Brought(f) => format!("приносит в мир: {}", feature(f).0.to_lowercase()),
-        Novelty::PlayedFor(f) => format!(
-            "играет карту новой механики: {}",
-            feature(f).0.to_lowercase()
-        ),
+        Novelty::PlayedFor(f) => format!("пускает в ход: {}", feature(f).0.to_lowercase()),
     }
 }
 
@@ -211,37 +208,27 @@ pub fn taste_parts(kind: necromy_rules::TasteKind) -> (&'static str, &'static st
     full.split_once(": ").unwrap_or((full, ""))
 }
 
-/// Name and explanation of a victory condition (§10).
-pub fn condition(c: necromy_rules::Condition) -> (String, String) {
-    use necromy_rules::Condition;
-    match c {
-        Condition::Registry { regions } => (
-            "Реестр".into(),
-            format!("Держи поселение или храм в {regions} краях из пяти."),
+/// Name and what it asks of a Great Deed (§21.7).
+pub fn great_deed(d: necromy_rules::GreatDeed) -> (&'static str, String) {
+    use necromy_rules::GreatDeed;
+    match d {
+        GreatDeed::WorldTree => (
+            "Мировое древо",
+            "Роща, выросшая из тела чемпиона (своего тоже), вокруг шесть клеток леса или рощ, рядом звери — и так два заката подряд.".into(),
         ),
-        Condition::GodLimit => (
-            "Предел бога".into(),
-            "Служи одному богу фанатично (благосклонность к нему 8+, вектор длиной 0,6+), пока он в тёмной стадии.".into(),
+        GreatDeed::Island => (
+            "Остров",
+            format!(
+                "Земля в {} клеток и больше, отрезанная мглой от Стола; на ней твоё поселение, и ты стоишь на ней.",
+                necromy_rules::ISLAND
+            ),
         ),
-        Condition::Fusion => (
-            "Слияние".into(),
-            "Служи двум соседним по кругу богам (к каждому 8+, вместе 60% твоей благосклонности), и ни один не в светлой стадии.".into(),
-        ),
-        Condition::MiddlePath { dawns } => (
-            "Срединный путь".into(),
-            format!("Благосклонность 10+ поровну у центра пентаграммы, ни один бог не тёмный, {dawns} рассвета подряд."),
-        ),
-        Condition::Overthrow { wins } => (
-            "Свержение".into(),
-            format!("Победи Доминирующего в бою {wins} раза."),
-        ),
-        Condition::FirstAtTable { round } => (
-            "Первый на столе".into(),
-            format!("Начиная с раунда {round}, будь единственным лидером по Стилю."),
-        ),
-        Condition::Wager { refusals } => (
-            "Пари Ахамара".into(),
-            format!("Будучи Доминирующим, откажись от желания {refusals} рассвета подряд: выигрывай стол и не бери его плату. Каждый отказ — +2 Угрозы; загаданное желание, рассвет без Венца или смерть обнуляют счёт."),
+        GreatDeed::DissolvedLand => (
+            "Растворение края",
+            format!(
+                "Отпусти чужой край: вся его земля, кроме храма и домов чемпионов, уходит во мглу — и не меньше {} клеток.",
+                necromy_rules::DISSOLVED
+            ),
         ),
     }
 }
@@ -249,21 +236,13 @@ pub fn condition(c: necromy_rules::Condition) -> (String, String) {
 pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
     use necromy_rules::CheckKind;
     match kind {
-        CheckKind::RegionsHeld => "края с владениями",
-        CheckKind::TopFavor => "благосклонность к главному богу",
-        CheckKind::SecondFavor => "к слабейшему из пары",
-        CheckKind::PairShare => "доля пары, %",
-        CheckKind::TotalFavor => "вся благосклонность",
-        CheckKind::Fanaticism => "фанатизм, %",
-        CheckKind::Balance => "близость к центру, %",
-        CheckKind::GodStage => "стадия главного бога",
-        CheckKind::PairNotLight => "боги пары не в свете",
-        CheckKind::GodsNotDark => "боги не во тьме",
-        CheckKind::Streak => "рассветов подряд",
-        CheckKind::Overthrows => "побед над Доминирующим",
-        CheckKind::Round => "раунд",
-        CheckKind::StyleLead => "единственный лидер по Стилю",
-        CheckKind::Refusals => "отказов от желания подряд",
+        CheckKind::HeroGrove => "роща из тела чемпиона",
+        CheckKind::WoodsAround => "лес и рощи вокруг",
+        CheckKind::BeastsNear => "звери рядом",
+        CheckKind::Dusks => "закатов подряд",
+        CheckKind::IslandSize => "клеток на отрезанной земле",
+        CheckKind::IslandSettled => "твоё поселение на ней",
+        CheckKind::RegionInMist => "клеток края во мгле",
     }
 }
 
@@ -294,6 +273,7 @@ pub fn wish(kind: necromy_rules::WishKind) -> &'static str {
         WishKind::Rise => "Пусть земля растёт",
         WishKind::Veil => "Пусть мгла возьмёт эту землю",
         WishKind::Unveil => "Развей мглу",
+        WishKind::Cut => "Отрежь мою землю от мира",
         WishKind::Settle => "Пусть здесь поселятся люди",
         WishKind::Stones => "Подними камни силы",
         WishKind::Awaken => "Принеси в мир новое",

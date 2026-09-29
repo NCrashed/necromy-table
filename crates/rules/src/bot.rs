@@ -9,12 +9,23 @@ use hexx::Hex;
 
 use crate::cards::{self, CardId, Effect};
 use crate::game::{
-    Condition, Game, Goal, Intent, PlayerId, Target, TimeOfDay, WindowKind, WishKind,
+    Game, Goal, GreatDeed, Intent, PlayerId, Target, TimeOfDay, WindowKind, WishKind,
 };
 use crate::gods::God;
 use necromy_dice::Face;
 
 pub fn choose(game: &Game, player: PlayerId) -> Intent {
+    // The deed of the match first: its own patron's, if offered.
+    if game.choosing().contains(&player) {
+        let patron = game.champion(player).map(|c| c.god);
+        let offers = game.offers(player);
+        let deed = offers
+            .iter()
+            .copied()
+            .find(|d| Some(d.patron()) == patron)
+            .unwrap_or(offers[0]);
+        return Intent::ChooseDeed { deed };
+    }
     // Tonight's wish first, on its turn or when dusk waits for it (§21.4).
     let wish_now = game.may_wish(player) && (game.at_dusk().is_some() || game.free_to_act(player));
     if wish_now && game.to_answer(player).is_none() {
@@ -302,6 +313,8 @@ fn walk(game: &Game, player: PlayerId) -> Intent {
             Goal::PassTrial(hex) if game.trial_for(player, hex).is_some() => Some(hex),
             _ => None,
         })
+        // Where its deed is made.
+        .or_else(|| deed_goal(game, player))
         // Something lying close by.
         .or_else(|| {
             game.ground_items()
@@ -366,12 +379,12 @@ fn is_body(effect: Effect) -> bool {
     )
 }
 
-/// Tonight's wish: the best-graded plain wish, from its own patron when
-/// tied; at the leader in Style when it needs a rival. A bot holding the
-/// Wager refuses every wish: that is the bet.
+/// Tonight's wish: what its deed needs next (§21.10), else the best-graded
+/// plain wish, from its own patron when tied; at the leader in Style when
+/// it needs a rival.
 fn wish(game: &Game, player: PlayerId) -> Intent {
-    if let Some(Condition::Wager { .. }) = game.secret(player) {
-        return Intent::RefuseWish;
+    if let Some(intent) = deed_wish(game, player) {
+        return intent;
     }
     let patron = game.champion(player).map(|c| c.god);
     let mut best: Option<(u8, bool, God, WishKind)> = None;
@@ -399,5 +412,80 @@ fn wish(game: &Game, player: PlayerId) -> Intent {
         god,
         wish: crate::Wish::one(act),
         said: None,
+    }
+}
+
+/// A wish towards the bot's Great Deed, if its plan has one now (§21.10):
+/// the first mechanic the deed needs that the world lacks, else what its
+/// next unmet step asks for.
+fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
+    let deed = game.deed(player)?;
+    let wish = |god: God, act: crate::Act| Intent::Wish {
+        god,
+        wish: crate::Wish::one(act),
+        said: None,
+    };
+    if let Some(&missing) = deed.needs().iter().find(|&&f| !game.has(f))
+        && game.can_awaken(missing)
+    {
+        return Some(wish(
+            missing.domain(),
+            crate::Act::Awaken {
+                feature: Some(missing),
+            },
+        ));
+    }
+    let unmet = game
+        .checks(player, deed)
+        .into_iter()
+        .find(|c| !c.met())?
+        .kind;
+    use crate::CheckKind::*;
+    Some(match (deed, unmet) {
+        // Its ground cut off from the world, then a settlement of its own there.
+        (GreatDeed::Island, IslandSize) => wish(God::Maya, crate::Act::Cut),
+        (GreatDeed::Island, IslandSettled) => wish(God::Trishna, crate::Act::Settle),
+        // A region too small grows first, by its own god; then the mist
+        // round a rival standing there, or round itself when it is there.
+        (GreatDeed::DissolvedLand, RegionInMist) => {
+            let (god, _, all) = game.dissolving(player);
+            let region_of = |p: PlayerId| {
+                game.champion(p)
+                    .and_then(|c| game.board().tile(c.hex))
+                    .and_then(|t| t.region)
+            };
+            let me = game.champion(player)?.hex;
+            let near = game
+                .left_to_dissolve(player)
+                .is_some_and(|h| h.unsigned_distance_to(me) <= 2);
+            if all < crate::game::DISSOLVED {
+                wish(god, crate::Act::Rise { terrain: None })
+            } else if near {
+                wish(God::Maya, crate::Act::Veil { target: None })
+            } else {
+                let rival = game
+                    .players()
+                    .find(|&p| p != player && region_of(p) == Some(god))?;
+                wish(
+                    God::Maya,
+                    crate::Act::Veil {
+                        target: Some(rival),
+                    },
+                )
+            }
+        }
+        // Bhava's woods round where it stands.
+        (GreatDeed::WorldTree, WoodsAround) => wish(God::Bhava, crate::Act::Land),
+        _ => return None,
+    })
+}
+
+/// Where the bot's deed wants it to stand: in the region it dissolves, on
+/// the grove of its World Tree.
+fn deed_goal(game: &Game, player: PlayerId) -> Option<Hex> {
+    match game.deed(player)? {
+        GreatDeed::DissolvedLand => game.left_to_dissolve(player),
+        GreatDeed::WorldTree => game.hero_grove(),
+        GreatDeed::Island => None,
     }
 }

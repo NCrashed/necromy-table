@@ -96,24 +96,18 @@ impl Game {
         self.lines.iter().filter(move |l| l.owner == player)
     }
 
-    /// How close a player is to winning, 0..=100: the best of their
-    /// conditions, each the average of its checks.
+    /// How close a player is to winning, 0..=100: their deed, the average
+    /// of its checks.
     pub fn nearness(&self, player: PlayerId) -> u16 {
-        self.open
+        let Some(deed) = self.deed(player) else {
+            return 0;
+        };
+        let checks = self.checks(player, deed);
+        let sum: u32 = checks
             .iter()
-            .copied()
-            .map(|c| (c, false))
-            .chain(self.secret(player).map(|c| (c, true)))
-            .map(|(c, secret)| {
-                let checks = self.checks_as(player, c, secret);
-                let sum: u32 = checks
-                    .iter()
-                    .map(|k| u32::from(k.have.min(k.need)) * 100 / u32::from(k.need.max(1)))
-                    .sum();
-                (sum / checks.len().max(1) as u32) as u16
-            })
-            .max()
-            .unwrap_or(0)
+            .map(|k| u32::from(k.have.min(k.need)) * 100 / u32::from(k.need.max(1)))
+            .sum();
+        (sum / checks.len().max(1) as u32) as u16
     }
 
     /// A deed may move a line forward (called from `record_deed`).
@@ -378,7 +372,7 @@ impl Game {
                         && let Some(tile) = self.board.tile_mut(hex)
                         && tile.corpse.is_none()
                     {
-                        tile.corpse = Some(Corpse { age: 0 });
+                        tile.corpse = Some(Corpse::fresh());
                         events.push(Event::CorpseAppeared { hex });
                     }
                 }

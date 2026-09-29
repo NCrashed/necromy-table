@@ -492,19 +492,6 @@ fn rebuild_panel(
             DIM,
         ));
     }
-    if matches!(
-        g.secret(game.human),
-        Some(necromy_rules::Condition::Wager { .. })
-    ) {
-        let note = stats::label(
-            &mut commands,
-            &font,
-            "Твоё тайное — Пари Ахамара: отказ идёт в счёт; желание или смерть его обнуляют.",
-            12.0,
-            false,
-        );
-        rows.push(note);
-    }
 
     commands.entity(frame).add_children(&rows);
     commands.entity(panel).add_child(frame);

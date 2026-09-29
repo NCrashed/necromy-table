@@ -1853,15 +1853,10 @@ impl Match {
                 }
             ),
             // What a wish told one player stays in their feed (§7.3).
-            Event::SecretLearned { player, about } if *player == me => {
-                match self.game.secret(*about) {
-                    Some(c) => {
-                        let (name, explain) = names::condition(c);
-                        format!("Тайное условие {}: «{name}». {explain}", self.name(*about))
-                    }
-                    None => format!("Тайна {} осталась тайной.", self.name(*about)),
-                }
-            }
+            Event::SecretLearned { player, about } if *player == me => format!(
+                "Бог шепчет тебе, что {} загадает на закате: ты увидишь это, как только желание запечатают.",
+                self.name(*about)
+            ),
             Event::SecretLearned { player, about } => format!(
                 "{} узнаёт тайное условие {}.",
                 self.name(*player),
@@ -2060,13 +2055,26 @@ impl Match {
                 names::god_genitive(*god),
                 self.name(*player)
             ),
-            Event::Victory { player, condition } => {
-                format!(
-                    "Победа: {} — {}.",
-                    self.name(*player),
-                    names::condition(*condition).0
-                )
-            }
+            Event::Victory { player, deed } => format!(
+                "Победа: {} — {}.",
+                self.name(*player),
+                names::great_deed(*deed).0
+            ),
+            Event::DeedChosen { player, deed } => format!(
+                "{} берётся за Великое деяние: «{}».",
+                self.name(*player),
+                names::great_deed(*deed).0
+            ),
+            Event::DeedEve { player, deed } => format!(
+                "Канун: деяние «{}» у {} готово — на закате свершится, если его не сорвут.",
+                names::great_deed(*deed).0,
+                self.name_genitive(*player)
+            ),
+            Event::EveBroken { player, deed } => format!(
+                "Канун сорван: деяние «{}» у {} уже не держится.",
+                names::great_deed(*deed).0,
+                self.name_genitive(*player)
+            ),
             Event::Claimed { player, hex, .. } => {
                 let what = match self.game.board().tile(*hex).map(|t| t.terrain) {
                     Some(Terrain::Temple) => "храм",

@@ -195,7 +195,7 @@ impl Game {
         if total != before {
             events.push(Event::StyleChanged {
                 player,
-                delta: total as i16 - before as i16,
+                delta: (i32::from(total) - i32::from(before)).clamp(-32768, 32767) as i16,
                 total,
                 reason,
             });
@@ -229,7 +229,6 @@ impl Game {
         loser: PlayerId,
         events: &mut Vec<Event>,
     ) {
-        self.count_overthrow(winner, loser);
         self.record_deed(winner, Deed::Won);
         self.first(winner, super::Novelty::WonBattle, events);
         let base = i16::from(self.taste.battle);

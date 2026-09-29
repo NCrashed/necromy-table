@@ -1,12 +1,14 @@
-//! Victory conditions and the end of the match (docs/design.md §10).
+//! Great Deeds and the end of the match (docs/design.md §21.7).
 //!
-//! Right side, under the gods: the three open conditions and the human's
-//! secret one, each with its checks as "have / need" and a mark when met;
-//! the explanation shows on hover. When someone wins, a panel over
-//! everything says who and how, with a new match or a look at the board.
+//! Right side, under the gods: everyone's deed, open to all, each with its
+//! steps as "have / need" and a mark when met, and the eve when all hold;
+//! the explanation and what the world must have for it show on hover. At
+//! the start a panel in the middle offers the human three deeds to pick
+//! from. When someone wins, a panel over everything says who and how, with
+//! a new match or a look at the board.
 
 use bevy::prelude::*;
-use necromy_rules::Condition;
+use necromy_rules::{GreatDeed, Intent, PlayerId};
 
 use crate::hud::{INK, UiFont};
 use crate::names;
@@ -26,27 +28,34 @@ impl Plugin for VictoryUiPlugin {
             .add_systems(Startup, spawn)
             .add_systems(
                 crate::InGame,
-                (rebuild_conditions, rebuild_end)
+                (rebuild_conditions, rebuild_end, rebuild_choice)
                     .run_if(resource_changed::<Match>.or_else(resource_changed::<EndDismissed>)),
             )
-            .add_systems(crate::InGame, (condition_tip, end_buttons));
+            .add_systems(crate::InGame, (condition_tip, end_buttons, choose_deed));
     }
 }
 
-/// Where the conditions panel goes: under the gods, in the right column
+/// Where the deeds panel goes: under the gods, in the right column
 /// (`stats.rs` spawns it there).
 #[derive(Component)]
 pub struct Conditions;
 
-/// One condition line, for its hover explanation.
+/// One deed line, for its hover explanation.
 #[derive(Component)]
-struct ConditionRow(Condition);
+struct ConditionRow(GreatDeed);
 
 #[derive(Component)]
 struct ConditionTip;
 
 #[derive(Component)]
 struct EndPanel;
+
+/// The three deeds offered to the human, in the middle, until one is picked.
+#[derive(Component)]
+struct ChoicePanel;
+
+#[derive(Component, Clone, Copy)]
+struct PickDeed(GreatDeed);
 
 /// The human closed the end panel to look at the board.
 #[derive(Resource, Default)]
@@ -92,6 +101,19 @@ fn spawn(mut commands: Commands, font: Res<UiFont>) {
         GlobalZIndex(20),
         Visibility::Hidden,
     ));
+    commands.spawn((
+        ChoicePanel,
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(120.0),
+            left: px(0.0),
+            right: px(0.0),
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        GlobalZIndex(16),
+        Visibility::Hidden,
+    ));
 }
 
 fn rebuild_conditions(
@@ -114,36 +136,28 @@ fn rebuild_conditions(
             Frame::Panel,
         ))
         .id();
-    let title = stats::label(&mut commands, &font, "Условия победы", 14.0, true);
+    let title = stats::label(&mut commands, &font, "Великие деяния", 14.0, true);
     commands.entity(sheet).add_child(title);
-
-    let secret = g.secret(game.human);
-    let lines = g
-        .open_conditions()
-        .iter()
-        .map(|&c| (c, false))
-        .chain(secret.map(|c| (c, true)));
-    for (condition, is_secret) in lines {
-        let row = condition_row(
-            &mut commands,
-            &font,
-            &game,
-            game.human,
-            condition,
-            is_secret,
-        );
+    // The human's first, then the rivals': all are open (§21.7).
+    let mut seats: Vec<PlayerId> = g.players().collect();
+    seats.sort_by_key(|&p| p != game.human);
+    for p in seats {
+        let row = match g.deed(p) {
+            Some(deed) => condition_row(&mut commands, &font, &game, p, deed),
+            None if g.offers(p).is_empty() => continue,
+            None => stats::label(
+                &mut commands,
+                &font,
+                &format!("{}: выбирает деяние…", game.name(p)),
+                12.0,
+                false,
+            ),
+        };
         commands.entity(sheet).add_child(row);
-    }
-    // Rivals' secrets learned through a wish: the view carries only those.
-    for p in g.players().filter(|&p| p != game.human) {
-        if let Some(condition) = g.secret(p) {
-            let row = condition_row(&mut commands, &font, &game, p, condition, true);
-            commands.entity(sheet).add_child(row);
-        }
     }
     let hint = commands
         .spawn((
-            Text::new("Наведи на условие — пояснение. Выполнишь любое своё — победа."),
+            Text::new("Наведи на деяние — пояснение. Всё выполнено — канун; свершится на закате, если его не сорвут."),
             font.text(11.0),
             TextColor(DIM),
             Node {
@@ -156,22 +170,22 @@ fn rebuild_conditions(
     commands.entity(*panel).add_child(sheet);
 }
 
-/// The condition's name, then each check as "label have/need", green when met.
+/// The deed's name, then each step as "label have/need", green when met.
 fn condition_row(
     commands: &mut Commands,
     font: &UiFont,
     m: &Match,
-    owner: necromy_rules::PlayerId,
-    condition: Condition,
-    secret: bool,
+    owner: PlayerId,
+    deed: GreatDeed,
 ) -> Entity {
     let g = &m.game;
     let rival = owner != m.human;
-    let checks = g.checks_as(owner, condition, secret);
+    let checks = g.checks(owner, deed);
     let done = checks.iter().filter(|c| c.met()).count();
+    let eve = g.on_eve(owner);
     let row = commands
         .spawn((
-            ConditionRow(condition),
+            ConditionRow(deed),
             Button,
             Node {
                 flex_direction: FlexDirection::Column,
@@ -179,28 +193,23 @@ fn condition_row(
                 ..default()
             },
             Frame::Tip,
-            Accent(if rival {
+            Accent(if eve {
+                GOLD
+            } else if rival {
                 Color::srgb(0.85, 0.35, 0.3)
-            } else if secret {
-                Color::srgb(0.62, 0.45, 0.85)
             } else {
                 Color::srgb(0.66, 0.47, 0.24)
             }),
         ))
         .id();
-    let (name, _) = names::condition(condition);
-    let head = if rival {
-        // A rival's secret a wish told the human (§7.3).
-        format!(
-            "{}: {name} · тайное  {done}/{}",
-            m.name(owner),
-            checks.len()
-        )
-    } else if secret {
-        format!("{name} · тайное  {done}/{}", checks.len())
+    let (name, _) = names::great_deed(deed);
+    let who = if rival {
+        format!("{}: ", m.name(owner))
     } else {
-        format!("{name}  {done}/{}", checks.len())
+        String::new()
     };
+    let eve_mark = if eve { " · канун!" } else { "" };
+    let head = format!("{who}{name}  {done}/{}{eve_mark}", checks.len());
     let head = stats::label(commands, font, &head, 13.0, true);
     commands.entity(row).add_child(head);
     for check in checks {
@@ -224,13 +233,30 @@ fn condition_row(
     row
 }
 
+/// What the world must have for `deed`, marked where it has it already.
+fn needs_line(m: &Match, deed: GreatDeed) -> String {
+    let needs: Vec<String> = deed
+        .needs()
+        .iter()
+        .map(|&f| {
+            let mark = if m.game.has(f) { "✓" } else { "·" };
+            format!("{mark} {}", names::feature(f).0.to_lowercase())
+        })
+        .collect();
+    if needs.is_empty() {
+        "Всё нужное в мире есть.".into()
+    } else {
+        format!("Нужно в мире: {}.", needs.join(", "))
+    }
+}
+
 fn condition_tip(
     game: Res<Match>,
     rows: Query<(&Interaction, &ConditionRow)>,
     tip: Single<(&mut Text, &mut Visibility), With<ConditionTip>>,
 ) {
     let (mut text, mut visibility) = tip.into_inner();
-    let Some(condition) = rows
+    let Some(deed) = rows
         .iter()
         .find(|(i, _)| **i != Interaction::None)
         .map(|(_, r)| r.0)
@@ -238,22 +264,133 @@ fn condition_tip(
         visibility.set_if_neq(Visibility::Hidden);
         return;
     };
-    let (name, explain) = names::condition(condition);
-    let secret = game.game.secret(game.human) == Some(condition)
-        && !game.game.open_conditions().contains(&condition);
-    let wanted = if secret {
-        format!(
-            "{name}: {explain}\nТайное условие — запасной путь: соперники его не видят, \
-             но оно выигрывает не раньше {}-го раунда.",
-            necromy_rules::SECRET_FROM_ROUND
-        )
-    } else {
-        format!("{name}: {explain}")
-    };
+    let (name, explain) = names::great_deed(deed);
+    let wanted = format!(
+        "{name} ({}): {explain}\n{}",
+        names::god(deed.patron()),
+        needs_line(&game, deed)
+    );
     if text.0 != wanted {
         text.0 = wanted;
     }
     visibility.set_if_neq(Visibility::Inherited);
+}
+
+/// The deeds offered to the human, in the middle, until they pick one.
+fn rebuild_choice(
+    mut commands: Commands,
+    game: Res<Match>,
+    art: Res<StatArt>,
+    font: Res<UiFont>,
+    panel: Single<(Entity, &mut Visibility), With<ChoicePanel>>,
+) {
+    let (panel, mut visibility) = panel.into_inner();
+    commands.entity(panel).despawn_related::<Children>();
+    let g = &game.game;
+    if !g.choosing().contains(&game.human) || game.autoplay {
+        visibility.set_if_neq(Visibility::Hidden);
+        return;
+    }
+    visibility.set_if_neq(Visibility::Inherited);
+    let frame = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: px(10.0),
+                padding: UiRect::all(px(22.0)),
+                width: px(760.0),
+                ..default()
+            },
+            Frame::Plate,
+            Accent(GOLD),
+        ))
+        .id();
+    let title = stats::label(
+        &mut commands,
+        &font,
+        "Выбери Великое деяние: цель твоей партии",
+        18.0,
+        true,
+    );
+    let hint = commands
+        .spawn((
+            Text::new(
+                "Деяние видят все. Чтобы его совершить, придётся принести в мир то, чего в нём ещё нет: \
+                 желаниями, историями, рисками. Когда всё выполнено — канун, и деяние свершится на закате, \
+                 если соперники его не сорвут.",
+            ),
+            font.text(12.0),
+            TextColor(DIM),
+            Node {
+                width: px(716.0),
+                ..default()
+            },
+        ))
+        .id();
+    let cards = commands
+        .spawn(Node {
+            column_gap: px(10.0),
+            ..default()
+        })
+        .id();
+    for &deed in g.offers(game.human) {
+        let (name, explain) = names::great_deed(deed);
+        let card = commands
+            .spawn((
+                PickDeed(deed),
+                Button,
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(6.0),
+                    padding: UiRect::all(px(12.0)),
+                    width: px(232.0),
+                    ..default()
+                },
+                Frame::Button,
+                Accent(crate::gods_ui::god_color(deed.patron())),
+            ))
+            .id();
+        let head = stats::row(&mut commands);
+        let icon = stats::icon_node(
+            &mut commands,
+            art.gods[deed.patron().index()].clone(),
+            22.0,
+            true,
+        );
+        let label = stats::label(&mut commands, &font, name, 15.0, true);
+        commands.entity(head).add_children(&[icon, label]);
+        let text = |commands: &mut Commands, s: String, color: Color| {
+            commands
+                .spawn((
+                    Text::new(s),
+                    font.text(12.0),
+                    TextColor(color),
+                    Node {
+                        width: px(208.0),
+                        ..default()
+                    },
+                ))
+                .id()
+        };
+        let what = text(&mut commands, explain, INK);
+        let needs = text(&mut commands, needs_line(&game, deed), DIM);
+        commands.entity(card).add_children(&[head, what, needs]);
+        commands.entity(cards).add_child(card);
+    }
+    commands.entity(frame).add_children(&[title, hint, cards]);
+    commands.entity(panel).add_child(frame);
+}
+
+fn choose_deed(
+    pressed: Query<(&Interaction, &PickDeed), Changed<Interaction>>,
+    mut game: ResMut<Match>,
+) {
+    for (interaction, pick) in &pressed {
+        if *interaction == Interaction::Pressed {
+            let human = game.human;
+            let _ = game.act(human, Intent::ChooseDeed { deed: pick.0 });
+        }
+    }
 }
 
 /// Who won and how, over everything.
@@ -266,7 +403,7 @@ fn rebuild_end(
     dismissed: Res<EndDismissed>,
 ) {
     let (panel, mut visibility) = panel.into_inner();
-    let Some((winner, condition)) = game.game.winner() else {
+    let Some((winner, deed)) = game.game.winner() else {
         visibility.set_if_neq(Visibility::Hidden);
         return;
     };
@@ -317,23 +454,11 @@ fn rebuild_end(
             },
         ))
         .id();
-    let (name, explain) = names::condition(condition);
-    // A rival's secret is hidden in our view; whatever won and is not
-    // open was theirs.
-    let secret = !game.game.open_conditions().contains(&condition);
-    // Who, then how, each on its own line and wrapping inside the plate:
-    // "Тришна (ты)" and "Пари Ахамара (тайное условие)" do not fit one.
+    let (name, explain) = names::great_deed(deed);
+    // Who, then how, each on its own line and wrapping inside the plate.
     let who = commands
         .spawn((
-            Text::new(format!(
-                "{}\n{name}{}",
-                game.name(winner),
-                if secret {
-                    " (тайное условие)"
-                } else {
-                    ""
-                }
-            )),
+            Text::new(format!("{}\nВеликое деяние: {name}", game.name(winner))),
             font.bold(17.0),
             TextColor(INK),
             TextLayout::justify(Justify::Center),
