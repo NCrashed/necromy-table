@@ -67,6 +67,9 @@ pub struct StatArt {
     /// (§20.4).
     pub undead: Vec<Handle<Image>>,
     pub beasts: Vec<Handle<Image>>,
+    /// Monsters by `Element::index`, and strangers from beyond (§21.8).
+    pub monsters: Vec<Handle<Image>>,
+    pub guests: Vec<Handle<Image>>,
     pub militia: Vec<Handle<Image>>,
     /// Die faces as icons.
     pub faces: HashMap<necromy_rules::Face, Handle<Image>>,
@@ -87,10 +90,10 @@ impl StatArt {
         let set = match kind {
             necromy_rules::MobKind::Undead => &self.undead,
             necromy_rules::MobKind::Beast { .. } => &self.beasts,
-            // Stand-ins until they have pictures of their own.
-            necromy_rules::MobKind::Monster { .. } => &self.beasts,
-            necromy_rules::MobKind::Guest if !self.militia.is_empty() => &self.militia,
-            necromy_rules::MobKind::Guest => &self.undead,
+            necromy_rules::MobKind::Monster { element, .. } => {
+                return self.monsters[element.index()].clone();
+            }
+            necromy_rules::MobKind::Guest => &self.guests,
         };
         set[id as usize % set.len()].clone()
     }
@@ -169,6 +172,12 @@ fn make_art(
     let beasts = (1..=6)
         .map(|n| assets.load(format!("sprites/beast-{n}.png")))
         .collect();
+    let monsters = (0..5)
+        .map(|n| assets.load(format!("sprites/monster-{n}.png")))
+        .collect();
+    let guests = (1..=2)
+        .map(|n| assets.load(format!("sprites/guest-{n}.png")))
+        .collect();
     let militia = (1..=4)
         .map(|n| assets.load(format!("sprites/militia-{n}.png")))
         .collect();
@@ -198,6 +207,8 @@ fn make_art(
         items,
         undead,
         beasts,
+        monsters,
+        guests,
         militia,
         guard,
         faces,
