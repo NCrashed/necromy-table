@@ -457,12 +457,16 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
             GreatDeed::Island
             | GreatDeed::WorldTree
             | GreatDeed::City
-            | GreatDeed::Reconciliation => wish(
+            | GreatDeed::Reconciliation
+            | GreatDeed::River
+            | GreatDeed::Amazon => wish(
                 God::Maya,
                 crate::Act::Veil {
                     target: Some(rival),
                 },
             ),
+            // Zaga's mountains drain the lake round it.
+            GreatDeed::FloodedTable => wish(God::Zaga, crate::Act::Land),
             // A legion thins by a god's hand.
             GreatDeed::Legion => wish(God::Ahamar, crate::Act::Weaken { target: rival }),
         });
@@ -521,6 +525,12 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
         (GreatDeed::Legion, LegionSize) if !game.mobs().iter().any(|m| m.is_undead()) => {
             wish(God::Zaga, crate::Act::Dead)
         }
+        (GreatDeed::River, RiverLength | RiverSource | RiverMouth) => {
+            wish(God::Maya, crate::Act::River)
+        }
+        (GreatDeed::FloodedTable, TableFlooded) => wish(God::Maya, crate::Act::Flood),
+        (GreatDeed::Amazon, JungleWoods) => wish(God::Bhava, crate::Act::Land),
+        (GreatDeed::Amazon, JungleRiver) => wish(God::Maya, crate::Act::River),
         // Bhava's woods round where it stands.
         (GreatDeed::WorldTree, WoodsAround) => wish(God::Bhava, crate::Act::Land),
         // A god of the pair out of its light: an offering to the god that
@@ -542,6 +552,24 @@ fn deed_goal(game: &Game, player: PlayerId) -> Option<Hex> {
         GreatDeed::DissolvedLand => game.left_to_dissolve(player),
         GreatDeed::WorldTree => game.hero_grove(),
         GreatDeed::Island => None,
+        // By the river's end, to run it on.
+        GreatDeed::River => {
+            let me = game.champion(player)?.hex;
+            game.river_head(me)
+                .filter(|h| h.unsigned_distance_to(me) > 2)
+        }
+        // Two hexes from the Table, where a spring runs towards it.
+        GreatDeed::FloodedTable => {
+            let me = game.champion(player)?.hex;
+            if me.ulength() == 2 {
+                return None;
+            }
+            Hex::ZERO
+                .ring(2)
+                .filter(|&h| game.board().contains(h) && game.occupant(h).is_none())
+                .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
+        }
+        GreatDeed::Amazon => None,
         // The nearest undead to write into the legion.
         GreatDeed::Legion => {
             let me = game.champion(player)?.hex;

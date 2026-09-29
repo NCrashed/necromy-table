@@ -191,6 +191,11 @@ pub fn terrain(terrain: necromy_rules::Terrain) -> (&'static str, &'static str) 
         Terrain::Grove => ("Роща", "выросла из нетронутого тела; идти дороже"),
         Terrain::Table => ("Стол Ахамара", "центр; займи — больше всего Стиля"),
         Terrain::Mist => ("Мгла", "земли здесь нет: не пройти, пока мгла не развеется"),
+        Terrain::River => (
+            "Река",
+            "переправа кончает ход; вдоль реки шаг за 1; в реке могут быть пираньи",
+        ),
+        Terrain::Lake => ("Озеро", "стоячая вода: не пройти; отрезает землю, как мгла"),
     }
 }
 
@@ -240,6 +245,25 @@ pub fn great_deed(d: necromy_rules::GreatDeed) -> (&'static str, String) {
                 necromy_rules::CITY
             ),
         ),
+        GreatDeed::River => (
+            "Река",
+            format!(
+                "Река в {} клеток и больше: исток у гор, устье на краю мира — два заката подряд.",
+                necromy_rules::RIVER
+            ),
+        ),
+        GreatDeed::FloodedTable => (
+            "Затопленный Стол",
+            "Стол Ахамара и шесть клеток вокруг под озером — два заката подряд.".into(),
+        ),
+        GreatDeed::Amazon => (
+            "Амазонка",
+            format!(
+                "Лес в {} клеток, сквозь который течёт река (не меньше {} клеток), и в реках пираньи — два заката подряд.",
+                necromy_rules::JUNGLE,
+                necromy_rules::JUNGLE_RIVER
+            ),
+        ),
         GreatDeed::Legion => (
             "Легион",
             format!(
@@ -269,6 +293,13 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::PairLight => "боги пары в свете",
         CheckKind::SharedShrine => "святилище обоих",
         CheckKind::LegionSize => "мертвецов в твоём легионе",
+        CheckKind::RiverLength => "клеток самой длинной реки",
+        CheckKind::RiverSource => "исток у гор",
+        CheckKind::RiverMouth => "устье на краю мира",
+        CheckKind::TableFlooded => "клеток Стола под водой",
+        CheckKind::JungleWoods => "клеток леса у реки",
+        CheckKind::JungleRiver => "клеток реки в лесу",
+        CheckKind::Piranhas => "пираньи в реках",
     }
 }
 
@@ -302,6 +333,8 @@ pub fn wish(kind: necromy_rules::WishKind) -> &'static str {
         WishKind::Cut => "Отрежь мою землю от мира",
         WishKind::Settle => "Пусть здесь поселятся люди",
         WishKind::Stones => "Подними камни силы",
+        WishKind::River => "Пусть потечёт река",
+        WishKind::Flood => "Пусть поднимутся воды",
         WishKind::Awaken => "Принеси в мир новое",
     }
 }
@@ -363,6 +396,18 @@ pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {
         Feature::Legion => (
             "Легион",
             "мертвеца рядом можно вписать в свой легион; победитель в бою уводит спутника",
+        ),
+        Feature::Rivers => (
+            "Реки",
+            "реки текут от гор к краю мира; переправа кончает ход, вдоль реки идти легко",
+        ),
+        Feature::Lakes => (
+            "Озёра",
+            "вода разливается озёрами: их не пройти, они отрезают землю",
+        ),
+        Feature::Piranhas => (
+            "Пираньи",
+            "в реках пираньи: кусают входящего, но не насмерть",
         ),
     }
 }

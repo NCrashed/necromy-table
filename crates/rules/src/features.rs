@@ -51,10 +51,16 @@ pub enum Feature {
     Companions,
     /// The undead may be written into a champion's legion.
     Legion,
+    /// Rivers: crossing ends the walk, along them is easy.
+    Rivers,
+    /// Lakes: still water nobody walks.
+    Lakes,
+    /// Piranhas in the rivers bite whoever steps in.
+    Piranhas,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 17] = [
+    pub const ALL: [Feature; 20] = [
         Feature::Bodies,
         Feature::Groves,
         Feature::Settlements,
@@ -72,6 +78,9 @@ impl Feature {
         Feature::City,
         Feature::Companions,
         Feature::Legion,
+        Feature::Rivers,
+        Feature::Lakes,
+        Feature::Piranhas,
     ];
 
     /// What the world must have before this can come in (§21.2): all of
@@ -85,6 +94,9 @@ impl Feature {
             Feature::City => &[Has(Feature::Buildings)],
             Feature::Companions => &[AnyOf(&[Feature::Beasts, Feature::Undead])],
             Feature::Legion => &[Has(Feature::Undead), Has(Feature::Companions)],
+            Feature::Rivers => &[Land(&[Terrain::Mountain, Terrain::Swamp])],
+            Feature::Lakes => &[Has(Feature::Rivers)],
+            Feature::Piranhas => &[Has(Feature::Beasts), Has(Feature::Rivers)],
             Feature::Groves | Feature::Undead => &[Has(Feature::Bodies)],
             Feature::Militia => &[Has(Feature::Settlements)],
             Feature::Ruins => &[Has(Feature::Settlements), Has(Feature::Undead)],
@@ -104,13 +116,19 @@ impl Feature {
     /// (§21.2).
     pub const fn domain(self) -> God {
         match self {
-            Feature::Groves | Feature::Beasts | Feature::Companions => God::Bhava,
+            Feature::Groves | Feature::Beasts | Feature::Companions | Feature::Piranhas => {
+                God::Bhava
+            }
             Feature::Settlements | Feature::Cargo | Feature::Buildings | Feature::City => {
                 God::Trishna
             }
             Feature::Bodies | Feature::Poison | Feature::Trials | Feature::Legion => God::Zaga,
             Feature::Militia | Feature::Loot | Feature::Guard => God::Ahamar,
-            Feature::Undead | Feature::Ruins | Feature::Stealth => God::Maya,
+            Feature::Undead
+            | Feature::Ruins
+            | Feature::Stealth
+            | Feature::Rivers
+            | Feature::Lakes => God::Maya,
         }
     }
 }

@@ -92,12 +92,16 @@ pub enum WishKind {
     Settle,
     /// "Raise the stones": a ring of standing stones near the asker.
     Stones,
+    /// "Let a river run": from the mountains nearest the asker to the rim.
+    River,
+    /// "Let the waters rise": the water nearest the asker spreads.
+    Flood,
     /// "Bring something new into the world": a mechanic the world lacks.
     Awaken,
 }
 
 impl WishKind {
-    pub const ALL: [WishKind; 27] = [
+    pub const ALL: [WishKind; 29] = [
         WishKind::Strength,
         WishKind::Weaken,
         WishKind::Land,
@@ -124,6 +128,8 @@ impl WishKind {
         WishKind::Cut,
         WishKind::Settle,
         WishKind::Stones,
+        WishKind::River,
+        WishKind::Flood,
         WishKind::Awaken,
     ];
 
@@ -225,6 +231,10 @@ pub enum Act {
     Settle,
     /// Standing stones on free land near the asker.
     Stones,
+    /// A river near the asker, on from one within reach.
+    River,
+    /// The water nearest the asker spreads towards the Table.
+    Flood,
     /// A mechanic the world lacks, the one named or else one of the god's
     /// own (§21.2); its first thing appears near the asker.
     Awaken {
@@ -261,6 +271,8 @@ impl Act {
             Act::Cut => WishKind::Cut,
             Act::Settle => WishKind::Settle,
             Act::Stones => WishKind::Stones,
+            Act::River => WishKind::River,
+            Act::Flood => WishKind::Flood,
             Act::Awaken { .. } => WishKind::Awaken,
         }
     }
@@ -301,6 +313,8 @@ impl Act {
                 | Act::Cut
                 | Act::Settle
                 | Act::Stones
+                | Act::River
+                | Act::Flood
                 | Act::Awaken { .. }
         )
     }
@@ -333,6 +347,8 @@ impl Act {
             WishKind::Cut => Act::Cut,
             WishKind::Settle => Act::Settle,
             WishKind::Stones => Act::Stones,
+            WishKind::River => Act::River,
+            WishKind::Flood => Act::Flood,
             WishKind::Awaken => Act::Awaken { feature: None },
             // A prepared wager bets on a fight, the likeliest thing to happen.
             WishKind::Wager => Act::Wager {
@@ -476,10 +492,10 @@ pub const fn taste_for(god: God, kind: WishKind) -> i8 {
         // Order loves land, judgement, a contract and the registry of
         // secrets; the dead are paperwork, a swap is disorder.
         (God::Ahamar, Land | Weaken | Truce | Secret | Wager | Foresee | Settle | Stones) => 1,
-        (God::Ahamar, Dead | Swap | Veil | Cut) => -1,
+        (God::Ahamar, Dead | Swap | Veil | Cut | Flood) => -1,
         // Dissolution loves letting go, loosening a grip, seeing through,
         // one thing becoming another; not strength, not a new thing to hold.
-        (God::Maya, Peace | Weaken | Swap | Hand | Rot | Veil | Unveil | Cut) => 1,
+        (God::Maya, Peace | Weaken | Swap | Hand | Rot | Veil | Unveil | Cut | River | Flood) => 1,
         (God::Maya, Strength | Forge | Tribute | Settle) => -1,
         // Renunciation loves quiet, the dead at rest and the price a desire
         // exacts; not strength, not blessing what is held.
@@ -756,6 +772,8 @@ impl Game {
             | Act::Cut
             | Act::Settle
             | Act::Stones
+            | Act::River
+            | Act::Flood
             | Act::Awaken { .. } => self.create(player, god, act, power, events),
             Act::Dead => {
                 let free: Vec<Hex> = (1..=2)

@@ -23,6 +23,7 @@ pub use cards::{CardDef, CardId, CardKind, CardMod, DefId, Effect, TargetRule, T
 pub use features::{Feature, Mode, World};
 pub use game::Cargo;
 pub use game::LEGION;
+pub use game::RIVER_RUN;
 pub use game::{
     Act, BEAST_DICE, BEAST_HEALTH, BEAST_RANGE, Bet, BodyVerb, Boon, CHOSEN, Champion, Character,
     Check, CheckKind, Cure, DISSOLVED, Deed, DuskStep, Event, FIRST_STYLE, FORESEE, FRIENDLY,
@@ -37,6 +38,7 @@ pub use game::{
 };
 pub use game::{BUILD_SPIRIT, Building, CITY, QUARTER_SPIRIT, WALLED_MILITIA};
 pub use game::{COMPANION_DICE, Companion, ENLIST_SPIRIT, RETINUE, TAME_SPIRIT};
+pub use game::{JUNGLE, JUNGLE_RIVER, RIVER};
 pub use gods::{Element, God};
 pub use hexx::Hex;
 pub use items::{ITEMS, ItemDef, ItemEffect, ItemId, Slot, When};

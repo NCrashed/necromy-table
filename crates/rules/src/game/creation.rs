@@ -122,6 +122,8 @@ impl Game {
         let needs = match act {
             Act::Dead => Feature::Bodies,
             Act::Settle => Feature::Settlements,
+            Act::River => Feature::Rivers,
+            Act::Flood => Feature::Lakes,
             _ => return None,
         };
         (!self.has(needs)).then_some(needs)
@@ -295,6 +297,12 @@ impl Game {
                     self.gain_loot(p, events);
                 }
             }
+            Feature::Rivers => {
+                self.run_river(near, super::RIVER_RUN, events);
+            }
+            Feature::Lakes => {
+                self.flood(near, 2, events);
+            }
             // These show themselves in their own time: the undead laying a
             // settlement waste, poison on a card, the guard on the loud, a
             // champion slipping away, beasts by night.
@@ -307,7 +315,8 @@ impl Game {
             | Feature::Buildings
             | Feature::City
             | Feature::Companions
-            | Feature::Legion => {}
+            | Feature::Legion
+            | Feature::Piranhas => {}
         }
     }
 
@@ -420,7 +429,7 @@ impl Game {
         let mut mist: Vec<Hex> = self
             .board
             .tiles()
-            .filter(|(_, t)| !t.terrain.is_land())
+            .filter(|(_, t)| t.terrain == Terrain::Mist)
             .map(|(h, _)| h)
             .collect();
         mist.sort_by_key(|h| (h.unsigned_distance_to(near), h.x(), h.y()));
@@ -509,6 +518,20 @@ impl Game {
             }
             Act::Stones => {
                 self.stones_near(me, events);
+            }
+            Act::River => {
+                if self.has(Feature::Rivers) {
+                    self.run_river(me, super::RIVER_RUN + usize::from(power), events);
+                } else {
+                    self.awaken(Some(player), god, Feature::Rivers, me, events);
+                }
+            }
+            Act::Flood => {
+                if self.has(Feature::Lakes) {
+                    self.flood(me, 1 + usize::from(power) / 2, events);
+                } else if self.can_awaken(Feature::Lakes) {
+                    self.awaken(Some(player), god, Feature::Lakes, me, events);
+                }
             }
             Act::Awaken { feature } => {
                 let chosen = feature
@@ -620,10 +643,12 @@ impl Game {
             .into_iter()
             .chain(std::iter::once(centre))
             .filter(|&h| {
-                self.board
-                    .tile(h)
-                    .is_some_and(|t| t.terrain.can_grow_grove() || t.terrain == Terrain::Mountain)
-                    && !self.mob_at(h)
+                self.board.tile(h).is_some_and(|t| {
+                    t.terrain.can_grow_grove()
+                            || t.terrain == Terrain::Mountain
+                            // The god's land drains the water it takes.
+                            || t.terrain.is_water()
+                }) && !self.mob_at(h)
             })
             .take(count)
             .collect();

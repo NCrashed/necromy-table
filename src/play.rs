@@ -1843,6 +1843,10 @@ impl Match {
                 self.name(*player),
                 names::building(*building)
             ),
+            Event::PiranhasBit { player, amount, .. } if *amount > 0 => format!(
+                "Пираньи кусают {}: −{amount}.",
+                self.name_accusative(*player)
+            ),
             Event::CompanionJoined { player, companion } => format!(
                 "{} ведёт нового спутника: {}.",
                 self.name(*player),

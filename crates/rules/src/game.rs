@@ -743,6 +743,12 @@ pub enum Event {
         from: PlayerId,
         cargo: cargo::Cargo,
     },
+    /// Piranhas bit `player` stepping into a river (§21.8).
+    PiranhasBit {
+        player: PlayerId,
+        amount: u8,
+        hp: u8,
+    },
     /// A mob follows `player` now (§21.8).
     CompanionJoined {
         player: PlayerId,
@@ -1629,7 +1635,7 @@ impl Game {
         if self.occupant(to).is_some() || (self.mob_at(to) && !self.lets_pass(player, to)) {
             return Err(RuleError::Occupied);
         }
-        Ok(self.terrain_cost(player, tile.terrain))
+        Ok(self.step_price(player, champion.hex, tile.terrain, self.move_points(player)))
     }
 
     /// Hexes `player` can reach this turn, with the cheapest cost.
@@ -1684,7 +1690,7 @@ impl Game {
                 {
                     continue;
                 }
-                let total = cost + self.terrain_cost(player, tile.terrain);
+                let total = cost + self.step_price(player, at, tile.terrain, points - cost);
                 if total > points {
                     continue;
                 }
@@ -2165,6 +2171,7 @@ impl Game {
             to,
             cost,
         });
+        self.piranhas(player, to, events);
         self.spring_traps(player, to, events);
 
         // The champion may have fallen to a trap and woken at home.
@@ -3250,6 +3257,7 @@ mod style;
 mod trial;
 mod victory;
 mod view;
+mod water;
 mod wish;
 mod world;
 pub use battle::Score;
@@ -3276,8 +3284,10 @@ pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
 pub use trial::{Boon, TRIAL_ROUNDS, TRIALS_ON_BOARD, Trial, trial_face};
 pub use victory::{
-    CITY, Check, CheckKind, DISSOLVED, GreatDeed, ISLAND, LEGION, OFFERED, REFUSAL_THREAT,
+    CITY, Check, CheckKind, DISSOLVED, GreatDeed, ISLAND, JUNGLE, JUNGLE_RIVER, LEGION, OFFERED,
+    REFUSAL_THREAT, RIVER,
 };
+pub use water::RIVER_RUN;
 pub use wish::{
     Act, Bet, FORESEE, FORGED_LINE, FORGED_NAME, MAX_ACTS, Price, Said, TRIBUTE_THREAT, Truce,
     WAGER_STAKE, Wager, Wish, WishKind, forge_template, god_terrain, likes_a_stake, taste_for,

@@ -38,6 +38,10 @@ pub enum Terrain {
     /// Land gone into the mist (§21.1): nobody walks it, nothing lies there,
     /// until it comes back out.
     Mist,
+    /// A river (§21.8): crossing it ends the walk, going along it is easy.
+    River,
+    /// Still water: nobody walks it, nothing lies there; not the mist.
+    Lake,
 }
 
 impl Terrain {
@@ -57,9 +61,14 @@ impl Terrain {
         )
     }
 
-    /// Land at all: anything but the mist.
+    /// Ground to stand on: anything but the mist and still water.
     pub const fn is_land(self) -> bool {
-        !matches!(self, Terrain::Mist)
+        !matches!(self, Terrain::Mist | Terrain::Lake)
+    }
+
+    /// Water: a river or a lake.
+    pub const fn is_water(self) -> bool {
+        matches!(self, Terrain::River | Terrain::Lake)
     }
 }
 
@@ -381,7 +390,7 @@ impl Board {
     /// The mist on `hex` lifts: the land comes back as it was.
     pub(crate) fn unveil(&mut self, hex: Hex) -> Option<Terrain> {
         let tile = self.tiles.get_mut(&key(hex))?;
-        if tile.terrain.is_land() {
+        if tile.terrain != Terrain::Mist {
             return None;
         }
         let terrain = self.veiled.remove(&key(hex)).unwrap_or(Terrain::Plains);

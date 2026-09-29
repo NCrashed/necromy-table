@@ -4992,3 +4992,112 @@ fn a_legion_of_five_is_a_deed_and_a_god_can_thin_it() {
     g.dusk_of_deeds(&mut ev);
     assert_eq!(g.winner(), None);
 }
+
+// ---- Rivers and lakes (§21.8) ----
+
+/// Every check of `deed` met but the dusks it must hold.
+fn but_dusks(g: &Game, p: PlayerId, deed: GreatDeed) -> bool {
+    g.checks(p, deed)
+        .iter()
+        .filter(|c| c.kind != CheckKind::Dusks)
+        .all(Check::met)
+}
+
+fn set_terrain(g: &mut Game, hex: Hex, terrain: Terrain) {
+    g.board.tile_mut(hex).unwrap().terrain = terrain;
+}
+
+#[test]
+fn crossing_a_river_ends_the_walk_and_along_it_is_easy() {
+    let (mut g, me, _) = duel(4);
+    set_terrain(&mut g, Hex::new(1, 0), Terrain::River);
+    set_terrain(&mut g, Hex::new(2, 0), Terrain::River);
+    assert_eq!(g.step_cost(me, Hex::new(1, 0)), Ok(MOVE_POINTS));
+    g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    assert_eq!(g.move_points(me), 0);
+    g.turns[me.0 as usize].move_points = 2;
+    assert_eq!(g.step_cost(me, Hex::new(2, 0)), Ok(1));
+    // The walk plans the same way: crossing takes what is left.
+    g.place(me, Hex::new(0, 0));
+    g.turns[me.0 as usize].move_points = MOVE_POINTS;
+    let reach = g.reachable(me);
+    assert_eq!(reach.get(&Hex::new(1, 0)), Some(&MOVE_POINTS));
+}
+
+#[test]
+fn piranhas_bite_but_never_the_last_health() {
+    let (mut g, me, _) = duel(4);
+    set_terrain(&mut g, Hex::new(1, 0), Terrain::River);
+    g.champ_mut(me).hp = 2;
+    g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    assert_eq!(g.champion(me).unwrap().hp, 1);
+    let mut ev = Vec::new();
+    g.piranhas(me, Hex::new(1, 0), &mut ev);
+    assert_eq!(g.champion(me).unwrap().hp, 1);
+    without(&mut g, &[Feature::Piranhas]);
+    g.champ_mut(me).hp = 3;
+    g.piranhas(me, Hex::new(1, 0), &mut ev);
+    assert_eq!(g.champion(me).unwrap().hp, 3);
+}
+
+#[test]
+fn a_lake_is_not_walked_and_does_not_lift() {
+    let (mut g, me, _) = duel(4);
+    set_terrain(&mut g, Hex::new(1, 0), Terrain::Lake);
+    assert_eq!(g.step_cost(me, Hex::new(1, 0)), Err(RuleError::OffBoard));
+    let mut ev = Vec::new();
+    g.unveil_near(Hex::new(1, 0), 3, &mut ev);
+    assert_eq!(
+        g.board().tile(Hex::new(1, 0)).unwrap().terrain,
+        Terrain::Lake
+    );
+}
+
+#[test]
+fn a_river_runs_from_the_mountains_to_the_rim_and_beyond() {
+    let (mut g, me, _) = duel(4);
+    g.chosen[me.0 as usize] = Some(GreatDeed::River);
+    let mut ev = Vec::new();
+    let near = g.champion(me).unwrap().hex;
+    let run = g.run_river(near, 20, &mut ev);
+    assert!(run.len() >= RIVER, "ran {}", run.len());
+    assert!(
+        but_dusks(&g, me, GreatDeed::River),
+        "{:?}",
+        g.checks(me, GreatDeed::River)
+    );
+    // Past the old rim: the world grew with it.
+    assert!(run.iter().any(|h| h.ulength() > crate::board::BOARD_RADIUS));
+}
+
+#[test]
+fn the_waters_rise_towards_the_table() {
+    let (mut g, me, foe) = duel(4);
+    g.chosen[foe.0 as usize] = Some(GreatDeed::FloodedTable);
+    g.place(me, Hex::new(0, -5));
+    g.place(foe, Hex::new(2, 0));
+    let mut ev = Vec::new();
+    let flooded = g.flood(Hex::new(2, 0), 8, &mut ev);
+    assert_eq!(flooded, 8);
+    assert_eq!(g.table_flooded(), 7);
+    assert!(but_dusks(&g, foe, GreatDeed::FloodedTable));
+    // Zaga's mountains take some of it back.
+    g.place(foe, Hex::new(1, -1));
+    g.grant_land(God::Zaga, Hex::new(1, -1), 3, &mut ev);
+    assert!(g.table_flooded() < 7);
+}
+
+#[test]
+fn a_river_through_the_woods_is_the_amazon() {
+    let (mut g, me, _) = duel(4);
+    g.chosen[me.0 as usize] = Some(GreatDeed::Amazon);
+    for hex in Hex::new(0, -4).range(2) {
+        set_terrain(&mut g, hex, Terrain::Forest);
+    }
+    for q in [-5, -4, -3] {
+        set_terrain(&mut g, Hex::new(0, q), Terrain::River);
+    }
+    assert!(but_dusks(&g, me, GreatDeed::Amazon));
+    without(&mut g, &[Feature::Piranhas]);
+    assert!(!but_dusks(&g, me, GreatDeed::Amazon));
+}

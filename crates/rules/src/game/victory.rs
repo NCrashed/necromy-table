@@ -36,26 +36,39 @@ pub enum GreatDeed {
     Reconciliation,
     /// Five undead of your legion following you.
     Legion,
+    /// A river of eight hexes and more, rising by the mountains and running
+    /// out to the rim of the world.
+    River,
+    /// The Table and the six hexes round it under a lake.
+    FloodedTable,
+    /// Woods of six hexes a river runs through, with piranhas in it.
+    Amazon,
     /// A whole region of another god gone into the mist, but its temple and
     /// the champions' homes, and fifteen hexes of it at least.
     DissolvedLand,
 }
 
 impl GreatDeed {
-    pub const ALL: [GreatDeed; 6] = [
+    pub const ALL: [GreatDeed; 9] = [
         GreatDeed::WorldTree,
         GreatDeed::Island,
         GreatDeed::DissolvedLand,
         GreatDeed::City,
         GreatDeed::Reconciliation,
         GreatDeed::Legion,
+        GreatDeed::River,
+        GreatDeed::FloodedTable,
+        GreatDeed::Amazon,
     ];
 
     /// The god whose deed it is: its card's colour, its voice.
     pub const fn patron(self) -> God {
         match self {
-            GreatDeed::WorldTree => God::Bhava,
-            GreatDeed::Island | GreatDeed::DissolvedLand => God::Maya,
+            GreatDeed::WorldTree | GreatDeed::Amazon => God::Bhava,
+            GreatDeed::Island
+            | GreatDeed::DissolvedLand
+            | GreatDeed::River
+            | GreatDeed::FloodedTable => God::Maya,
             GreatDeed::City => God::Trishna,
             GreatDeed::Reconciliation | GreatDeed::Legion => God::Zaga,
         }
@@ -70,6 +83,9 @@ impl GreatDeed {
             GreatDeed::DissolvedLand => &[],
             GreatDeed::City => &[Feature::Settlements, Feature::Buildings, Feature::City],
             GreatDeed::Reconciliation => &[Feature::Settlements, Feature::Buildings],
+            GreatDeed::River => &[Feature::Rivers],
+            GreatDeed::FloodedTable => &[Feature::Rivers, Feature::Lakes],
+            GreatDeed::Amazon => &[Feature::Beasts, Feature::Rivers, Feature::Piranhas],
             GreatDeed::Legion => &[
                 Feature::Bodies,
                 Feature::Undead,
@@ -107,6 +123,20 @@ pub enum CheckKind {
     SharedShrine,
     /// Undead of your legion following you.
     LegionSize,
+    /// Hexes of the longest river.
+    RiverLength,
+    /// It rises by the mountains.
+    RiverSource,
+    /// It runs out to the rim.
+    RiverMouth,
+    /// Of the Table and the six round it, under water.
+    TableFlooded,
+    /// Woods a river runs through.
+    JungleWoods,
+    /// A river runs through them.
+    JungleRiver,
+    /// Piranhas in the world's rivers.
+    Piranhas,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +156,12 @@ impl Check {
 pub const CITY: usize = 7;
 /// Undead in a legion for the Legion.
 pub const LEGION: usize = 5;
+/// Hexes of a river for the River.
+pub const RIVER: usize = 12;
+/// Woods round a river for the Amazon.
+pub const JUNGLE: usize = 10;
+/// River hexes in the woods for the Amazon.
+pub const JUNGLE_RIVER: usize = 3;
 
 /// Hexes an Island needs.
 pub const ISLAND: usize = 7;
@@ -274,6 +310,44 @@ impl Game {
                     check(CheckKind::CityHas, has, 3),
                 ]
             }
+            GreatDeed::River => {
+                let (len, source, mouth) = self.best_river();
+                vec![
+                    check(CheckKind::RiverLength, len, RIVER),
+                    check(CheckKind::RiverSource, usize::from(source), 1),
+                    check(CheckKind::RiverMouth, usize::from(mouth), 1),
+                    check(
+                        CheckKind::Dusks,
+                        usize::from(self.progress[player.0 as usize].held_dusks),
+                        2,
+                    ),
+                ]
+            }
+            GreatDeed::FloodedTable => vec![
+                check(CheckKind::TableFlooded, self.table_flooded(), 7),
+                check(
+                    CheckKind::Dusks,
+                    usize::from(self.progress[player.0 as usize].held_dusks),
+                    2,
+                ),
+            ],
+            GreatDeed::Amazon => {
+                let (woods, river) = self.best_jungle();
+                vec![
+                    check(CheckKind::JungleWoods, woods, JUNGLE),
+                    check(CheckKind::JungleRiver, river, JUNGLE_RIVER),
+                    check(
+                        CheckKind::Piranhas,
+                        usize::from(self.has(Feature::Piranhas)),
+                        1,
+                    ),
+                    check(
+                        CheckKind::Dusks,
+                        usize::from(self.progress[player.0 as usize].held_dusks),
+                        2,
+                    ),
+                ]
+            }
             GreatDeed::Legion => {
                 let legion = self
                     .companions(player)
@@ -400,7 +474,7 @@ impl Game {
                         continue;
                     }
                     all += 1;
-                    if !t.terrain.is_land() {
+                    if t.terrain == Terrain::Mist {
                         gone += 1;
                     }
                 }

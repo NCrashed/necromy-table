@@ -38,8 +38,8 @@ impl Game {
         if !self.mob_at(to) && self.occupant(to).is_none_or(|p| p == player) {
             return Err(RuleError::InvalidTarget);
         }
-        let cost = self.terrain_cost(player, tile.terrain);
         let have = self.move_points(player);
+        let cost = self.step_price(player, me.hex, tile.terrain, have);
         if cost > have {
             return Err(RuleError::NotEnoughMovePoints { need: cost, have });
         }
