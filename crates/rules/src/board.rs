@@ -42,6 +42,8 @@ pub enum Terrain {
     River,
     /// Still water: nobody walks it, nothing lies there; not the mist.
     Lake,
+    /// What a fire left (§21.8).
+    Ash,
 }
 
 impl Terrain {
@@ -57,7 +59,12 @@ impl Terrain {
     pub const fn can_grow_grove(self) -> bool {
         matches!(
             self,
-            Terrain::Plains | Terrain::Forest | Terrain::Swamp | Terrain::Ruins | Terrain::Grove
+            Terrain::Plains
+                | Terrain::Forest
+                | Terrain::Swamp
+                | Terrain::Ruins
+                | Terrain::Grove
+                | Terrain::Ash
         )
     }
 

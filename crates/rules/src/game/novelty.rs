@@ -37,6 +37,9 @@ pub enum Novelty {
     Enlisted,
     /// A road laid by one's own hand.
     Paved,
+    /// A fire set, a fire put out.
+    Kindled,
+    Doused,
     /// A wish of this kind, granted.
     Wished(WishKind),
     /// A mechanic brought into the world.

@@ -98,12 +98,14 @@ pub enum WishKind {
     Flood,
     /// "Lay the register's road": on from the network about the Table.
     Road,
+    /// "Set it alight": fire in the woods nearest the asker.
+    Fire,
     /// "Bring something new into the world": a mechanic the world lacks.
     Awaken,
 }
 
 impl WishKind {
-    pub const ALL: [WishKind; 30] = [
+    pub const ALL: [WishKind; 31] = [
         WishKind::Strength,
         WishKind::Weaken,
         WishKind::Land,
@@ -133,6 +135,7 @@ impl WishKind {
         WishKind::River,
         WishKind::Flood,
         WishKind::Road,
+        WishKind::Fire,
         WishKind::Awaken,
     ];
 
@@ -240,6 +243,8 @@ pub enum Act {
     Flood,
     /// The register's road runs on towards the temple nearest the asker.
     Road,
+    /// Fire in the woods or settlement nearest the asker, theirs.
+    Fire,
     /// A mechanic the world lacks, the one named or else one of the god's
     /// own (§21.2); its first thing appears near the asker.
     Awaken {
@@ -279,6 +284,7 @@ impl Act {
             Act::River => WishKind::River,
             Act::Flood => WishKind::Flood,
             Act::Road => WishKind::Road,
+            Act::Fire => WishKind::Fire,
             Act::Awaken { .. } => WishKind::Awaken,
         }
     }
@@ -322,6 +328,7 @@ impl Act {
                 | Act::River
                 | Act::Flood
                 | Act::Road
+                | Act::Fire
                 | Act::Awaken { .. }
         )
     }
@@ -357,6 +364,7 @@ impl Act {
             WishKind::River => Act::River,
             WishKind::Flood => Act::Flood,
             WishKind::Road => Act::Road,
+            WishKind::Fire => Act::Fire,
             WishKind::Awaken => Act::Awaken { feature: None },
             // A prepared wager bets on a fight, the likeliest thing to happen.
             WishKind::Wager => Act::Wager {
@@ -495,7 +503,7 @@ pub const fn taste_for(god: God, kind: WishKind) -> i8 {
     match (god, kind) {
         // Hunger loves strength, feasts of the dead and a gift that feeds;
         // quiet and truce bore it.
-        (God::Trishna, Strength | Dead | Forge | Tribute | Plant | Settle) => 1,
+        (God::Trishna, Strength | Dead | Forge | Tribute | Plant | Settle | Fire) => 1,
         (God::Trishna, Peace | Truce | Veil) => -1,
         // Order loves land, judgement, a contract and the registry of
         // secrets; the dead are paperwork, a swap is disorder.
@@ -514,7 +522,7 @@ pub const fn taste_for(god: God, kind: WishKind) -> i8 {
         (God::Zaga, Strength | Bless | Hallow | Rise) => -1,
         // Growth loves the land, strength, what grows in the hand; not harm.
         (God::Bhava, Land | Strength | Bless | Forge | Hallow | Rise) => 1,
-        (God::Bhava, Weaken | Blight | Wager | Rot | Veil) => -1,
+        (God::Bhava, Weaken | Blight | Wager | Rot | Veil | Fire) => -1,
         _ => 0,
     }
 }
@@ -786,6 +794,7 @@ impl Game {
             | Act::River
             | Act::Flood
             | Act::Road
+            | Act::Fire
             | Act::Awaken { .. } => self.create(player, god, act, power, events),
             Act::Dead => {
                 let free: Vec<Hex> = (1..=2)

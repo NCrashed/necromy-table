@@ -45,13 +45,15 @@ pub enum GreatDeed {
     Amazon,
     /// One network of roads joining all five temples and the Table.
     Roads,
+    /// A fire of yours has passed through four regions, and burns still.
+    GreatFire,
     /// A whole region of another god gone into the mist, but its temple and
     /// the champions' homes, and fifteen hexes of it at least.
     DissolvedLand,
 }
 
 impl GreatDeed {
-    pub const ALL: [GreatDeed; 10] = [
+    pub const ALL: [GreatDeed; 11] = [
         GreatDeed::WorldTree,
         GreatDeed::Island,
         GreatDeed::DissolvedLand,
@@ -62,6 +64,7 @@ impl GreatDeed {
         GreatDeed::FloodedTable,
         GreatDeed::Amazon,
         GreatDeed::Roads,
+        GreatDeed::GreatFire,
     ];
 
     /// The god whose deed it is: its card's colour, its voice.
@@ -72,7 +75,7 @@ impl GreatDeed {
             | GreatDeed::DissolvedLand
             | GreatDeed::River
             | GreatDeed::FloodedTable => God::Maya,
-            GreatDeed::City => God::Trishna,
+            GreatDeed::City | GreatDeed::GreatFire => God::Trishna,
             GreatDeed::Roads => God::Ahamar,
             GreatDeed::Reconciliation | GreatDeed::Legion => God::Zaga,
         }
@@ -89,6 +92,7 @@ impl GreatDeed {
             GreatDeed::Reconciliation => &[Feature::Settlements, Feature::Buildings],
             GreatDeed::River => &[Feature::Rivers],
             GreatDeed::Roads => &[Feature::Settlements, Feature::Roads],
+            GreatDeed::GreatFire => &[Feature::Fires],
             GreatDeed::FloodedTable => &[Feature::Rivers, Feature::Lakes],
             GreatDeed::Amazon => &[Feature::Beasts, Feature::Rivers, Feature::Piranhas],
             GreatDeed::Legion => &[
@@ -130,6 +134,10 @@ pub enum CheckKind {
     LegionSize,
     /// Temples on the register's roads.
     TemplesLinked,
+    /// Regions a fire of yours has burnt through.
+    RegionsBurnt,
+    /// A fire of yours burns still.
+    FireBurning,
     /// Hexes of the longest river.
     RiverLength,
     /// It rises by the mountains.
@@ -320,6 +328,18 @@ impl Game {
                 ]
             }
             GreatDeed::Roads => vec![check(CheckKind::TemplesLinked, self.temples_linked(), 5)],
+            GreatDeed::GreatFire => vec![
+                check(
+                    CheckKind::RegionsBurnt,
+                    self.regions_burnt(player),
+                    super::GREAT_FIRE,
+                ),
+                check(
+                    CheckKind::FireBurning,
+                    usize::from(self.fires().any(|(_, f)| f.by == Some(player))),
+                    1,
+                ),
+            ],
             GreatDeed::River => {
                 let (len, source, mouth) = self.best_river();
                 vec![

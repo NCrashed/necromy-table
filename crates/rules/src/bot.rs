@@ -460,6 +460,7 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
             | GreatDeed::Reconciliation
             | GreatDeed::River
             | GreatDeed::Roads
+            | GreatDeed::GreatFire
             | GreatDeed::Amazon => wish(
                 God::Maya,
                 crate::Act::Veil {
@@ -531,6 +532,7 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
         }
         (GreatDeed::FloodedTable, TableFlooded) => wish(God::Maya, crate::Act::Flood),
         (GreatDeed::Roads, TemplesLinked) => wish(God::Ahamar, crate::Act::Road),
+        (GreatDeed::GreatFire, RegionsBurnt | FireBurning) => wish(God::Trishna, crate::Act::Fire),
         (GreatDeed::Amazon, JungleWoods) => wish(God::Bhava, crate::Act::Land),
         (GreatDeed::Amazon, JungleRiver) => wish(God::Maya, crate::Act::River),
         // Bhava's woods round where it stands.
@@ -573,6 +575,19 @@ fn deed_goal(game: &Game, player: PlayerId) -> Option<Hex> {
         }
         GreatDeed::Amazon => None,
         GreatDeed::Roads => None,
+        // Woods in a region its fire has not passed yet.
+        GreatDeed::GreatFire => {
+            let me = game.champion(player)?.hex;
+            game.board()
+                .land()
+                .filter(|(h, t)| {
+                    t.terrain.burns()
+                        && *h != me
+                        && t.region.is_some_and(|g| !game.burnt_by(player, g))
+                })
+                .map(|(h, _)| h)
+                .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
+        }
         // The nearest undead to write into the legion.
         GreatDeed::Legion => {
             let me = game.champion(player)?.hex;
@@ -647,6 +662,36 @@ fn border_pair(game: &Game, hex: Hex) -> Option<[God; 2]> {
 /// A move on its own turn for the bot's deed, where it stands (§21.10):
 /// a quarter for its city, what the city lacks, a shrine of two.
 fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
+    // A rival's Great Fire on its eve: put out what of it is near.
+    let spirit_now = game.champion(player)?.spirit_points;
+    if spirit_now >= crate::DOUSE_SPIRIT
+        && let Some(hex) = game.dousable(player).into_iter().find(|&h| {
+            game.fire(h).and_then(|f| f.by).is_some_and(|by| {
+                by != player && game.on_eve(by) && game.deed(by) == Some(GreatDeed::GreatFire)
+            })
+        })
+    {
+        return Some(Intent::Douse { hex });
+    }
+    // Its own Great Fire: set a region alight that its fire has not passed,
+    // or keep one burning once four are.
+    if game.deed(player) == Some(GreatDeed::GreatFire) && spirit_now >= crate::KINDLE_SPIRIT {
+        let mine = game.fires().any(|(_, f)| f.by == Some(player));
+        let enough = game.regions_burnt(player) >= crate::GREAT_FIRE;
+        let fresh = |h: &Hex| {
+            game.board()
+                .tile(*h)
+                .and_then(|t| t.region)
+                .is_some_and(|g| !game.burnt_by(player, g))
+        };
+        if let Some(hex) = game
+            .kindleable(player)
+            .into_iter()
+            .find(|h| (enough && !mine) || (!enough && fresh(h)))
+        {
+            return Some(Intent::Kindle { hex });
+        }
+    }
     // A companion next to it: an undead for a legion, a beast when Spirit
     // is to spare.
     let spare = game.champion(player)?.spirit_points >= crate::TAME_SPIRIT + 2;

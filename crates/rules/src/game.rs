@@ -188,6 +188,14 @@ pub enum Intent {
     },
     /// On your turn: a road on the hex underfoot (§21.8).
     Pave,
+    /// On your turn: set the woods or settlement beside you alight.
+    Kindle {
+        hex: Hex,
+    },
+    /// On your turn: put out the fire beside you or underfoot.
+    Douse {
+        hex: Hex,
+    },
     /// On your turn: take the body (or burden) underfoot on your back (§21.8).
     Take,
     /// On your turn: lay down what you carry where you stand.
@@ -749,6 +757,21 @@ pub enum Event {
     RoadLaid {
         hex: Hex,
     },
+    /// Fire on `hex`, begun by `by` or spread from theirs (§21.8).
+    FireStarted {
+        hex: Hex,
+        by: Option<PlayerId>,
+    },
+    /// The fire on `hex` went out or burnt the hex out.
+    FireOut {
+        hex: Hex,
+    },
+    /// `player` was burnt by a fire.
+    Scorched {
+        player: PlayerId,
+        amount: u8,
+        hp: u8,
+    },
     /// Piranhas bit `player` stepping into a river (§21.8).
     PiranhasBit {
         player: PlayerId,
@@ -1269,6 +1292,9 @@ pub struct Game {
     buildings: BTreeMap<(i32, i32), buildings::Building>,
     /// Roads of the register (§21.8).
     roads: std::collections::BTreeSet<(i32, i32)>,
+    /// Fires burning (§21.8), and per player the regions theirs burnt.
+    fires: BTreeMap<(i32, i32), fire::Fire>,
+    burnt: Vec<u8>,
     /// Who did what first at the table (§21.5).
     firsts: BTreeMap<novelty::Novelty, PlayerId>,
     /// Per player, battles won so far: each is worth less.
@@ -1402,6 +1428,8 @@ impl Game {
             loads: Vec::new(),
             buildings: BTreeMap::new(),
             roads: Default::default(),
+            fires: BTreeMap::new(),
+            burnt: vec![0; champions_len],
             firsts: BTreeMap::new(),
             won: vec![0; champions_len],
             log: Vec::new(),
@@ -1926,6 +1954,8 @@ impl Game {
             Intent::Sacrifice { slot } => self.sacrifice(player, slot, events),
             Intent::Rebuild => self.rebuild(player, events),
             Intent::Pave => self.pave(player, events),
+            Intent::Kindle { hex } => self.kindle(player, hex, events),
+            Intent::Douse { hex } => self.douse(player, hex, events),
             Intent::Recruit { mob } => self.take_companion(player, mob, events),
             Intent::Take => self.take(player, events),
             Intent::Build { building } => self.build(player, building, events),
@@ -1958,6 +1988,8 @@ impl Game {
             Intent::Sacrifice { slot } => self.check_sacrifice(player, slot).map(|_| ()),
             Intent::Rebuild => self.check_rebuild(player).map(|_| ()),
             Intent::Pave => self.check_pave(player),
+            Intent::Kindle { hex } => self.check_kindle(player, hex),
+            Intent::Douse { hex } => self.check_douse(player, hex),
             Intent::Recruit { mob } => self.check_recruit(player, mob).map(|_| ()),
             Intent::Take => self.check_take(player).map(|_| ()),
             Intent::Build { building } => self.check_build(player, building).map(|_| ()),
@@ -2181,6 +2213,7 @@ impl Game {
             cost,
         });
         self.piranhas(player, to, events);
+        self.scorch(player, to, events);
         self.spring_traps(player, to, events);
 
         // The champion may have fallen to a trap and woken at home.
@@ -2417,6 +2450,8 @@ impl Game {
             | Intent::Build { .. }
             | Intent::Recruit { .. }
             | Intent::Pave
+            | Intent::Kindle { .. }
+            | Intent::Douse { .. }
             | Intent::Quarter { .. }
             | Intent::Cycle { .. } => {
                 return Err(RuleError::WindowOpen);
@@ -3215,6 +3250,9 @@ impl Game {
             }
             self.mob_phase(events);
         }
+        if self.scripted.is_none() && self.has(Feature::Fires) {
+            self.fire_phase(events);
+        }
         if self.scripted.is_none_or(|s| s.guard) && self.has(Feature::Guard) {
             self.guard_phase(events);
         }
@@ -3253,6 +3291,7 @@ mod cargo;
 mod companions;
 mod creation;
 mod dusk;
+mod fire;
 mod gear;
 mod guard;
 mod laws;
@@ -3277,6 +3316,7 @@ pub use buildings::{BUILD_SPIRIT, Building, QUARTER_SPIRIT, WALLED_MILITIA};
 pub use cargo::Cargo;
 pub use companions::{COMPANION_DICE, Companion, ENLIST_SPIRIT, RETINUE, TAME_SPIRIT};
 pub use dusk::{DuskStep, Seal, SealedWish};
+pub use fire::{DOUSE_SPIRIT, Fire, GREAT_FIRE, KINDLE_SPIRIT};
 pub use gear::{Gain, SACRIFICE};
 pub use guard::{GUARD_DICE, GUARD_HEALTH, GUARD_RELIEF, GUARD_STEPS, Guard};
 pub use laws::{BURDEN_FREE, CHOSEN, CRACK_REACH, Law, Patronage, SENTENCE_THRESHOLD, SIGN, VOICE};

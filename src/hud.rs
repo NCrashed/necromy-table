@@ -546,6 +546,14 @@ fn tooltip(
             names::mob(b.kind, b.id).0.to_lowercase()
         ));
     }
+    if let Some(fire) = g.fire(hex) {
+        let whose = fire
+            .by
+            .map_or(String::new(), |p| format!(" (зажёг {})", game.name(p)));
+        lines.push(format!(
+            "пожар{whose}: войти — обжечься; в ход мира перекинется дальше"
+        ));
+    }
     if g.road(hex) {
         lines.push("дорога: шаг по ней стоит 1; здесь не скрыться".into());
     }

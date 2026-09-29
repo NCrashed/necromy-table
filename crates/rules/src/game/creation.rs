@@ -66,6 +66,7 @@ impl Game {
         self.ground.retain(|(h, _)| *h != hex);
         self.loads.retain(|(h, _)| *h != hex);
         self.wash_road(hex);
+        self.put_out(hex, events);
         self.buildings.remove(&key);
         self.claims.remove(&key);
         self.militia.remove(&key);
@@ -126,6 +127,7 @@ impl Game {
             Act::River => Feature::Rivers,
             Act::Flood => Feature::Lakes,
             Act::Road => Feature::Roads,
+            Act::Fire => Feature::Fires,
             _ => return None,
         };
         (!self.has(needs)).then_some(needs)
@@ -307,6 +309,11 @@ impl Game {
             }
             Feature::Roads => {
                 self.run_road(near, super::ROAD_RUN, events);
+            }
+            Feature::Fires => {
+                if let Some(p) = player {
+                    self.fire_near(p, near, 1, events);
+                }
             }
             // These show themselves in their own time: the undead laying a
             // settlement waste, poison on a card, the guard on the loud, a
@@ -529,6 +536,13 @@ impl Game {
                     self.run_river(me, super::RIVER_RUN + usize::from(power), events);
                 } else {
                     self.awaken(Some(player), god, Feature::Rivers, me, events);
+                }
+            }
+            Act::Fire => {
+                if self.has(Feature::Fires) {
+                    self.fire_near(player, me, 1 + usize::from(power) / 3, events);
+                } else if self.can_awaken(Feature::Fires) {
+                    self.awaken(Some(player), god, Feature::Fires, me, events);
                 }
             }
             Act::Road => {

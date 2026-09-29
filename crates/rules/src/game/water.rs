@@ -86,7 +86,7 @@ impl Game {
 
     /// `hex` becomes water of `terrain`: whatever lay there goes, the undead
     /// and beasts on it drown.
-    fn water(&mut self, hex: Hex, terrain: Terrain, events: &mut Vec<Event>) {
+    pub(super) fn water(&mut self, hex: Hex, terrain: Terrain, events: &mut Vec<Event>) {
         let key = (hex.x(), hex.y());
         let drowned: Vec<u32> = self
             .mobs
@@ -98,6 +98,7 @@ impl Game {
             self.mobs.retain(|m| m.id != id);
             events.push(Event::MobLeft { id });
         }
+        self.put_out(hex, events);
         if terrain == Terrain::Lake {
             self.wash_road(hex);
             self.traps.retain(|t| t.hex != hex);

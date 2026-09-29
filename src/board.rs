@@ -210,6 +210,8 @@ struct MarkerSprites {
     pouch: Handle<Image>,
     /// A road on a hex (§21.8), drawn flat.
     road: Handle<Image>,
+    /// A fire burning on a hex (§21.8).
+    fire: Handle<Image>,
     /// A building's sign (§21.8): tavern, forge, wall, and a shrine per god.
     signs: [Handle<Image>; 3],
     shrines: [Handle<Image>; 5],
@@ -328,6 +330,7 @@ fn spawn_board(
         quest: images.add(pixel_sprite(&QUEST_ROWS, [250, 214, 120])),
         pouch: assets.load("items/ground-pouch.png"),
         road: images.add(pixel_sprite(&ROAD_ROWS, [0; 3])),
+        fire: images.add(pixel_sprite(&FIRE_ROWS, [236, 110, 36])),
         signs: [[220, 160, 60], [200, 84, 44], [150, 150, 160]]
             .map(|c| images.add(pixel_sprite(&SIGN_ROWS, c))),
         shrines: God::ALL.map(|g| images.add(pixel_sprite(&SIGN_ROWS, g.accent()))),
@@ -739,6 +742,19 @@ fn sync_markers(
         .roads()
         .map(|hex| (hex, sprites.road.clone(), Vec3::ZERO, TEXELS, true))
         .collect();
+    let fires: Vec<_> = game
+        .game
+        .fires()
+        .map(|(hex, _)| {
+            (
+                hex,
+                sprites.fire.clone(),
+                Vec3::new(0.0, 0.0, 0.2),
+                TEXELS,
+                false,
+            )
+        })
+        .collect();
     let signs: Vec<_> = game
         .game
         .buildings()
@@ -756,6 +772,7 @@ fn sync_markers(
     let wanted: Vec<_> = corpses
         .chain(roads)
         .chain(signs)
+        .chain(fires)
         .chain(traps)
         .chain(flags)
         .chain(trails)
@@ -848,6 +865,7 @@ fn ground_color(tile: &RulesTile, painted: bool, stage: Option<u8>) -> Color {
             Terrain::Mist => [0.66, 0.68, 0.78],
             Terrain::River => [0.24, 0.52, 0.82],
             Terrain::Lake => [0.12, 0.30, 0.62],
+            Terrain::Ash => [0.24, 0.22, 0.22],
         }
     };
     let tint = tile
@@ -938,6 +956,24 @@ const ROAD_ROWS: [&str; 10] = [
     "..#xxoxxoxxoxxoxx#..",
     "...##oxxoxxoxxo##...",
     ".....##########.....",
+];
+
+/// Flames: a light core in the fire's colour, ink round it.
+const FIRE_ROWS: [&str; 14] = [
+    "......#.......",
+    ".....#f#......",
+    ".....#f#...#..",
+    "....#ff#..#f#.",
+    "..#.#fFf#.#f#.",
+    ".#f##fFf##ff#.",
+    ".#ff#fFFf#ff#.",
+    "#fffffFFfffff#",
+    "#ffFfFFFFfFff#",
+    "#fFFFFooFFFff#",
+    "#fFFFooooFFFf#",
+    ".#fFFooooFFf#.",
+    "..#ffFFFFff#..",
+    "...########...",
 ];
 
 /// A building's sign on a post, its plank in the building's colour.

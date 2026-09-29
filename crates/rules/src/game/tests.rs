@@ -5154,3 +5154,79 @@ fn the_registers_road_runs_from_the_table_to_the_temples() {
     assert_eq!(g.temples_linked(), 5);
     assert!(g.checks(me, GreatDeed::Roads).iter().all(Check::met));
 }
+
+// ---- Fires (§21.8) ----
+
+#[test]
+fn a_fire_burns_to_ash_and_catches_on_the_woods() {
+    let (mut g, me, _) = duel(4);
+    for hex in Hex::new(0, -3).range(1) {
+        set_terrain(&mut g, hex, Terrain::Forest);
+    }
+    let mut ev = Vec::new();
+    g.set_fire(Hex::new(0, -3), Some(me), &mut ev);
+    for _ in 0..4 {
+        g.fire_phase(&mut ev);
+    }
+    assert_eq!(
+        g.board().tile(Hex::new(0, -3)).unwrap().terrain,
+        Terrain::Ash
+    );
+    let ash = Hex::new(0, -3)
+        .all_neighbors()
+        .iter()
+        .filter(|&&h| g.board().tile(h).unwrap().terrain == Terrain::Ash)
+        .count();
+    assert!(ash > 0, "the fire caught on nothing");
+    let region = g.board().tile(Hex::new(0, -3)).unwrap().region.unwrap();
+    assert!(g.burnt_by(me, region));
+    // Plains do not burn: the fire stops at them.
+    assert!(
+        g.fires()
+            .all(|(h, _)| g.board().tile(h).unwrap().terrain.burns())
+    );
+}
+
+#[test]
+fn a_champion_kindles_and_douses_and_walking_in_burns() {
+    let (mut g, me, _) = duel(4);
+    set_terrain(&mut g, Hex::new(1, 0), Terrain::Forest);
+    g.champ_mut(me).spirit_points = 3;
+    g.apply(
+        me,
+        Intent::Kindle {
+            hex: Hex::new(1, 0),
+        },
+    )
+    .unwrap();
+    assert!(g.fire(Hex::new(1, 0)).is_some());
+    g.champ_mut(me).hp = 3;
+    let mut ev = Vec::new();
+    g.scorch(me, Hex::new(1, 0), &mut ev);
+    assert_eq!(g.champion(me).unwrap().hp, 2);
+    g.apply(
+        me,
+        Intent::Douse {
+            hex: Hex::new(1, 0),
+        },
+    )
+    .unwrap();
+    assert!(g.fire(Hex::new(1, 0)).is_none());
+    assert_eq!(g.champion(me).unwrap().spirit_points, 1);
+}
+
+#[test]
+fn a_great_fire_is_four_regions_and_a_fire_still_burning() {
+    let (mut g, me, _) = duel(4);
+    g.chosen[me.0 as usize] = Some(GreatDeed::GreatFire);
+    g.burnt[me.0 as usize] = 0b01111;
+    assert!(!g.checks(me, GreatDeed::GreatFire).iter().all(Check::met));
+    set_terrain(&mut g, Hex::new(1, 1), Terrain::Forest);
+    let mut ev = Vec::new();
+    g.set_fire(Hex::new(1, 1), Some(me), &mut ev);
+    assert!(g.checks(me, GreatDeed::GreatFire).iter().all(Check::met));
+    // Water puts it out.
+    g.water(Hex::new(1, 1), Terrain::Lake, &mut ev);
+    assert!(g.fire(Hex::new(1, 1)).is_none());
+    assert!(!g.checks(me, GreatDeed::GreatFire).iter().all(Check::met));
+}

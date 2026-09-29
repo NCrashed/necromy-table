@@ -165,6 +165,8 @@ pub fn novelty(n: necromy_rules::Novelty) -> String {
         Novelty::Tamed => "приручает зверя".into(),
         Novelty::Enlisted => "вписывает мертвеца в легион".into(),
         Novelty::Paved => "мостит дорогу".into(),
+        Novelty::Kindled => "поджигает".into(),
+        Novelty::Doused => "тушит пожар".into(),
         Novelty::Sacrificed => "отдаёт предмет богу".into(),
         Novelty::Hid => "уходит в тень".into(),
         Novelty::FinishedLine => "доводит до конца свою историю".into(),
@@ -197,6 +199,10 @@ pub fn terrain(terrain: necromy_rules::Terrain) -> (&'static str, &'static str) 
             "переправа кончает ход; вдоль реки шаг за 1; в реке могут быть пираньи",
         ),
         Terrain::Lake => ("Озеро", "стоячая вода: не пройти; отрезает землю, как мгла"),
+        Terrain::Ash => (
+            "Пепелище",
+            "здесь прошёл огонь; тело на нём может прорасти рощей",
+        ),
     }
 }
 
@@ -269,6 +275,13 @@ pub fn great_deed(d: necromy_rules::GreatDeed) -> (&'static str, String) {
             "Дороги реестра",
             "Одна сеть дорог связывает Стол и все пять храмов.".into(),
         ),
+        GreatDeed::GreatFire => (
+            "Великий пожар",
+            format!(
+                "Огонь, начатый тобой, прошёл по {} краям из пяти — и ещё горит.",
+                necromy_rules::GREAT_FIRE
+            ),
+        ),
         GreatDeed::Legion => (
             "Легион",
             format!(
@@ -299,6 +312,8 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::SharedShrine => "святилище обоих",
         CheckKind::LegionSize => "мертвецов в твоём легионе",
         CheckKind::TemplesLinked => "храмов на дорогах реестра",
+        CheckKind::RegionsBurnt => "краёв прошёл твой огонь",
+        CheckKind::FireBurning => "твой огонь ещё горит",
         CheckKind::RiverLength => "клеток самой длинной реки",
         CheckKind::RiverSource => "исток у гор",
         CheckKind::RiverMouth => "устье на краю мира",
@@ -342,6 +357,7 @@ pub fn wish(kind: necromy_rules::WishKind) -> &'static str {
         WishKind::River => "Пусть потечёт река",
         WishKind::Flood => "Пусть поднимутся воды",
         WishKind::Road => "Проложи дорогу реестра",
+        WishKind::Fire => "Подожги лес",
         WishKind::Awaken => "Принеси в мир новое",
     }
 }
@@ -419,6 +435,10 @@ pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {
         Feature::Roads => (
             "Дороги",
             "шаг по дороге стоит 1 на любой земле, дорога через реку — мост; на дороге не скрыться",
+        ),
+        Feature::Fires => (
+            "Пожары",
+            "лес, рощи и поселения горят; огонь перекидывается на соседей и оставляет пепел",
         ),
     }
 }

@@ -75,6 +75,9 @@ enum ActionButton {
     Recruit(u32),
     /// A road on the hex underfoot (§21.8).
     Pave,
+    /// Set a hex beside you alight, or put a fire out.
+    Kindle(hexx::Hex),
+    Douse(hexx::Hex),
     Quarter(hexx::Hex),
 }
 
@@ -506,6 +509,22 @@ fn rebuild_action(
                 format!("Замостить\n{} Духа", necromy_rules::PAVE_SPIRIT),
             ));
         }
+        if spirit >= necromy_rules::DOUSE_SPIRIT
+            && let Some(&hex) = g.dousable(human).first()
+        {
+            buttons.push((
+                ActionButton::Douse(hex),
+                format!("Потушить\n{} Духа", necromy_rules::DOUSE_SPIRIT),
+            ));
+        }
+        if spirit >= necromy_rules::KINDLE_SPIRIT
+            && let Some(&hex) = g.kindleable(human).first()
+        {
+            buttons.push((
+                ActionButton::Kindle(hex),
+                format!("Поджечь\n{} Духа", necromy_rules::KINDLE_SPIRIT),
+            ));
+        }
         if spirit >= necromy_rules::QUARTER_SPIRIT
             && let Some(&hex) = g.quarters(human).first()
         {
@@ -563,6 +582,8 @@ fn action_buttons(
             ActionButton::Quarter(hex) => Intent::Quarter { hex: *hex },
             ActionButton::Recruit(mob) => Intent::Recruit { mob: *mob },
             ActionButton::Pave => Intent::Pave,
+            ActionButton::Kindle(hex) => Intent::Kindle { hex: *hex },
+            ActionButton::Douse(hex) => Intent::Douse { hex: *hex },
             ActionButton::Cycle => Intent::Cycle {
                 cards: selection.sift.take().unwrap_or_default(),
             },

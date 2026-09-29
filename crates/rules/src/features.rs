@@ -59,10 +59,12 @@ pub enum Feature {
     Piranhas,
     /// Roads: a step along one costs one; nobody hides on them.
     Roads,
+    /// Fires: woods, groves and settlements burn to ash.
+    Fires,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 21] = [
+    pub const ALL: [Feature; 22] = [
         Feature::Bodies,
         Feature::Groves,
         Feature::Settlements,
@@ -84,6 +86,7 @@ impl Feature {
         Feature::Lakes,
         Feature::Piranhas,
         Feature::Roads,
+        Feature::Fires,
     ];
 
     /// What the world must have before this can come in (§21.2): all of
@@ -100,6 +103,7 @@ impl Feature {
             Feature::Rivers => &[Land(&[Terrain::Mountain, Terrain::Swamp])],
             Feature::Lakes => &[Has(Feature::Rivers)],
             Feature::Roads => &[Has(Feature::Settlements)],
+            Feature::Fires => &[Land(&[Terrain::Forest, Terrain::Grove])],
             Feature::Piranhas => &[Has(Feature::Beasts), Has(Feature::Rivers)],
             Feature::Groves | Feature::Undead => &[Has(Feature::Bodies)],
             Feature::Militia => &[Has(Feature::Settlements)],
@@ -123,9 +127,11 @@ impl Feature {
             Feature::Groves | Feature::Beasts | Feature::Companions | Feature::Piranhas => {
                 God::Bhava
             }
-            Feature::Settlements | Feature::Cargo | Feature::Buildings | Feature::City => {
-                God::Trishna
-            }
+            Feature::Settlements
+            | Feature::Cargo
+            | Feature::Buildings
+            | Feature::City
+            | Feature::Fires => God::Trishna,
             Feature::Bodies | Feature::Poison | Feature::Trials | Feature::Legion => God::Zaga,
             Feature::Militia | Feature::Loot | Feature::Guard | Feature::Roads => God::Ahamar,
             Feature::Undead
