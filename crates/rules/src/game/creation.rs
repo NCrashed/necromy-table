@@ -64,6 +64,7 @@ impl Game {
         self.traps.retain(|t| t.hex != hex);
         self.trials.retain(|t| t.hex != hex);
         self.ground.retain(|(h, _)| *h != hex);
+        self.loads.retain(|(h, _)| *h != hex);
         self.claims.remove(&key);
         self.militia.remove(&key);
         self.ruins.remove(&key);
@@ -300,7 +301,8 @@ impl Game {
             | Feature::Poison
             | Feature::Guard
             | Feature::Stealth
-            | Feature::Beasts => {}
+            | Feature::Beasts
+            | Feature::Cargo => {}
         }
     }
 

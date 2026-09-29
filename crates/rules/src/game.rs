@@ -77,6 +77,8 @@ pub struct Champion {
     pub poison: Option<Poison>,
     /// Worn items by `Slot::index` (§20.3).
     pub gear: [Option<crate::items::ItemId>; 3],
+    /// What they carry (§21.8).
+    pub cargo: Option<cargo::Cargo>,
 }
 
 impl Champion {
@@ -109,6 +111,7 @@ impl Champion {
             seen_at: hex,
             poison: None,
             gear: [None; 3],
+            cargo: None,
         }
     }
 
@@ -166,6 +169,10 @@ pub enum Intent {
     ChooseDeed {
         deed: victory::GreatDeed,
     },
+    /// On your turn: take the body (or burden) underfoot on your back (§21.8).
+    Take,
+    /// On your turn: lay down what you carry where you stand.
+    Lay,
     /// Once a turn: let these cards go and draw one fewer, as many at a
     /// temple (§21.2).
     Cycle {
@@ -690,6 +697,24 @@ pub enum Event {
         god: God,
         player: Option<PlayerId>,
     },
+    /// `player` took `cargo` on their back from `hex` (§21.8).
+    CargoTaken {
+        player: PlayerId,
+        cargo: cargo::Cargo,
+        hex: Hex,
+    },
+    /// `player` laid `cargo` down on `hex`, or it fell there.
+    CargoLaid {
+        player: PlayerId,
+        cargo: cargo::Cargo,
+        hex: Hex,
+    },
+    /// `player` won `cargo` off `from` in battle.
+    CargoSeized {
+        player: PlayerId,
+        from: PlayerId,
+        cargo: cargo::Cargo,
+    },
     /// `player` did something first at this table (§21.5); Style follows.
     First {
         player: PlayerId,
@@ -1035,6 +1060,8 @@ pub enum RuleError {
     NoCycle,
     /// Not a deed this player was offered, or one is chosen already.
     InvalidDeed,
+    /// Nothing to take here, or nothing carried to lay down.
+    NoCargo,
 }
 
 impl std::fmt::Display for RuleError {
@@ -1044,6 +1071,7 @@ impl std::fmt::Display for RuleError {
             RuleError::NotAtTemple => write!(f, "not at a temple"),
             RuleError::NotRuins => write!(f, "not the ruins of a settlement"),
             RuleError::InvalidDeed => write!(f, "not a deed to choose"),
+            RuleError::NoCargo => write!(f, "nothing to take or to lay down"),
             RuleError::NoCycle => write!(f, "the hand went through already or holds no such card"),
             RuleError::NothingWorn => write!(f, "nothing worn there"),
             RuleError::UnknownPlayer => write!(f, "unknown player"),
@@ -1173,6 +1201,8 @@ pub struct Game {
     fog: BTreeMap<(i32, i32), PlayerId>,
     /// Land the wish being granted raised, for its god's twist.
     raised: Vec<Hex>,
+    /// Burdens lying on the ground (§21.8).
+    loads: Vec<(Hex, cargo::Cargo)>,
     /// Who did what first at the table (§21.5).
     firsts: BTreeMap<novelty::Novelty, PlayerId>,
     /// Per player, battles won so far: each is worth less.
@@ -1303,6 +1333,7 @@ impl Game {
             deferred: Vec::new(),
             fog: BTreeMap::new(),
             raised: Vec::new(),
+            loads: Vec::new(),
             firsts: BTreeMap::new(),
             won: vec![0; champions_len],
             log: Vec::new(),
@@ -1828,6 +1859,8 @@ impl Game {
             Intent::Play { card, target } => self.play_own(player, card, target, events),
             Intent::Sacrifice { slot } => self.sacrifice(player, slot, events),
             Intent::Rebuild => self.rebuild(player, events),
+            Intent::Take => self.take(player, events),
+            Intent::Lay => self.lay(player, events),
             Intent::Cycle { cards } => {
                 self.cycle(player, &cards, events);
                 Ok(())
@@ -1854,6 +1887,8 @@ impl Game {
             Intent::Play { card, target } => self.check_play(player, card, target),
             Intent::Sacrifice { slot } => self.check_sacrifice(player, slot).map(|_| ()),
             Intent::Rebuild => self.check_rebuild(player).map(|_| ()),
+            Intent::Take => self.check_take(player).map(|_| ()),
+            Intent::Lay => self.check_lay(player).map(|_| ()),
             Intent::Cycle { ref cards } => self.check_cycle(player, cards),
             _ => Err(RuleError::WrongTiming),
         }
@@ -2286,6 +2321,8 @@ impl Game {
             | Intent::EndTurn
             | Intent::Sacrifice { .. }
             | Intent::Rebuild
+            | Intent::Take
+            | Intent::Lay
             | Intent::Cycle { .. } => {
                 return Err(RuleError::WindowOpen);
             }
@@ -2882,6 +2919,7 @@ impl Game {
             })
             .unwrap_or(home);
         self.drop_on_fall(player, at, events);
+        self.drop_cargo(player, at, events);
         // Whoever falls wakes at home, in plain sight.
         self.reveal(player, stealth::RevealReason::Stumbled, events);
         let champ = self.champ_mut(player);
@@ -3024,6 +3062,11 @@ impl Game {
         if rooted {
             self.turns[player.0 as usize].move_points = 0;
         }
+        // A burden makes the road longer (§21.8).
+        if self.champions[player.0 as usize].cargo.is_some() {
+            let turn = &mut self.turns[player.0 as usize];
+            turn.move_points = turn.move_points.saturating_sub(1);
+        }
         events.push(Event::TurnStarted {
             player,
             move_points: self.move_points(player),
@@ -3108,6 +3151,7 @@ impl Game {
 
 mod battle;
 mod beasts;
+mod cargo;
 mod creation;
 mod dusk;
 mod gear;
@@ -3128,6 +3172,7 @@ mod wish;
 mod world;
 pub use battle::Score;
 pub use beasts::{BEAST_DICE, BEAST_HEALTH, BEAST_RANGE};
+pub use cargo::Cargo;
 pub use dusk::{DuskStep, Seal, SealedWish};
 pub use gear::{Gain, SACRIFICE};
 pub use guard::{GUARD_DICE, GUARD_HEALTH, GUARD_RELIEF, GUARD_STEPS, Guard};

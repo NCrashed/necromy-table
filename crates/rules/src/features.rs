@@ -41,10 +41,12 @@ pub enum Feature {
     Stealth,
     /// Bhava's beasts out of his woods at night.
     Beasts,
+    /// A burden on a champion's back: a body, later food, goods (§21.8).
+    Cargo,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 12] = [
+    pub const ALL: [Feature; 13] = [
         Feature::Bodies,
         Feature::Groves,
         Feature::Settlements,
@@ -57,6 +59,7 @@ impl Feature {
         Feature::Guard,
         Feature::Stealth,
         Feature::Beasts,
+        Feature::Cargo,
     ];
 
     /// What the world must have before this can come in (§21.2): all of
@@ -65,6 +68,7 @@ impl Feature {
         use Need::*;
         match self {
             Feature::Bodies | Feature::Settlements | Feature::Guard => &[],
+            Feature::Cargo => &[Has(Feature::Bodies)],
             Feature::Groves | Feature::Undead => &[Has(Feature::Bodies)],
             Feature::Militia => &[Has(Feature::Settlements)],
             Feature::Ruins => &[Has(Feature::Settlements), Has(Feature::Undead)],
@@ -81,7 +85,7 @@ impl Feature {
     pub const fn domain(self) -> God {
         match self {
             Feature::Groves | Feature::Beasts => God::Bhava,
-            Feature::Settlements => God::Trishna,
+            Feature::Settlements | Feature::Cargo => God::Trishna,
             Feature::Bodies | Feature::Poison | Feature::Trials => God::Zaga,
             Feature::Militia | Feature::Loot | Feature::Guard => God::Ahamar,
             Feature::Undead | Feature::Ruins | Feature::Stealth => God::Maya,

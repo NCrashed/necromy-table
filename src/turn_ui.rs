@@ -66,6 +66,9 @@ enum ActionButton {
     Rebuild,
     /// Let the marked cards go and draw anew (§21.2).
     Cycle,
+    /// Take the burden underfoot, lay down the one carried (§21.8).
+    Take,
+    Lay,
 }
 
 fn spawn(mut commands: Commands, font: Res<UiFont>) {
@@ -451,7 +454,23 @@ fn rebuild_action(
     commands.entity(texts).add_children(&[main, hint]);
     commands.entity(panel).add_child(texts);
 
-    if let Some((action, label)) = button {
+    // What this spot offers besides (§21.8): a burden to take or lay down.
+    let mut buttons: Vec<(ActionButton, String)> = button
+        .map(|(a, l)| (a, l.to_string()))
+        .into_iter()
+        .collect();
+    if game.is_human_turn() && selection.card.is_none() && selection.sift.is_none() {
+        if let Some(cargo) = g.takeable(human) {
+            buttons.push((
+                ActionButton::Take,
+                format!("Взять\n{}", names::cargo(cargo)),
+            ));
+        }
+        if g.cargo(human).is_some() {
+            buttons.push((ActionButton::Lay, "Положить\nношу".to_string()));
+        }
+    }
+    for (action, label) in buttons {
         let b = commands
             .spawn((
                 action,
@@ -491,6 +510,8 @@ fn action_buttons(
         let intent = match button {
             ActionButton::EndTurn => Intent::EndTurn,
             ActionButton::Rebuild => Intent::Rebuild,
+            ActionButton::Take => Intent::Take,
+            ActionButton::Lay => Intent::Lay,
             ActionButton::Cycle => Intent::Cycle {
                 cards: selection.sift.take().unwrap_or_default(),
             },

@@ -188,8 +188,10 @@ impl Game {
         // Whoever dealt more takes Style from the other (§6.3).
         if to_defender > to_attacker {
             self.battle_style(attacker, defender, events);
+            self.seize_cargo(attacker, defender, events);
         } else if to_attacker > to_defender {
             self.battle_style(defender, attacker, events);
+            self.seize_cargo(defender, attacker, events);
         }
         // Trishna's Thirst: whoever drew more blood drinks a Spirit (§5.3).
         if self.law_active(super::Law::Thirst) && to_defender != to_attacker {

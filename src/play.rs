@@ -1812,6 +1812,30 @@ impl Match {
                     None => format!("В мир приходит новое — {name}: {what}."),
                 }
             }
+            Event::CargoTaken { player, cargo, .. } => {
+                format!(
+                    "{} берёт на плечи: {}.",
+                    self.name(*player),
+                    names::cargo(*cargo)
+                )
+            }
+            Event::CargoLaid { player, cargo, .. } => {
+                format!(
+                    "{} опускает ношу: {}.",
+                    self.name(*player),
+                    names::cargo(*cargo)
+                )
+            }
+            Event::CargoSeized {
+                player,
+                from,
+                cargo,
+            } => format!(
+                "{} забирает у {} ношу: {}.",
+                self.name(*player),
+                self.name_genitive(*from),
+                names::cargo(*cargo)
+            ),
             Event::First { player, novelty } => format!(
                 "{} первым за столом {}: +{} Стиля.",
                 self.name(*player),

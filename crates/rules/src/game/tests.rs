@@ -4695,3 +4695,46 @@ fn a_still_board_lets_the_darkest_god_bring_something_in() {
     assert_eq!(grown.len(), 1);
     assert_eq!(grown[0].domain(), God::Maya);
 }
+
+// ---- Burdens (§21.8) ----
+
+#[test]
+fn a_body_is_carried_a_step_shorter_and_laid_down_again() {
+    let (mut g, me, _) = duel(3);
+    let here = g.champion(me).unwrap().hex;
+    g.board.tile_mut(here).unwrap().corpse = Some(Corpse::fresh());
+    g.apply(me, Intent::Take).unwrap();
+    assert_eq!(g.cargo(me), Some(Cargo::Body { hero: false }));
+    assert!(g.board().tile(here).unwrap().corpse.is_none());
+    assert_eq!(
+        g.apply(me, Intent::Take),
+        Err(RuleError::NoCargo),
+        "one at a time"
+    );
+    // A step shorter next turn.
+    g.end_turn_and_settle();
+    while g.phase(me) != &Phase::Acting {
+        g.end_turn_and_settle();
+    }
+    assert_eq!(g.move_points(me), MOVE_POINTS - 1);
+    let there = g.champion(me).unwrap().hex;
+    g.apply(me, Intent::Lay).unwrap();
+    assert!(g.cargo(me).is_none());
+    assert!(g.board().tile(there).unwrap().corpse.is_some());
+}
+
+#[test]
+fn the_winner_takes_the_losers_burden() {
+    let (mut g, me, foe) = duel(3);
+    g.champ_mut(foe).cargo = Some(Cargo::Body { hero: true });
+    let mut ev = Vec::new();
+    g.seize_cargo(me, foe, &mut ev);
+    assert_eq!(g.cargo(me), Some(Cargo::Body { hero: true }));
+    assert!(g.cargo(foe).is_none());
+    // The fallen drop theirs where they fall.
+    g.champ_mut(foe).cargo = Some(Cargo::Body { hero: false });
+    let at = g.champion(foe).unwrap().hex;
+    g.fall(foe, &mut ev);
+    assert!(g.cargo(foe).is_none());
+    assert!(g.board().tile(at).unwrap().corpse.is_some() || !g.loads().is_empty());
+}

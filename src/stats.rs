@@ -565,6 +565,17 @@ fn stat_sheet(
 
     // What the militia think of them (§20.4), in the colour of the pennant
     // over every militia: whether they let this champion through.
+    // What they carry (§21.8).
+    if let Some(cargo) = g.cargo(player) {
+        let line = label(
+            commands,
+            font,
+            &format!("ноша: {} (шаг короче)", names::cargo(cargo)),
+            12.0,
+            true,
+        );
+        rows.push(line);
+    }
     // Only in a world with militia (§21.2).
     if g.has(necromy_rules::Feature::Militia) {
         let standing = g.standing(player);

@@ -158,6 +158,7 @@ pub fn feature_id(f: Feature) -> &'static str {
         Feature::Guard => "guard",
         Feature::Stealth => "stealth",
         Feature::Beasts => "beasts",
+        Feature::Cargo => "cargo",
     }
 }
 
@@ -176,6 +177,7 @@ fn feature_words(f: Feature) -> &'static str {
         Feature::Guard => "королевская гвардия",
         Feature::Stealth => "умение скрываться",
         Feature::Beasts => "звери Бхавы",
+        Feature::Cargo => "ноша: носить тела и грузы",
     }
 }
 

@@ -318,6 +318,10 @@ pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {
         ),
         Feature::Stealth => ("Скрытность", "в лесу и болоте ночью можно скрыться"),
         Feature::Beasts => ("Звери", "ночью из лесов Бхавы выходят звери"),
+        Feature::Cargo => (
+            "Ноша",
+            "тело можно взять и нести, на шаг медленнее; победитель забирает ношу побеждённого",
+        ),
     }
 }
 
@@ -838,5 +842,14 @@ pub fn mob(kind: necromy_rules::MobKind, id: u32) -> (&'static str, &'static str
     match kind {
         necromy_rules::MobKind::Undead => ("Неупокоенный", "неупокоенного"),
         necromy_rules::MobKind::Beast { .. } => BEASTS[id as usize % BEASTS.len()],
+    }
+}
+
+/// A burden a champion carries (§21.8).
+pub fn cargo(c: necromy_rules::Cargo) -> &'static str {
+    use necromy_rules::Cargo;
+    match c {
+        Cargo::Body { hero: true } => "тело чемпиона",
+        Cargo::Body { hero: false } => "тело",
     }
 }
