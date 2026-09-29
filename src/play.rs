@@ -1990,7 +1990,27 @@ impl Match {
             Event::MobFell { by, .. } => {
                 format!("{} упокаивает неупокоенного.", self.name(*by))
             }
-            Event::MilitiaStruck { .. } => "Ополчение поселения рубит неупокоенного.".into(),
+            Event::MilitiaStruck { mob, .. } => {
+                format!("Ополчение поселения рубит {}.", self.mob_name(*mob).1)
+            }
+            Event::MilitiaHit {
+                player,
+                why: necromy_rules::MilitiaWhy::Loud,
+                ..
+            } => format!(
+                "Ополчение бьёт {}: от такого шума жди беды (Угроза).",
+                self.name_accusative(*player)
+            ),
+            Event::MilitiaHit {
+                player,
+                why: necromy_rules::MilitiaWhy::Pursuer { friend },
+                ..
+            } => format!(
+                "Ополчение заступается за {} и бьёт {}.",
+                self.name_accusative(*friend),
+                self.name_accusative(*player)
+            ),
+            Event::GuardHewed { .. } => "Гвардия по пути рубит неупокоенного.".into(),
             Event::SettlementRuined { .. } => {
                 "Неупокоенные разорили поселение без ополчения: теперь там руины.".into()
             }

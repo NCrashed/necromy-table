@@ -557,6 +557,21 @@ fn tooltip(
         } else {
             "шаг сюда — бой с ополчением! (они тебе не рады)".into()
         });
+        // Whom they will strike in the world phase, if nothing else comes.
+        if let Some((p, why)) = g.militia_target(hex) {
+            let reason = match why {
+                necromy_rules::MilitiaWhy::Loud => "слишком шумно".to_string(),
+                necromy_rules::MilitiaWhy::Pursuer { friend } => {
+                    format!("нападал(а) на их друга, {}", game.name(friend))
+                }
+            };
+            lines.push(format!("в ход мира ударят: {} — {reason}", game.name(p)));
+        } else {
+            lines.push(format!(
+                "бьют не-друзей рядом: шумных (Угроза {}+) и обидчиков своих друзей",
+                g.guard_threshold()
+            ));
+        }
     } else if let Some(men) = g.militia(hex) {
         lines.push(format!(
             "ополчение: {men}/{} — сейчас не на месте",
@@ -578,6 +593,7 @@ fn tooltip(
             "здесь королевская гвардия: {hp}/{} здоровья",
             necromy_rules::GUARD_HEALTH
         ));
+        lines.push("по пути рубит неупокоенных".into());
     }
     if game.is_human_turn() {
         if g.attackable(game.human).contains(&hex) && g.militia_at(hex).is_some() {

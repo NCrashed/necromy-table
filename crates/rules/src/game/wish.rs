@@ -1028,6 +1028,7 @@ impl Game {
             && self.def(card).effect.is_harmful()
         {
             self.break_truce(player, other, events);
+            self.note_pursuit(player, other);
         }
     }
 }

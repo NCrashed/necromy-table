@@ -156,8 +156,9 @@ impl Game {
     /// away from home go back.
     ///
     /// At a gate the two sides trade blows: each undead next to militia
-    /// knocks a man down, then the militia wound one undead that did not
-    /// just come up (an undead takes two). A lone undead left alone takes a
+    /// knocks a man down, then the militia wound one mob that did not just
+    /// come up (an undead takes two, a beast three) or, with none next to
+    /// them, strike a champion they hold something against (`militia_hit`). A lone undead left alone takes a
     /// settlement in a few phases unless a dawn brings a man back in time
     /// or a champion comes to help; two at once are faster.
     pub(super) fn mob_phase(&mut self, events: &mut Vec<Event>) {
@@ -210,15 +211,18 @@ impl Game {
             .militias()
             .filter_map(|(home, m)| m.at.filter(|_| m.men > 0).map(|at| (home, at)))
             .collect();
-        for (_, at) in posts {
+        for (home, at) in posts {
+            // A mob next to them first (undead or beast), else a champion
+            // they hold something against.
             let Some(id) = self
                 .mobs
                 .iter()
-                .filter(|u| u.is_undead() && u.hex.unsigned_distance_to(at) <= 1)
+                .filter(|u| u.hex.unsigned_distance_to(at) <= 1)
                 .filter(|u| !arrived.contains(&u.id))
                 .min_by_key(|u| (u.hp, u.id))
                 .map(|u| u.id)
             else {
+                self.militia_hit(home, at, events);
                 continue;
             };
             let Some(u) = self.mobs.iter_mut().find(|u| u.id == id) else {
@@ -229,10 +233,7 @@ impl Game {
             events.push(Event::MobHurt { id, amount: 1, hp });
             if hp == 0 {
                 self.mobs.retain(|u| u.id != id);
-                events.push(Event::MilitiaStruck {
-                    hex: at,
-                    undead: id,
-                });
+                events.push(Event::MilitiaStruck { hex: at, mob: id });
             }
         }
 

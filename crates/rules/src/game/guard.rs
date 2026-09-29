@@ -11,6 +11,9 @@
 //! Brought down, it leaves the board, and whoever felled it takes Style and
 //! an item from the loot deck. While someone is still loud, a fresh guard
 //! comes out of the Table in the next world phase.
+//!
+//! Trained against necromancy, it hews down an undead next to it on its
+//! way whenever its quarry is not yet in reach.
 
 use hexx::Hex;
 use serde::{Deserialize, Serialize};
@@ -108,6 +111,18 @@ impl Game {
 
         if guard.hex.unsigned_distance_to(goal) <= 1 {
             self.guard_strike(target, events);
+        } else if let Some(undead) = self
+            .mobs
+            .iter()
+            .filter(|m| m.is_undead() && m.hex.unsigned_distance_to(guard.hex) <= 1)
+            .map(|m| m.id)
+            .min()
+        {
+            self.mobs.retain(|m| m.id != undead);
+            events.push(Event::GuardHewed {
+                hex: guard.hex,
+                undead,
+            });
         }
     }
 

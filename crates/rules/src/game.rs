@@ -373,6 +373,11 @@ pub enum Event {
     GuardLeft {
         hex: Hex,
     },
+    /// On its way the guard hewed down undead `undead` next to it.
+    GuardHewed {
+        hex: Hex,
+        undead: u32,
+    },
     GuardStruck {
         target: PlayerId,
     },
@@ -428,10 +433,18 @@ pub enum Event {
         hex: Hex,
         by: PlayerId,
     },
-    /// A settlement's militia cut down undead `undead` next to it.
+    /// A settlement's militia standing on `hex` cut down mob `mob` next
+    /// to them.
     MilitiaStruck {
         hex: Hex,
-        undead: u32,
+        mob: u32,
+    },
+    /// The militia of `home` struck `player` next to them in the world
+    /// phase, for `why`; a hit that never takes the last health follows.
+    MilitiaHit {
+        home: Hex,
+        player: PlayerId,
+        why: militia::MilitiaWhy,
     },
     /// No militia held it: the undead laid it waste.
     SettlementRuined {
@@ -1019,6 +1032,8 @@ pub struct Game {
     /// Settlements the undead laid waste, to be built again (§20.4).
     ruins: std::collections::BTreeSet<(i32, i32)>,
     standing: Vec<i8>,
+    /// Per player, the rival who last went after them and the round.
+    pursuers: Vec<Option<(PlayerId, u32)>>,
     taste: style::Taste,
     /// Per player, what they did since the last dusk.
     deeds: Vec<Vec<style::Deed>>,
@@ -1139,6 +1154,7 @@ impl Game {
             militia,
             ruins: Default::default(),
             standing: vec![0; setup.champions.len()],
+            pursuers: vec![None; setup.champions.len()],
             taste,
             deeds: vec![Vec::new(); champions_len],
             guard: None,
@@ -2860,7 +2876,8 @@ pub use gear::{Gain, SACRIFICE};
 pub use guard::{GUARD_DICE, GUARD_HEALTH, GUARD_RELIEF, GUARD_STEPS, Guard};
 pub use laws::{BURDEN_FREE, CHOSEN, CRACK_REACH, Law, Patronage, SENTENCE_THRESHOLD, SIGN, VOICE};
 pub use militia::{
-    FRIENDLY, HOSTILE, MILITIA, MILITIA_PASS, Militia, REBUILD_SPIRIT, REBUILD_STANDING,
+    FRIENDLY, HOSTILE, MILITIA, MILITIA_PASS, Militia, MilitiaWhy, PURSUIT_ROUNDS, REBUILD_SPIRIT,
+    REBUILD_STANDING,
 };
 pub use mobs::{
     MAX_UNDEAD, Mob, MobKind, UNDEAD_AGE, UNDEAD_AGE_DARK, UNDEAD_DICE, UNDEAD_HEALTH, UNDEAD_SIGHT,

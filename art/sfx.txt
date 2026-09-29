@@ -90,3 +90,4 @@ menu-pick	0.5	3	A small object is quickly plucked up by a hand: a light airy who
 menu-squeak	0.5	4	A tiny woodland animal is startled and lets out one short surprised squeak
 menu-thud	0.5	4	A small soft object lands on grass and soil: a short muffled thud
 menu-thump	0.6	3	A heavy chunk of stone and earth lands on the ground: a deep short thump with a scatter of pebbles and a rustle of leaves
+guard-hew	1.0	3	An armoured knight hews down a skeleton with one heavy sword blow: a steel swing, a crack of dry bones scattering and a short ghostly hiss

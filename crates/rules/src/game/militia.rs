@@ -12,6 +12,11 @@
 //! stood, and go home in the next world phase. The others have to fight
 //! their way in, and the militia remember it.
 //!
+//! With no mob next to them, the militia strike a champion next to them
+//! who is not their friend: whoever went after one of their friends in
+//! their sight (`pursuer`), else whoever is loud enough for the guard. A
+//! blow of theirs never takes the last health.
+//!
 //! The ruins of a settlement can be built again: standing on them, on
 //! one's own turn, for `REBUILD_SPIRIT` and the rest of the turn's walk. The
 //! builder holds it, one man comes back, and the militia think better of them.
@@ -40,6 +45,9 @@ pub const REBUILD_SPIRIT: u8 = 2;
 pub const REBUILD_STANDING: i8 = 2;
 /// What cutting the militia down costs with the rest of them.
 const KILLED_MILITIA: i8 = -2;
+/// Rounds the militia hold it against whoever went after a friend of theirs:
+/// the one it happened in and the next.
+pub const PURSUIT_ROUNDS: u32 = 1;
 /// Separates militia throws from the others.
 const MILITIA_STREAM: u64 = 0x0000_f011;
 
@@ -49,6 +57,15 @@ pub struct Militia {
     /// Where they stand: home, or where a champion they let in stood.
     /// `None` while nobody stands for them (none left, or on their way).
     pub at: Option<Hex>,
+}
+
+/// Why the militia struck a champion in the world phase.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MilitiaWhy {
+    /// They went after `friend`, a friend of the militia, nearby.
+    Pursuer { friend: PlayerId },
+    /// Their Threat is up to the guard's threshold.
+    Loud,
 }
 
 impl Game {
@@ -113,6 +130,60 @@ impl Game {
             let standing = *s;
             events.push(Event::StandingChanged { player, standing });
         }
+    }
+
+    /// `attacker` went after `victim`: a battle or a harmful card.
+    pub(super) fn note_pursuit(&mut self, attacker: PlayerId, victim: PlayerId) {
+        if attacker != victim {
+            self.pursuers[victim.0 as usize] = Some((attacker, self.round));
+        }
+    }
+
+    /// The rival who went after `victim` lately, this round or the one
+    /// before (`PURSUIT_ROUNDS`).
+    pub fn pursuer(&self, victim: PlayerId) -> Option<PlayerId> {
+        self.pursuers
+            .get(victim.0 as usize)
+            .copied()
+            .flatten()
+            .filter(|&(_, round)| self.round - round <= PURSUIT_ROUNDS)
+            .map(|(p, _)| p)
+    }
+
+    /// Whom the militia standing on `at` would strike, and why: a champion
+    /// next to them in sight and not their friend, who went after a friend
+    /// of theirs within two hexes, else who is loud.
+    pub fn militia_target(&self, at: Hex) -> Option<(PlayerId, MilitiaWhy)> {
+        let near: Vec<PlayerId> = self
+            .players()
+            .filter(|&p| !self.is_hidden(p) && self.standing(p) < FRIENDLY)
+            .filter(|&p| self.hex_of(p).unsigned_distance_to(at) <= 1)
+            .collect();
+        let pursued = near.iter().find_map(|&p| {
+            self.players()
+                .filter(|&f| f != p && self.standing(f) >= FRIENDLY)
+                .filter(|&f| self.hex_of(f).unsigned_distance_to(at) <= 2)
+                .find(|&f| self.pursuer(f) == Some(p))
+                .map(|friend| (p, MilitiaWhy::Pursuer { friend }))
+        });
+        pursued.or_else(|| {
+            near.iter()
+                .find(|&&p| self.threat(p) >= self.guard_threshold())
+                .map(|&p| (p, MilitiaWhy::Loud))
+        })
+    }
+
+    /// World phase: the militia of `home`, standing on `at`, strike whom
+    /// `militia_target` names. Returns whether they struck.
+    pub(super) fn militia_hit(&mut self, home: Hex, at: Hex, events: &mut Vec<Event>) -> bool {
+        let Some((player, why)) = self.militia_target(at) else {
+            return false;
+        };
+        events.push(Event::MilitiaHit { home, player, why });
+        if self.champions[player.0 as usize].hp > 1 {
+            self.damage(player, 1, events);
+        }
+        true
     }
 
     /// A settlement within two hexes of `hex`: its people see what happens.

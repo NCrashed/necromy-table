@@ -962,6 +962,8 @@ fn hear_events(
             Event::SettlementRuined { hex } => (Sound::new("settlement-ruined"), Heard::At(*hex)),
             Event::MilitiaHelped { player, .. } => (Sound::new("heal"), by(*player)),
             Event::MilitiaBeat { player, .. } => (Sound::new("hurt"), by(*player)),
+            Event::MilitiaHit { player, .. } => (Sound::new("militia-strike"), by(*player)),
+            Event::GuardHewed { hex, .. } => (Sound::new("guard-hew"), Heard::At(*hex)),
             Event::GuardStruck { target } => {
                 if *target == human {
                     in_battle = true;
