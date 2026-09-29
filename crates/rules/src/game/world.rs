@@ -107,6 +107,7 @@ impl Game {
         self.settle_wagers(events);
         self.settle_player_bets(events);
         self.duels_at_dusk(events);
+        self.treasuries_at_dusk();
     }
 
     /// Dusk, after the wishes: Trishna pulls, then every god whose pressure

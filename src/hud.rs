@@ -614,6 +614,14 @@ fn tooltip(
             game.name(p)
         ));
     }
+    if let Some(d) = g.delve(hex) {
+        let below = if d.treasury {
+            format!("сокровищница, охрана {}, цела закатов {}", d.guards, d.held)
+        } else {
+            format!("туннелей {}/{}", d.tunnels, necromy_rules::HALL_DEPTH)
+        };
+        lines.push(format!("ход вниз ({}): {below}", game.name(d.owner)));
+    }
     let food = g.food_at(hex);
     if food > 0 {
         lines.push(format!(

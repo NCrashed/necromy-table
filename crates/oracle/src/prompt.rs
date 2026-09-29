@@ -190,6 +190,7 @@ pub fn feature_id(f: Feature) -> &'static str {
         Feature::WalkingGroves => "walking_groves",
         Feature::Arena => "arena",
         Feature::Debts => "debts",
+        Feature::Underworld => "underworld",
     }
 }
 
@@ -232,6 +233,7 @@ fn feature_words(f: Feature) -> &'static str {
         Feature::WalkingGroves => "бродячие рощи",
         Feature::Arena => "арены и дуэли",
         Feature::Debts => "пари между игроками и долги",
+        Feature::Underworld => "подземный мир под руинами",
     }
 }
 

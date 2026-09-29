@@ -335,6 +335,12 @@ fn walk(game: &Game, player: PlayerId) -> Intent {
                 .min_by_key(|&hex| (me.hex.unsigned_distance_to(hex), hex.x(), hex.y())),
             _ => None,
         })
+        // A rival's treasury on its eve: to raid it.
+        .or_else(|| {
+            game.delves()
+                .find(|(_, d)| d.owner != player && d.treasury && game.on_eve(d.owner))
+                .map(|(h, _)| h)
+        })
         // Called to a duel: to the one who called.
         .or_else(|| {
             game.duels()
@@ -483,6 +489,7 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
             | GreatDeed::Arena
             | GreatDeed::DebtBondage
             | GreatDeed::DeadBall
+            | GreatDeed::Treasury
             | GreatDeed::Amazon => wish(
                 God::Maya,
                 crate::Act::Veil {
@@ -705,6 +712,20 @@ fn deed_goal(game: &Game, player: PlayerId) -> Option<Hex> {
             }
         }
         GreatDeed::DebtBondage => None,
+        // Its way down, else ruins to open one under.
+        GreatDeed::Treasury => {
+            let me = game.champion(player)?.hex;
+            if let Some((h, _)) = game.delves().find(|(_, d)| d.owner == player) {
+                return (h != me).then_some(h);
+            }
+            game.board()
+                .land()
+                .filter(|(h, t)| {
+                    t.terrain == crate::Terrain::Ruins && game.delve(*h).is_none() && *h != me
+                })
+                .map(|(h, _)| h)
+                .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
+        }
         // A grove to wake, while none of its own walks.
         GreatDeed::WalkingForest => {
             if game.walkers().any(|(_, p)| p == player) {
@@ -1058,6 +1079,29 @@ fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
         })
     {
         return Some(Intent::Douse { hex });
+    }
+    // A treasury it can take, it takes; its own, it works on.
+    let work = game.delve_work(player);
+    let here = game.champion(player)?.hex;
+    if work.contains(&crate::DelveWork::Raid)
+        && let Some(d) = game.delve(here)
+        && game.champion(player)?.might + companions_worth(game, player) > d.guards + 1
+    {
+        return Some(Intent::Delve {
+            work: crate::DelveWork::Raid,
+        });
+    }
+    if game.deed(player) == Some(GreatDeed::Treasury)
+        && let Some(&w) = [
+            crate::DelveWork::Treasury,
+            crate::DelveWork::Dig,
+            crate::DelveWork::Open,
+            crate::DelveWork::Guard,
+        ]
+        .iter()
+        .find(|w| work.contains(w))
+    {
+        return Some(Intent::Delve { work: w });
     }
     // A debt it can pay, it pays.
     if let Some(d) = game
@@ -1427,4 +1471,14 @@ fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
         }
         _ => None,
     }
+}
+
+/// Dice a champion's companions add, as the rules count them.
+fn companions_worth(game: &Game, player: PlayerId) -> u8 {
+    let worth: u8 = game
+        .companions(player)
+        .iter()
+        .map(|&c| if c == crate::Companion::Dragon { 2 } else { 1 })
+        .sum();
+    worth.min(crate::COMPANION_DICE)
 }

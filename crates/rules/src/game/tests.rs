@@ -5772,3 +5772,42 @@ fn a_night_feast_with_the_dead_near_kept_till_dawn_is_a_ball() {
     g.ball_at_dawn(&mut ev);
     assert!(!g.kept_ball(me));
 }
+
+// ---- The underworld (§21.8) ----
+
+#[test]
+fn a_treasury_under_ruins_is_dug_guarded_and_raided() {
+    let (mut g, me, foe) = duel(4);
+    g.chosen[me.0 as usize] = Some(GreatDeed::Treasury);
+    let ruins = Hex::new(0, 2);
+    set_terrain(&mut g, ruins, Terrain::Ruins);
+    g.place(me, ruins);
+    g.champ_mut(me).spirit_points = 9;
+    let mut ev = Vec::new();
+    g.work_delve(me, DelveWork::Open, &mut ev).unwrap();
+    for _ in 0..HALL_DEPTH {
+        g.work_delve(me, DelveWork::Dig, &mut ev).unwrap();
+    }
+    assert_eq!(
+        g.work_delve(me, DelveWork::Dig, &mut ev),
+        Err(RuleError::CannotBuild)
+    );
+    g.work_delve(me, DelveWork::Treasury, &mut ev).unwrap();
+    g.champ_mut(me).companions = vec![Companion::Undead; 3];
+    for _ in 0..3 {
+        g.work_delve(me, DelveWork::Guard, &mut ev).unwrap();
+    }
+    for _ in 0..TREASURY_DUSKS {
+        g.treasuries_at_dusk();
+    }
+    assert!(g.checks(me, GreatDeed::Treasury).iter().all(Check::met));
+    // Three guards and one more: a champion of ordinary might is beaten back.
+    g.place(me, Hex::new(-1, 3));
+    g.place(foe, ruins);
+    let hp = g.champion(foe).unwrap().hp;
+    g.work_delve(foe, DelveWork::Raid, &mut ev).unwrap();
+    assert_eq!(g.champion(foe).unwrap().hp, hp - 1);
+    g.delves.get_mut(&(ruins.x(), ruins.y())).unwrap().guards = 0;
+    g.work_delve(foe, DelveWork::Raid, &mut ev).unwrap();
+    assert_eq!(g.treasury_held(me), 0);
+}

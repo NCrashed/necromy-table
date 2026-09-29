@@ -303,6 +303,14 @@ pub fn great_deed(d: necromy_rules::GreatDeed) -> (&'static str, String) {
                 necromy_rules::GREAT_FIRE
             ),
         ),
+        GreatDeed::Treasury => (
+            "Сокровищница",
+            format!(
+                "Под руинами открой ход вниз, пророй {} туннеля к залу, сделай в нём сокровищницу с охраной — и её не возьмут {} заката.",
+                necromy_rules::HALL_DEPTH,
+                necromy_rules::TREASURY_DUSKS
+            ),
+        ),
         GreatDeed::DeadBall => (
             "Бал мёртвых",
             "Ночной пир в твоём поселении: рядом сидят неупокоенные, ополчение и два соперника — и до рассвета никто не дерётся.".into(),
@@ -448,6 +456,7 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::ArenaWins => "дуэлей выиграно на твоей арене",
         CheckKind::Debtors => "соперников у тебя в долгу",
         CheckKind::BallKept => "бал мёртвых прошёл без драки",
+        CheckKind::TreasuryHeld => "закатов твоя сокровищница цела",
         CheckKind::PenElements => "стихий зверей в твоём загоне",
         CheckKind::PenByShrine => "твоё святилище рядом",
         CheckKind::Crowned => "коронация на Столе",
@@ -573,6 +582,10 @@ pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {
         Feature::Roads => (
             "Дороги",
             "шаг по дороге стоит 1 на любой земле, дорога через реку — мост; на дороге не скрыться",
+        ),
+        Feature::Underworld => (
+            "Подземный мир",
+            "под руинами можно открыть ход вниз, прорыть туннели к залу и спрятать там сокровищницу",
         ),
         Feature::Arena => (
             "Арены",
@@ -1209,5 +1222,17 @@ pub fn goods(god: necromy_rules::God) -> &'static str {
         God::Zaga => "соль",
         God::Ahamar => "железо",
         God::Maya => "жемчуг",
+    }
+}
+
+/// What a champion does at a way down (§21.8), for the buttons.
+pub fn delve_work(w: necromy_rules::DelveWork) -> &'static str {
+    use necromy_rules::DelveWork;
+    match w {
+        DelveWork::Open => "Открыть ход\nвниз",
+        DelveWork::Dig => "Рыть\nтуннель",
+        DelveWork::Treasury => "Сделать\nсокровищницу",
+        DelveWork::Guard => "Оставить\nспутника в охране",
+        DelveWork::Raid => "Набег на\nсокровищницу",
     }
 }

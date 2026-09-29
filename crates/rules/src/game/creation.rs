@@ -366,7 +366,8 @@ impl Game {
             | Feature::Pens
             | Feature::WalkingGroves
             | Feature::Arena
-            | Feature::Debts => {}
+            | Feature::Debts
+            | Feature::Underworld => {}
         }
     }
 

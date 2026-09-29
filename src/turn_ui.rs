@@ -82,6 +82,8 @@ enum ActionButton {
     Fair,
     /// A circle on the stones underfoot.
     DrawCircle,
+    /// Work at a way down.
+    Delve(necromy_rules::DelveWork),
     /// Arena and debts: a challenge, a bet, a debt paid.
     Challenge(necromy_rules::PlayerId),
     BetOn(necromy_rules::PlayerId),
@@ -548,6 +550,9 @@ fn rebuild_action(
                 format!("Поджечь\n{} Духа", necromy_rules::KINDLE_SPIRIT),
             ));
         }
+        for w in g.delve_work(human) {
+            buttons.push((ActionButton::Delve(w), names::delve_work(w).to_string()));
+        }
         if let Some(&rival) = g.challengeable(human).first() {
             buttons.push((
                 ActionButton::Challenge(rival),
@@ -700,6 +705,7 @@ fn action_buttons(
             ActionButton::Feast => Intent::Feast,
             ActionButton::Fair => Intent::Fair,
             ActionButton::DrawCircle => Intent::DrawCircle,
+            ActionButton::Delve(work) => Intent::Delve { work: *work },
             ActionButton::Challenge(rival) => Intent::Challenge { rival: *rival },
             ActionButton::BetOn(rival) => Intent::BetOn {
                 rival: *rival,

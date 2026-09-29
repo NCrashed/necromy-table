@@ -195,6 +195,11 @@ pub enum Intent {
     Feast,
     /// On your turn, in a settlement of yours: open a fair.
     Fair,
+    /// On your turn, at a way down: open, dig, make a treasury, guard it,
+    /// or raid a rival's (§21.8).
+    Delve {
+        work: underworld::DelveWork,
+    },
     /// On your turn, in an arena of yours: challenge a rival (§21.8).
     Challenge {
         rival: PlayerId,
@@ -807,6 +812,21 @@ pub enum Event {
     /// A road on `hex` (§21.8).
     RoadLaid {
         hex: Hex,
+    },
+    /// `player` worked the way down on `hex` (§21.8).
+    Delved {
+        player: PlayerId,
+        hex: Hex,
+        work: underworld::DelveWork,
+        tunnels: u8,
+        guards: u8,
+    },
+    /// `player` raided `owner`'s treasury on `hex`: `won` if taken.
+    Raided {
+        player: PlayerId,
+        hex: Hex,
+        owner: PlayerId,
+        won: bool,
     },
     /// `host`'s night feast with the dead near: a ball, if kept till dawn.
     BallBegun {
@@ -1555,6 +1575,8 @@ pub struct Game {
     buildings: BTreeMap<(i32, i32), buildings::Building>,
     /// Roads of the register (§21.8).
     roads: std::collections::BTreeSet<(i32, i32)>,
+    /// Ways down under ruins and what lies below (§21.8).
+    delves: BTreeMap<(i32, i32), underworld::Delve>,
     /// Fights of any kind so far, the ball of the dead under way (its host
     /// and the fights when it began), and who kept one (§21.7).
     brawls: u32,
@@ -1730,6 +1752,7 @@ impl Game {
             stores: BTreeMap::new(),
             fairs: BTreeMap::new(),
             rulers: BTreeMap::new(),
+            delves: BTreeMap::new(),
             brawls: 0,
             ball: None,
             balls: vec![false; champions_len],
@@ -2279,6 +2302,7 @@ impl Game {
             Intent::Feast => self.hold_feast(player, events),
             Intent::Fair => self.open_fair(player, events),
             Intent::DrawCircle => self.draw_circle(player, events),
+            Intent::Delve { work } => self.work_delve(player, work, events),
             Intent::Challenge { rival } => self.challenge(player, rival, events),
             Intent::BetOn { rival, bet } => self.place_bet(player, rival, bet, events),
             Intent::PayDebt { creditor } => self.pay_debt(player, creditor, events),
@@ -2329,6 +2353,7 @@ impl Game {
             Intent::Feast => self.check_feast(player),
             Intent::Fair => self.check_fair(player),
             Intent::DrawCircle => self.check_circle(player),
+            Intent::Delve { work } => self.check_delve(player, work),
             Intent::Challenge { rival } => self.check_challenge(player, rival),
             Intent::BetOn { rival, .. } => self.check_bet(player, rival),
             Intent::PayDebt { creditor } => self.check_pay(player, creditor),
@@ -2814,6 +2839,7 @@ impl Game {
             | Intent::Feast
             | Intent::Fair
             | Intent::DrawCircle
+            | Intent::Delve { .. }
             | Intent::Challenge { .. }
             | Intent::BetOn { .. }
             | Intent::PayDebt { .. }
@@ -3701,6 +3727,7 @@ mod story;
 mod style;
 mod trade;
 mod trial;
+mod underworld;
 mod victory;
 mod view;
 mod walking;
@@ -3741,6 +3768,7 @@ pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
 pub use trade::{DEAD_FEASTS, FAIR_DUSKS, FAIR_SPIRIT, Fair};
 pub use trial::{Boon, TRIAL_ROUNDS, TRIALS_ON_BOARD, Trial, trial_face};
+pub use underworld::{DELVE_SPIRIT, Delve, DelveWork, HALL_DEPTH, TREASURY_DUSKS};
 pub use victory::{
     CITY, Check, CheckKind, DISSOLVED, EARLIEST_EVE, GreatDeed, ISLAND, JUNGLE, JUNGLE_RIVER,
     LEGION, OFFERED, REFUSAL_THREAT, RIVER,

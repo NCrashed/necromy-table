@@ -89,10 +89,12 @@ pub enum Feature {
     Arena,
     /// Bets between players, and debts.
     Debts,
+    /// Ways down under ruins: tunnels, halls, treasuries.
+    Underworld,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 36] = [
+    pub const ALL: [Feature; 37] = [
         Feature::Bodies,
         Feature::Groves,
         Feature::Settlements,
@@ -129,6 +131,7 @@ impl Feature {
         Feature::WalkingGroves,
         Feature::Arena,
         Feature::Debts,
+        Feature::Underworld,
     ];
 
     /// What the world must have before this can come in (§21.2): all of
@@ -163,6 +166,7 @@ impl Feature {
             Feature::WalkingGroves => &[Has(Feature::Groves)],
             Feature::Arena => &[Has(Feature::Buildings)],
             Feature::Debts => &[],
+            Feature::Underworld => &[Has(Feature::Ruins)],
             Feature::Pens => &[
                 Has(Feature::Beasts),
                 Has(Feature::Companions),
@@ -209,7 +213,8 @@ impl Feature {
             | Feature::Trials
             | Feature::Legion
             | Feature::Burial
-            | Feature::Dragons => God::Zaga,
+            | Feature::Dragons
+            | Feature::Underworld => God::Zaga,
             Feature::Militia
             | Feature::Loot
             | Feature::Guard

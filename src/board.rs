@@ -218,6 +218,8 @@ struct MarkerSprites {
     fair: Handle<Image>,
     /// A dragon's egg, drawn flat.
     egg: Handle<Image>,
+    /// A way down under ruins, drawn flat.
+    delve: Handle<Image>,
     /// Goods lying on the ground, a sack in its land's colour.
     goods: [Handle<Image>; 5],
     /// A building's sign (§21.8): tavern, forge, wall, and a shrine per god.
@@ -342,6 +344,7 @@ fn spawn_board(
         sack: images.add(pixel_sprite(&SACK_ROWS, [196, 160, 96])),
         fair: images.add(pixel_sprite(&BANNER_ROWS, [210, 60, 120])),
         egg: images.add(pixel_sprite(&EGG_ROWS, [170, 60, 50])),
+        delve: images.add(pixel_sprite(&HOLE_ROWS, [40, 30, 40])),
         goods: God::ALL.map(|g| images.add(pixel_sprite(&SACK_ROWS, g.accent()))),
         signs: [
             [220, 160, 60],
@@ -800,6 +803,19 @@ fn sync_markers(
             )
         })
         .collect();
+    let holes: Vec<_> = game
+        .game
+        .delves()
+        .map(|(hex, _)| {
+            (
+                hex,
+                sprites.delve.clone(),
+                Vec3::new(0.3, 0.0, -0.3),
+                TEXELS,
+                true,
+            )
+        })
+        .collect();
     let signs: Vec<_> = game
         .game
         .buildings()
@@ -821,6 +837,7 @@ fn sync_markers(
         .chain(signs)
         .chain(fires)
         .chain(sacks)
+        .chain(holes)
         .chain(banners)
         .chain(traps)
         .chain(flags)
@@ -1008,6 +1025,20 @@ const ROAD_ROWS: [&str; 10] = [
     "..#xxoxxoxxoxxoxx#..",
     "...##oxxoxxoxxo##...",
     ".....##########.....",
+];
+
+/// A dark way down, rimmed with stones.
+const HOLE_ROWS: [&str; 10] = [
+    "...######...",
+    ".##xxxxxx##.",
+    "#xxffffffxx#",
+    "#xffffffffx#",
+    "#xffffffffx#",
+    "#xffffffffx#",
+    "#xxffffffxx#",
+    ".##xxxxxx##.",
+    "...######...",
+    "............",
 ];
 
 /// A speckled egg.

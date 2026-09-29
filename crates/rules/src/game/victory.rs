@@ -73,6 +73,8 @@ pub enum GreatDeed {
     Arena,
     /// Three rivals in your debt at once.
     DebtBondage,
+    /// A treasury of yours under ruins that nobody took for three dusks.
+    Treasury,
     /// A night feast of yours with two rivals, the dead and the militia
     /// near, and no fight until dawn.
     DeadBall,
@@ -87,7 +89,7 @@ pub enum GreatDeed {
 }
 
 impl GreatDeed {
-    pub const ALL: [GreatDeed; 26] = [
+    pub const ALL: [GreatDeed; 27] = [
         GreatDeed::WorldTree,
         GreatDeed::Island,
         GreatDeed::DissolvedLand,
@@ -114,6 +116,7 @@ impl GreatDeed {
         GreatDeed::Arena,
         GreatDeed::DebtBondage,
         GreatDeed::DeadBall,
+        GreatDeed::Treasury,
     ];
 
     /// The god whose deed it is: its card's colour, its voice.
@@ -144,7 +147,8 @@ impl GreatDeed {
             | GreatDeed::Legion
             | GreatDeed::Necropolis
             | GreatDeed::PlaguePit
-            | GreatDeed::Dragon => God::Zaga,
+            | GreatDeed::Dragon
+            | GreatDeed::Treasury => God::Zaga,
         }
     }
 
@@ -183,6 +187,12 @@ impl GreatDeed {
             GreatDeed::Guest => &[Feature::Companions, Feature::Guests],
             GreatDeed::Arena => &[Feature::Settlements, Feature::Buildings, Feature::Arena],
             GreatDeed::DebtBondage => &[Feature::Debts],
+            GreatDeed::Treasury => &[
+                Feature::Settlements,
+                Feature::Undead,
+                Feature::Ruins,
+                Feature::Underworld,
+            ],
             GreatDeed::DeadBall => &[
                 Feature::Bodies,
                 Feature::Undead,
@@ -293,6 +303,8 @@ pub enum CheckKind {
     Debtors,
     /// A ball of the dead kept till dawn.
     BallKept,
+    /// Dusks a treasury of yours has held.
+    TreasuryHeld,
     /// Elements of the beasts in a pen of yours.
     PenElements,
     /// A shrine of yours in its city.
@@ -529,6 +541,11 @@ impl Game {
                 CheckKind::ArenaWins,
                 self.arena_wins(player),
                 super::ARENA_WINS,
+            )],
+            GreatDeed::Treasury => vec![check(
+                CheckKind::TreasuryHeld,
+                self.treasury_held(player),
+                usize::from(super::TREASURY_DUSKS),
             )],
             GreatDeed::DeadBall => vec![check(
                 CheckKind::BallKept,
