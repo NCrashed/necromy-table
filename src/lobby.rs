@@ -99,6 +99,8 @@ pub struct Front {
     /// Setting up a single player match, and the god taken for it.
     alone: bool,
     alone_god: God,
+    /// The world the single player match begins with (§21).
+    alone_mode: necromy_rules::Mode,
     /// The tutorial's chapters are listed.
     tutorial: bool,
     /// The newest single player match on disk and a line about it.
@@ -128,6 +130,10 @@ impl Front {
             returning: false,
             alone: std::env::var_os("NECROMY_PLAY").is_some_and(|v| v == "alone"),
             alone_god: crate::play::default_god(),
+            alone_mode: match std::env::var("NECROMY_MODE").as_deref() {
+                Ok("full") => necromy_rules::Mode::Full,
+                _ => necromy_rules::Mode::Creation,
+            },
             tutorial: std::env::var_os("NECROMY_PLAY").is_some_and(|v| v == "tutorial"),
             saved: crate::saves::latest(),
         }
@@ -215,6 +221,8 @@ enum FrontButton {
     Solo(God),
     /// Single player: begin with the god taken.
     Begin,
+    /// Single player: the world to begin with.
+    Mode(necromy_rules::Mode),
     /// Back from the single player setup to the menu.
     Back,
     Open,
@@ -268,7 +276,10 @@ fn dev_play(mut done: Local<bool>, mut front: ResMut<Front>, mut commands: Comma
             front.code = code.clone();
             front.dial(ClientMsg::Join { code });
         }
-        Ok("local") => commands.insert_resource(Match::local(crate::play::default_god())),
+        Ok("local") => commands.insert_resource(Match::local(
+            crate::play::default_god(),
+            crate::play::default_mode(),
+        )),
         Ok("continue") => front.resume(&mut commands),
         Ok("return") => {
             front.go_back();
@@ -420,7 +431,14 @@ fn buttons(
         match *button {
             FrontButton::Alone => front.alone = true,
             FrontButton::Solo(god) => front.alone_god = god,
-            FrontButton::Begin => commands.insert_resource(Match::local(front.alone_god)),
+            FrontButton::Begin => {
+                commands.insert_resource(Match::local(front.alone_god, front.alone_mode))
+            }
+            FrontButton::Mode(mode) => match &front.conn {
+                // At a table the owner asks the server; alone, it is ours.
+                Some(conn) if front.lobby.is_some() => conn.send(ClientMsg::Mode(mode)),
+                _ => front.alone_mode = mode,
+            },
             FrontButton::Back => {
                 front.alone = false;
                 front.tutorial = false;
@@ -777,6 +795,7 @@ fn alone_rows(
         commands.entity(cards).add_child(card);
     }
     rows.push(cards);
+    rows.push(mode_row(commands, font, front.alone_mode, true));
     let actions = commands
         .spawn(Node {
             column_gap: px(10.0),
@@ -810,6 +829,12 @@ fn lobby_rows(
         "Продиктуй друзьям этот код.",
         13.0,
         DIM,
+    ));
+    rows.push(mode_row(
+        commands,
+        font,
+        lobby.mode,
+        lobby.you == lobby.owner,
     ));
 
     for (i, person) in lobby.people.iter().enumerate() {
@@ -953,4 +978,55 @@ impl Ticket {
             let _ = std::fs::remove_file(path);
         }
     }
+}
+
+/// The world a match begins with (§21): two buttons and what each means;
+/// only words for someone who may not choose.
+fn mode_row(
+    commands: &mut Commands,
+    font: &UiFont,
+    mode: necromy_rules::Mode,
+    choose: bool,
+) -> Entity {
+    use necromy_rules::Mode;
+    let column = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: px(4.0),
+            ..default()
+        })
+        .id();
+    let what = match mode {
+        Mode::Creation => {
+            "Сотворение мира: маленький мир и одна механика; остальное игроки приносят желаниями."
+        }
+        Mode::Full => "Полный мир: вся доска и все механики с первого хода.",
+    };
+    if choose {
+        let row = commands
+            .spawn(Node {
+                column_gap: px(10.0),
+                ..default()
+            })
+            .id();
+        let creation = button(
+            commands,
+            font,
+            FrontButton::Mode(Mode::Creation),
+            "Сотворение мира",
+            mode == Mode::Creation,
+        );
+        let full = button(
+            commands,
+            font,
+            FrontButton::Mode(Mode::Full),
+            "Полный мир",
+            mode == Mode::Full,
+        );
+        commands.entity(row).add_children(&[creation, full]);
+        commands.entity(column).add_child(row);
+    }
+    let note = text(commands, font, what, 12.0, DIM);
+    commands.entity(column).add_child(note);
+    column
 }

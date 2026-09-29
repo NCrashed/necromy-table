@@ -35,6 +35,14 @@ pub fn default_god() -> God {
         })
         .unwrap_or(God::Trishna)
 }
+/// The world a match begins with: `NECROMY_MODE=creation|full` for dev runs,
+/// which play a full world by default; the menu picks its own.
+pub fn default_mode() -> necromy_rules::Mode {
+    match std::env::var("NECROMY_MODE").as_deref() {
+        Ok("creation") => necromy_rules::Mode::Creation,
+        _ => necromy_rules::Mode::Full,
+    }
+}
 const FEED_LINES: usize = 9;
 
 pub struct PlayPlugin;
@@ -44,7 +52,7 @@ impl Plugin for PlayPlugin {
         // Dev runs go straight to a single player match; otherwise the menu
         // (`lobby.rs`) inserts the `Match` when one begins.
         if crate::lobby::skip_menu() {
-            app.insert_resource(Match::local(default_god()));
+            app.insert_resource(Match::local(default_god(), default_mode()));
         }
         app.init_resource::<Selection>()
             .init_resource::<IncomingCountdown>()
@@ -409,12 +417,15 @@ pub struct Selection {
     pub card: Option<CardId>,
     /// Cards marked to burn in the open Battle window.
     pub burn: Vec<CardId>,
+    /// Going through the hand (a click on the deck): the cards marked to
+    /// let go (§21.2).
+    pub sift: Option<Vec<CardId>>,
 }
 
 impl Match {
     /// A single player match on a table in this process (§17.3), seeded by
     /// `NECROMY_SEED` or the clock.
-    pub fn local(god: God) -> Self {
+    pub fn local(god: God, mode: necromy_rules::Mode) -> Self {
         let seed = std::env::var("NECROMY_SEED")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -456,7 +467,7 @@ impl Match {
             oracle: Some(oracle),
             // Alone, nobody waits on the human.
             timers: None,
-            mode: Default::default(),
+            mode,
         });
         let saver = crate::saves::start(&mut table);
         let first = table.drain(human);
@@ -1801,6 +1812,17 @@ impl Match {
                     None => format!("В мир приходит новое — {name}: {what}."),
                 }
             }
+            Event::Cycled {
+                player,
+                let_go,
+                drawn,
+            } => format!(
+                "{} перебирает руку: сбрасывает {let_go}, берёт {drawn}.",
+                self.name(*player)
+            ),
+            Event::DeckGrew { cards, .. } => {
+                format!("В колоду замешаны новые карты: {cards}.")
+            }
             Event::AwakeningDeferred { god, feature, .. } => format!(
                 "{} откладывает до следующего заката: {}. Нового — не больше одного за закат.",
                 names::god(*god),
@@ -2278,6 +2300,16 @@ pub fn window_name(m: &Match, kind: WindowKind) -> String {
 /// Plays `card` for the human with the only sensible target, or starts
 /// aiming it. Called by the hand UI.
 pub fn pick_card(m: &mut Match, selection: &mut Selection, card: CardId) {
+    // Going through the hand: a click marks the card, or unmarks it.
+    if let Some(marked) = selection.sift.as_mut() {
+        match marked.iter().position(|&c| c == card) {
+            Some(i) => {
+                marked.remove(i);
+            }
+            None => marked.push(card),
+        }
+        return;
+    }
     // Tribute: the card clicked is the card given, no aiming.
     if matches!(
         m.game.to_answer(m.human).map(|w| w.kind),
@@ -2428,6 +2460,7 @@ fn keys(
     }
     if keys.just_pressed(KeyCode::Escape) {
         selection.card = None;
+        selection.sift = None;
     }
     let human = game.human;
     // Space in any window waiting on you: go on without answering (a pass),
@@ -2529,6 +2562,9 @@ pub fn worth_answering(g: &necromy_rules::Game, human: PlayerId, kind: WindowKin
 
 /// Forget an aimed card that can no longer be played.
 fn drop_stale_selection(game: Res<Match>, mut selection: ResMut<Selection>) {
+    if selection.sift.is_some() && !game.game.may_cycle(game.human) {
+        selection.sift = None;
+    }
     if !selection.burn.is_empty() && game.game.battle_dice(game.human).is_none() {
         selection.burn.clear();
     }

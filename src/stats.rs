@@ -565,26 +565,31 @@ fn stat_sheet(
 
     // What the militia think of them (§20.4), in the colour of the pennant
     // over every militia: whether they let this champion through.
-    let standing = g.standing(player);
-    let line = label(
-        commands,
-        font,
-        &format!("ополчение: {standing:+} — {}", names::standing(standing)),
-        12.0,
-        true,
-    );
-    commands
-        .entity(line)
-        .insert(TextColor(names::standing_color(standing)));
-    rows.push(line);
+    // Only in a world with militia (§21.2).
+    if g.has(necromy_rules::Feature::Militia) {
+        let standing = g.standing(player);
+        let line = label(
+            commands,
+            font,
+            &format!("ополчение: {standing:+} — {}", names::standing(standing)),
+            12.0,
+            true,
+        );
+        commands
+            .entity(line)
+            .insert(TextColor(names::standing_color(standing)));
+        rows.push(line);
+    }
 
     // Worn items (§20.3): slots with a tooltip on the human's own sheet;
     // a popup vanishes when the mouse leaves its portrait, so there each
-    // item is written out.
-    if mine {
-        rows.push(crate::gear_ui::gear_row(commands, art, font, m, player));
-    } else {
-        rows.extend(crate::gear_ui::gear_lines(commands, art, font, m, player));
+    // item is written out. Only in a world with loot.
+    if g.has(necromy_rules::Feature::Loot) {
+        if mine {
+            rows.push(crate::gear_ui::gear_row(commands, art, font, m, player));
+        } else {
+            rows.extend(crate::gear_ui::gear_lines(commands, art, font, m, player));
+        }
     }
 
     // Character: what earns and costs Style at dusk (§6.2).

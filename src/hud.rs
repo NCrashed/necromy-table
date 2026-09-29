@@ -185,7 +185,9 @@ fn rebuild_hand(
     for &card in game.game.hand(game.human) {
         let def = game.game.def(card);
         let usable = playable.contains(&card) || burning;
-        let selected = selection.card == Some(card) || selection.burn.contains(&card);
+        let selected = selection.card == Some(card)
+            || selection.burn.contains(&card)
+            || selection.sift.as_ref().is_some_and(|s| s.contains(&card));
         let look = CardLook {
             name: game.game.card_mod(card).and_then(|m| m.name.clone()),
             usable: usable || selected,
@@ -614,7 +616,9 @@ fn raise_cards(
     mut cards: Query<(&Interaction, &HandCard, &mut Node, &mut ZIndex)>,
 ) {
     for (interaction, card, mut node, mut z) in &mut cards {
-        let chosen = selection.card == Some(card.0) || selection.burn.contains(&card.0);
+        let chosen = selection.card == Some(card.0)
+            || selection.burn.contains(&card.0)
+            || selection.sift.as_ref().is_some_and(|s| s.contains(&card.0));
         let up = chosen || *interaction != Interaction::None;
         let top = if up { px(-CARD_TUCK) } else { px(0.0) };
         // A raised card comes in front of the ones overlapping it.

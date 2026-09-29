@@ -157,8 +157,44 @@ impl Game {
             god,
             player,
         });
+        self.deal_in(feature, events);
         self.first_of(feature, player, near, events);
         true
+    }
+
+    /// Cards of a mechanic just come in go into the deck (§21.2): a few of
+    /// its own and whatever answers they need, two copies each.
+    fn deal_in(&mut self, feature: Feature, events: &mut Vec<Event>) {
+        let allowed: Vec<crate::cards::DefId> = (0..crate::cards::POOL.len() as u16)
+            .map(crate::cards::DefId)
+            .filter(|d| d.def().needs().is_none_or(|f| self.has(f)))
+            .collect();
+        let mut fresh: Vec<crate::cards::DefId> = allowed
+            .iter()
+            .copied()
+            .filter(|d| d.def().needs() == Some(feature) && !self.slice.contains(d))
+            .collect();
+        self.rng.shuffle(&mut fresh);
+        fresh.truncate(DEALT_IN);
+        self.slice.extend(fresh.iter().copied());
+        fresh.extend(crate::cards::answer(&mut self.slice, &allowed));
+        self.slice.sort();
+        let mut count = 0;
+        for def in fresh {
+            for _ in 0..crate::cards::COPIES {
+                let card = crate::cards::CardId(self.defs.len() as u32);
+                self.defs.push(def);
+                self.deck.push(card);
+                count += 1;
+            }
+        }
+        if count > 0 {
+            self.rng.shuffle(&mut self.deck);
+            events.push(Event::DeckGrew {
+                feature,
+                cards: count,
+            });
+        }
     }
 
     /// An awakening set aside at the last dusk comes in now, before the
@@ -551,4 +587,50 @@ impl Game {
             events.push(Event::TerrainChanged { hex, terrain });
         }
     }
+}
+
+/// Distinct cards a mechanic brings into the deck when it comes in.
+pub const DEALT_IN: usize = 3;
+/// Radius of a world being created (§21.1): 61 hexes, room for five.
+pub const CREATION_RADIUS: u32 = 4;
+/// Distinct cards a world being created starts its deck with.
+pub const CREATION_SLICE: usize = 16;
+
+/// A world to create (§21.1): a small board of plains and two or three
+/// other kinds of land, and one mechanic from those that need nothing the
+/// board lacks.
+pub(super) fn seed_world(
+    rng: &mut crate::rng::Rng,
+) -> (crate::board::Board, crate::features::World) {
+    let mut kinds = vec![
+        Terrain::Forest,
+        Terrain::Mountain,
+        Terrain::Swamp,
+        Terrain::Stones,
+    ];
+    rng.shuffle(&mut kinds);
+    kinds.truncate(2 + rng.below(2) as usize);
+    let mut board = crate::board::Board::seed_world(rng, CREATION_RADIUS, &kinds);
+    let has_land = |board: &crate::board::Board, ks: &[Terrain]| {
+        board.land().any(|(_, t)| ks.contains(&t.terrain))
+    };
+    let options: Vec<Feature> = [
+        Feature::Bodies,
+        Feature::Settlements,
+        Feature::Stealth,
+        Feature::Trials,
+    ]
+    .into_iter()
+    .filter(|f| {
+        f.requires().iter().all(|n| match *n {
+            Need::Land(ks) => has_land(&board, ks),
+            _ => false,
+        }) || f.requires().is_empty()
+    })
+    .collect();
+    let start = *rng.pick(&options).expect("bodies need nothing");
+    if start == Feature::Settlements {
+        board.settle_regions(rng, 1);
+    }
+    (board, crate::features::World::of([start]))
 }

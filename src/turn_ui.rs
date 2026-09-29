@@ -64,6 +64,8 @@ enum ActionButton {
     Pass,
     /// Build the ruins underfoot again (§20.4).
     Rebuild,
+    /// Let the marked cards go and draw anew (§21.2).
+    Cycle,
 }
 
 fn spawn(mut commands: Commands, font: Res<UiFont>) {
@@ -270,7 +272,14 @@ fn rebuild_action(
     let human = game.human;
     let kind = game.human_window();
 
-    let (title, hint, button, moves) = if let Some(card) = selection.card {
+    let (title, hint, button, moves) = if let Some(marked) = &selection.sift {
+        (
+            format!("Перебор руки: отмечено {}", marked.len()),
+            "клик по карте — отметить; отмеченные уйдут в сброс, доберёшь на одну меньше (в храме — столько же) · Esc — отмена",
+            (!marked.is_empty()).then_some((ActionButton::Cycle, "Сбросить\nотмеченные")),
+            false,
+        )
+    } else if let Some(card) = selection.card {
         (
             format!("Цель для «{}»", g.def(card).name),
             "клик по золотой клетке · правый клик или Esc — отмена",
@@ -482,6 +491,9 @@ fn action_buttons(
         let intent = match button {
             ActionButton::EndTurn => Intent::EndTurn,
             ActionButton::Rebuild => Intent::Rebuild,
+            ActionButton::Cycle => Intent::Cycle {
+                cards: selection.sift.take().unwrap_or_default(),
+            },
             ActionButton::Pass => {
                 selection.card = None;
                 Intent::Pass

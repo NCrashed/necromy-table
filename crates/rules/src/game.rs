@@ -161,6 +161,11 @@ pub enum Intent {
     },
     /// On your turn on the ruins of a settlement: build it again (§20.4).
     Rebuild,
+    /// Once a turn: let these cards go and draw one fewer, as many at a
+    /// temple (§21.2).
+    Cycle {
+        cards: Vec<CardId>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -217,6 +222,8 @@ struct Turn {
     last_element: Option<Element>,
     /// Cards played on their own turn so far (Zaga's Burden, §5.3).
     cards: u8,
+    /// The hand went through once this turn (`Intent::Cycle`).
+    cycled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -678,6 +685,17 @@ pub enum Event {
         god: God,
         player: Option<PlayerId>,
     },
+    /// `player` let `let_go` cards go and drew `drawn` (`Intent::Cycle`).
+    Cycled {
+        player: PlayerId,
+        let_go: u8,
+        drawn: u8,
+    },
+    /// Cards of a mechanic just come in were shuffled into the deck.
+    DeckGrew {
+        feature: Feature,
+        cards: u8,
+    },
     /// One mechanic a dusk: `god` sets `player`'s aside for the next.
     AwakeningDeferred {
         player: PlayerId,
@@ -987,6 +1005,8 @@ pub enum RuleError {
     NothingWorn,
     /// Only the ruins of a settlement can be built again.
     NotRuins,
+    /// The hand goes through once a turn, and only cards in it.
+    NoCycle,
 }
 
 impl std::fmt::Display for RuleError {
@@ -995,6 +1015,7 @@ impl std::fmt::Display for RuleError {
             RuleError::NotYourTurn => write!(f, "not your turn"),
             RuleError::NotAtTemple => write!(f, "not at a temple"),
             RuleError::NotRuins => write!(f, "not the ruins of a settlement"),
+            RuleError::NoCycle => write!(f, "the hand went through already or holds no such card"),
             RuleError::NothingWorn => write!(f, "nothing worn there"),
             RuleError::UnknownPlayer => write!(f, "unknown player"),
             RuleError::OffBoard => write!(f, "off the board"),
@@ -1130,10 +1151,10 @@ impl Game {
             setup.champions.len()
         );
         let mut rng = Rng::new(setup.seed);
-        let board = Board::generate(&mut rng);
-        let world = match setup.mode {
-            Mode::Full => World::full(),
-            Mode::Creation => World::full(),
+        // A full world, or a small one to create (§21.1).
+        let (board, world) = match setup.mode {
+            Mode::Full => (Board::generate(&mut rng), World::full()),
+            Mode::Creation => creation::seed_world(&mut rng),
         };
         let militia = if world.has(Feature::Militia) {
             Self::militia_of(&board)
@@ -1153,7 +1174,13 @@ impl Game {
         let stages = God::ALL.map(|_| rng.below(2) as u8);
         let taste = style::Taste::draw(&mut rng);
         let (open, secrets) = victory::draw(&mut rng, setup.champions.len());
-        let slice = cards::match_slice(&mut rng);
+        // Only cards of mechanics the world has (§21.2); a new world, fewer.
+        let slice = match setup.mode {
+            Mode::Full => cards::match_slice(&mut rng),
+            Mode::Creation => cards::slice_of(&mut rng, creation::CREATION_SLICE, |d| {
+                d.needs().is_none_or(|f| world.has(f))
+            }),
+        };
         let defs: Vec<DefId> = slice
             .iter()
             .flat_map(|&d| std::iter::repeat_n(d, cards::COPIES as usize))
@@ -1177,6 +1204,7 @@ impl Game {
                     move_points: 0,
                     last_element: None,
                     cards: 0,
+                    cycled: false,
                 };
                 champions_len
             ],
@@ -1749,6 +1777,10 @@ impl Game {
             Intent::Play { card, target } => self.play_own(player, card, target, events),
             Intent::Sacrifice { slot } => self.sacrifice(player, slot, events),
             Intent::Rebuild => self.rebuild(player, events),
+            Intent::Cycle { cards } => {
+                self.cycle(player, &cards, events);
+                Ok(())
+            }
             _ => Err(RuleError::WrongTiming),
         }
     }
@@ -1771,6 +1803,7 @@ impl Game {
             Intent::Play { card, target } => self.check_play(player, card, target),
             Intent::Sacrifice { slot } => self.check_sacrifice(player, slot).map(|_| ()),
             Intent::Rebuild => self.check_rebuild(player).map(|_| ()),
+            Intent::Cycle { ref cards } => self.check_cycle(player, cards),
             _ => Err(RuleError::WrongTiming),
         }
     }
@@ -2040,6 +2073,50 @@ impl Game {
         self.stealth_at_turn_end(player, events);
     }
 
+    /// `player` may go through their hand now (`Intent::Cycle`).
+    pub fn may_cycle(&self, player: PlayerId) -> bool {
+        self.free_to_act(player)
+            && !self.turns[player.0 as usize].cycled
+            && !self.hand(player).is_empty()
+    }
+
+    /// Whether `player` may let `cards` go now: once a turn, cards of the hand.
+    fn check_cycle(&self, player: PlayerId, cards: &[CardId]) -> Result<(), RuleError> {
+        let hand = self.hand(player);
+        let mut seen = Vec::new();
+        let fine = !self.turns[player.0 as usize].cycled
+            && !cards.is_empty()
+            && cards.iter().all(|c| {
+                let fresh = !seen.contains(c);
+                seen.push(*c);
+                fresh && hand.contains(c)
+            });
+        if fine {
+            Ok(())
+        } else {
+            Err(RuleError::NoCycle)
+        }
+    }
+
+    /// The cards go to the discard and fresh ones come: one fewer, as many
+    /// at a temple, where the gods listen (§21.2).
+    fn cycle(&mut self, player: PlayerId, cards: &[CardId], events: &mut Vec<Event>) {
+        self.turns[player.0 as usize].cycled = true;
+        self.hands[player.0 as usize].retain(|c| !cards.contains(c));
+        self.discard.extend_from_slice(cards);
+        let at_temple = self
+            .board
+            .tile(self.hex_of(player))
+            .is_some_and(|t| t.terrain == Terrain::Temple);
+        let draw = cards.len() - usize::from(!at_temple);
+        events.push(Event::Cycled {
+            player,
+            let_go: cards.len() as u8,
+            drawn: draw as u8,
+        });
+        self.draw(player, draw, events);
+    }
+
     fn play_own(
         &mut self,
         player: PlayerId,
@@ -2149,7 +2226,11 @@ impl Game {
                 Choice::Burn(cards)
             }
             Intent::Burn { .. } => return Err(RuleError::WrongTiming),
-            Intent::Move { .. } | Intent::EndTurn | Intent::Sacrifice { .. } | Intent::Rebuild => {
+            Intent::Move { .. }
+            | Intent::EndTurn
+            | Intent::Sacrifice { .. }
+            | Intent::Rebuild
+            | Intent::Cycle { .. } => {
                 return Err(RuleError::WindowOpen);
             }
             Intent::Wish { .. } | Intent::RefuseWish => return Err(RuleError::InvalidWish),
@@ -2841,6 +2922,7 @@ impl Game {
             move_points: MOVE_POINTS + self.stride(player),
             last_element: None,
             cards: 0,
+            cycled: false,
         };
         let champ = self.champ_mut(player);
         let faded = champ.ward.take().is_some();

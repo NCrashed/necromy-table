@@ -37,6 +37,7 @@ impl Plugin for DeckPlugin {
             (
                 (notice_draws, rebuild_pile).run_if(resource_changed::<Match>),
                 raise_pile,
+                sift_on_click,
                 fly,
                 turn_over,
             )
@@ -212,6 +213,24 @@ fn rebuild_pile(
     let count = chip(&mut commands, format!("колода: {deck}"), 104.0);
     let spent = chip(&mut commands, format!("сброс: {discard}"), 176.0);
     commands.entity(slot).add_children(&[count, spent]);
+}
+
+/// A click on the pile goes through the hand (§21.2): the cards clicked next
+/// are marked to let go, the action bar lets them go. Again to stop.
+fn sift_on_click(
+    slot: Query<&Interaction, (Changed<Interaction>, With<DeckSlot>)>,
+    game: Res<Match>,
+    mut selection: ResMut<crate::play::Selection>,
+) {
+    if !slot.iter().any(|i| *i == Interaction::Pressed) {
+        return;
+    }
+    if selection.sift.is_some() {
+        selection.sift = None;
+    } else if game.game.may_cycle(game.human) {
+        selection.card = None;
+        selection.sift = Some(Vec::new());
+    }
 }
 
 /// The pile rises under the mouse like a card in hand.

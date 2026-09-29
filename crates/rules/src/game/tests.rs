@@ -4509,3 +4509,125 @@ fn creation_in_bot_games() {
     }
     println!("raised {raised}, veiled {veiled}, grown {grown}, deferred {deferred}");
 }
+
+fn creation(seed: u64) -> Game {
+    Game::new(Setup {
+        seed,
+        champions: God::ALL.to_vec(),
+        mode: Mode::Creation,
+    })
+    .0
+}
+
+#[test]
+fn a_world_to_create_starts_small_with_one_mechanic() {
+    for seed in 0..40 {
+        let g = creation(seed);
+        assert_eq!(g.board().extent(), crate::game::creation::CREATION_RADIUS);
+        let features: Vec<Feature> = g.world().features().collect();
+        assert_eq!(features.len(), 1, "seed {seed}: {features:?}");
+        // The deck holds no card of a mechanic the world lacks.
+        for id in g.slice() {
+            assert!(
+                id.def().needs().is_none_or(|f| g.has(f)),
+                "seed {seed}: {} in a world without {:?}",
+                id.def().name,
+                id.def().needs()
+            );
+        }
+        // Settlements only where the world has them.
+        let settled = g
+            .board()
+            .land()
+            .any(|(_, t)| t.terrain == Terrain::Settlement);
+        assert_eq!(settled, g.has(Feature::Settlements), "seed {seed}");
+        for god in God::ALL {
+            assert_eq!(
+                g.board().tile(g.board().temple_of(god)).unwrap().terrain,
+                Terrain::Temple
+            );
+        }
+    }
+}
+
+#[test]
+fn a_mechanic_that_comes_in_brings_its_cards() {
+    let mut g = creation(3);
+    without(&mut g, &Feature::ALL);
+    g.world.add(Feature::Bodies);
+    let deck = g.deck_len();
+    let mut ev = Vec::new();
+    let at = g.board().start_of(God::Maya);
+    // Poison needs a swamp.
+    g.board.tile_mut(at).unwrap().terrain = Terrain::Swamp;
+    assert!(g.awaken(None, God::Zaga, Feature::Poison, at, &mut ev));
+    let grown = ev.iter().find_map(|e| match e {
+        Event::DeckGrew { cards, .. } => Some(*cards),
+        _ => None,
+    });
+    assert!(grown.is_some_and(|n| n >= 2));
+    assert_eq!(g.deck_len(), deck + grown.unwrap() as usize);
+    // Every poison dealt in comes with its cure.
+    for id in g.slice() {
+        if let Some(e) = crate::cards::poison_element(id.def()) {
+            assert!(
+                g.slice().iter().any(|a| crate::cards::cures(a.def(), e)),
+                "{} without a cure",
+                id.def().name
+            );
+        }
+    }
+}
+
+#[test]
+fn bots_play_a_world_being_created() {
+    for seed in 0..30 {
+        let mut g = creation(seed);
+        for _ in 0..3000 {
+            if g.winner().is_some() {
+                break;
+            }
+            let p = g.awaiting()[0];
+            let intent = crate::bot::choose(&g, p);
+            g.apply(p, intent.clone())
+                .unwrap_or_else(|e| panic!("seed {seed}: bot {p:?} {intent:?}: {e}"));
+        }
+        assert!(
+            g.winner().is_some() || g.round() >= 6,
+            "seed {seed}: only reached round {}",
+            g.round()
+        );
+    }
+}
+
+#[test]
+fn the_hand_goes_through_once_a_turn_one_fewer_but_at_a_temple() {
+    let (mut g, me, _) = duel(3);
+    let a = g.give(me, "Бинт");
+    let b = g.give(me, "Искра");
+    let events = g.apply(me, Intent::Cycle { cards: vec![a, b] }).unwrap();
+    assert!(matches!(
+        events.iter().find(|e| matches!(e, Event::Cycled { .. })),
+        Some(Event::Cycled {
+            let_go: 2,
+            drawn: 1,
+            ..
+        })
+    ));
+    assert_eq!(g.hand(me).len(), 1);
+    assert!(!g.hand(me).contains(&a) && !g.hand(me).contains(&b));
+    let c = g.hand(me)[0];
+    assert_eq!(
+        g.apply(me, Intent::Cycle { cards: vec![c] }),
+        Err(RuleError::NoCycle),
+        "once a turn"
+    );
+    // At a temple the gods give back as many as went.
+    let (mut g, me, _) = duel(3);
+    let temple = g.board().temple_of(God::Zaga);
+    g.place(me, temple);
+    let a = g.give(me, "Бинт");
+    g.apply(me, Intent::Cycle { cards: vec![a] }).unwrap();
+    assert_eq!(g.hand(me).len(), 1);
+    assert_ne!(g.hand(me)[0], a);
+}

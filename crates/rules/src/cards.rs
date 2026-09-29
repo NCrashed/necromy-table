@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use necromy_dice::Face;
 
+use crate::features::Feature;
 use crate::gods::Element;
 use crate::rng::Rng;
 
@@ -164,6 +165,21 @@ pub struct CardDef {
     pub cost: u8,
     pub target: TargetRule,
     pub effect: Effect,
+}
+
+impl CardDef {
+    /// The mechanic this card plays with, which the world must have for it
+    /// to be in the deck (§21.2): bodies for a card on a body, poison,
+    /// hiding, groves.
+    pub fn needs(&self) -> Option<Feature> {
+        match self.effect {
+            _ if self.kind == CardKind::Body => Some(Feature::Bodies),
+            Effect::Poison(_) | Effect::Trap(TrapEffect::Poison(_)) => Some(Feature::Poison),
+            Effect::Hide => Some(Feature::Stealth),
+            Effect::Grow => Some(Feature::Groves),
+            _ => None,
+        }
+    }
 }
 
 impl CardDef {
@@ -364,10 +380,26 @@ pub const COPIES: u32 = 2;
 /// every poison in it has an answer (§2, §20.1): a harmful card, or a heal,
 /// of the one element that quenches it.
 pub fn match_slice(rng: &mut Rng) -> Vec<DefId> {
-    let mut all: Vec<DefId> = (0..POOL.len() as u16).map(DefId).collect();
-    rng.shuffle(&mut all);
-    let mut slice: Vec<DefId> = all[..SLICE_SIZE.min(all.len())].to_vec();
+    slice_of(rng, SLICE_SIZE, |_| true)
+}
 
+/// `size` cards of those `allowed`, then the answers they need.
+pub fn slice_of(rng: &mut Rng, size: usize, allowed: impl Fn(&CardDef) -> bool) -> Vec<DefId> {
+    let mut all: Vec<DefId> = (0..POOL.len() as u16)
+        .map(DefId)
+        .filter(|d| allowed(d.def()))
+        .collect();
+    rng.shuffle(&mut all);
+    let mut slice: Vec<DefId> = all[..size.min(all.len())].to_vec();
+    answer(&mut slice, &all);
+    slice.sort();
+    slice
+}
+
+/// Adds cards of `pool` to `slice` until every ward and every poison in it
+/// has an answer (§2, §20.1); what was added.
+pub fn answer(slice: &mut Vec<DefId>, pool: &[DefId]) -> Vec<DefId> {
+    let mut added = Vec::new();
     loop {
         let missing = slice.iter().find_map(|id| {
             let need = Need::of(id.def())?;
@@ -376,15 +408,19 @@ pub fn match_slice(rng: &mut Rng) -> Vec<DefId> {
         });
         let Some(need) = missing else { break };
         // The pool itself always holds an answer; tests check that.
-        let answer = all
+        let Some(answer) = pool
             .iter()
             .find(|a| !slice.contains(a) && need.met_by(a.def()))
             .copied()
-            .expect("the pool answers every ward and poison");
+        else {
+            // The full pool answers everything (tests check it); a world that
+            // lacks the answer's mechanic goes without.
+            break;
+        };
         slice.push(answer);
+        added.push(answer);
     }
-    slice.sort();
-    slice
+    added
 }
 
 /// What a card in the slice asks the slice to answer.

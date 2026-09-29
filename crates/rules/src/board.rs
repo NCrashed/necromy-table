@@ -161,22 +161,64 @@ impl Board {
         let radius = radius.max(2);
         let mut board = Board::plain(radius);
         let hexes: Vec<Hex> = board.tiles().map(|(h, _)| h).collect();
-        for hex in hexes {
+        // Standing stones are rare: two rings on the whole board, set below.
+        let common: Vec<Terrain> = kinds
+            .iter()
+            .copied()
+            .filter(|&t| t != Terrain::Stones)
+            .collect();
+        for &hex in &hexes {
             if hex == Hex::ZERO {
                 continue;
             }
             // Mostly plains; each other kind of land here and there.
             let terrain = match rng.below(3) {
-                0 => *rng.pick(kinds).unwrap_or(&Terrain::Plains),
+                0 => *rng.pick(&common).unwrap_or(&Terrain::Plains),
                 _ => Terrain::Plains,
             };
             board.set(hex, terrain);
+        }
+        if kinds.contains(&Terrain::Stones) {
+            let mut spots: Vec<Hex> = hexes.iter().copied().filter(|h| h.ulength() >= 2).collect();
+            rng.shuffle(&mut spots);
+            for hex in spots.into_iter().take(2) {
+                board.set(hex, Terrain::Stones);
+            }
         }
         for god in God::ALL {
             board.set(board.start_of(god), Terrain::Plains);
             board.set(board.temple_of(god), Terrain::Temple);
         }
         board
+    }
+
+    /// `per_region` settlements in each god's land, off the Table, the
+    /// temples and the starts, two hexes apart at least.
+    pub(crate) fn settle_regions(&mut self, rng: &mut Rng, per_region: usize) {
+        let hexes: Vec<Hex> = self.land().map(|(h, _)| h).collect();
+        for god in God::ALL {
+            let mut spots: Vec<Hex> = hexes
+                .iter()
+                .copied()
+                .filter(|&h| region_of(h) == Some(god) && h.ulength() < self.extent)
+                .filter(|&h| h != self.temple_of(god) && h != self.start_of(god))
+                .collect();
+            rng.shuffle(&mut spots);
+            let mut placed: Vec<Hex> = Vec::new();
+            for spot in spots {
+                if placed.len() == per_region {
+                    break;
+                }
+                let clear = self
+                    .land()
+                    .filter(|(_, t)| t.terrain == Terrain::Settlement)
+                    .all(|(h, _)| h.unsigned_distance_to(spot) >= 2);
+                if clear {
+                    self.set(spot, Terrain::Settlement);
+                    placed.push(spot);
+                }
+            }
+        }
     }
 
     /// A small plain board for a scripted scene (a tutorial chapter): all

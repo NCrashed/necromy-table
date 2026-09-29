@@ -22,7 +22,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever a message changes shape; mismatched sides refuse.
-pub const PROTOCOL: u32 = 25;
+pub const PROTOCOL: u32 = 26;
 pub const DEFAULT_PORT: u16 = 7878;
 /// Our playtest server (aerospace, service/necromy-table.nix): where the
 /// menu points unless `NECROMY_SERVER` or the field says otherwise.
@@ -43,6 +43,8 @@ pub enum ClientMsg {
     },
     /// Take a god's seat, or give it back.
     Pick(Option<God>),
+    /// The owner picks the world the match begins with (§21).
+    Mode(necromy_rules::Mode),
     /// The owner starts the match; free seats go to bots.
     Start,
     /// Sit back down at a running match after losing the connection.
@@ -77,6 +79,8 @@ pub struct LobbyInfo {
     pub people: Vec<Person>,
     /// Which model speaks for the gods on this server, if any.
     pub oracle: Option<String>,
+    /// The world the match will begin with.
+    pub mode: necromy_rules::Mode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

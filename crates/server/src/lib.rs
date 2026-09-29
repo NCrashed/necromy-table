@@ -57,6 +57,8 @@ struct Lobby {
     /// In joining order.
     members: Vec<u64>,
     picks: BTreeMap<u64, God>,
+    /// The world the match begins with (§21), the owner's choice.
+    mode: necromy_rules::Mode,
     running: Option<Running>,
 }
 
@@ -226,6 +228,7 @@ impl Server {
                         owner: id,
                         members: vec![id],
                         picks: BTreeMap::new(),
+                        mode: necromy_rules::Mode::Creation,
                         running: None,
                     },
                 );
@@ -282,6 +285,23 @@ impl Server {
                     }
                 }
                 self.tell_lobby(&code);
+            }
+            ClientMsg::Mode(mode) => {
+                let Some(code) = self.lobby_of(id) else {
+                    self.refuse(id, "ты не за столом");
+                    return;
+                };
+                let Some(lobby) = self.lobbies.get_mut(&code) else {
+                    return;
+                };
+                if lobby.owner != id {
+                    self.refuse(id, "мир выбирает тот, кто открыл стол");
+                    return;
+                }
+                if lobby.running.is_none() {
+                    lobby.mode = mode;
+                    self.tell_lobby(&code);
+                }
             }
             ClientMsg::Rejoin { code, ticket } => {
                 self.leave(id);
@@ -364,6 +384,7 @@ impl Server {
                     owner,
                     people: people.clone(),
                     oracle: self.oracle.as_ref().map(|_| "локальная модель".to_string()),
+                    mode: lobby.mode,
                 }),
             );
         }
@@ -410,7 +431,7 @@ impl Server {
             salt,
             oracle,
             timers,
-            mode: Default::default(),
+            mode: lobby.mode,
         });
         let handed: Vec<(u64, PlayerId, u64)> = seats_of
             .iter()
@@ -500,6 +521,7 @@ impl Server {
                 owner: id,
                 members: Vec::new(),
                 picks: BTreeMap::new(),
+                mode: necromy_rules::Mode::Creation,
                 running: Some(Running {
                     table,
                     seats: BTreeMap::new(),
