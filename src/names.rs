@@ -735,10 +735,22 @@ fn god_name(god: God) -> &'static str {
 /// What the militia think of a champion, in a word (§20.4).
 pub fn standing(standing: i8) -> &'static str {
     match standing {
-        s if s >= necromy_rules::FRIENDLY => "друзья: лечат в поселениях",
-        s if s <= necromy_rules::HOSTILE => "враги: не дают занять, гонят",
-        s if s > 0 => "расположены",
-        s if s < 0 => "насторожены",
-        _ => "равнодушны",
+        s if s >= necromy_rules::FRIENDLY => "друзья: пропускают, лечат в поселениях",
+        s if s >= necromy_rules::MILITIA_PASS => "пропускают в поселения",
+        s if s <= necromy_rules::HOSTILE => "враги: только с боем, гонят из поселений",
+        _ => "не пропускают: только с боем",
+    }
+}
+
+/// The colour of the militia's pennant for a standing: green friends, gold
+/// who they let through, red who has to fight them (`mobs_ui.rs`).
+pub fn standing_color(standing: i8) -> bevy::prelude::Color {
+    use bevy::prelude::Color;
+    if standing >= necromy_rules::FRIENDLY {
+        Color::srgb_u8(64, 150, 56)
+    } else if standing >= necromy_rules::MILITIA_PASS {
+        Color::srgb_u8(150, 112, 30)
+    } else {
+        Color::srgb_u8(176, 44, 36)
     }
 }

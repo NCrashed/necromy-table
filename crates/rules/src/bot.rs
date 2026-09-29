@@ -64,6 +64,10 @@ fn respond(game: &Game, player: PlayerId, kind: WindowKind) -> Intent {
 }
 
 fn own_turn(game: &Game, player: PlayerId) -> Intent {
+    // Ruins underfoot are a settlement waiting to be built again (§20.4).
+    if game.can_rebuild(player) {
+        return Intent::Rebuild;
+    }
     let cards = game.playable(player);
     // Bodies first: they only work while standing on one.
     if let Some(&card) = cards.iter().find(|&&c| {

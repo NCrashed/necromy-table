@@ -25,7 +25,6 @@ use serde::{Deserialize, Serialize};
 
 use super::style::Deed;
 use super::{Event, Fighter, Game, PlayerId, RevealReason, WindowKind};
-use crate::board::Terrain;
 use crate::cards::CardId;
 use crate::gods::{Element, God};
 
@@ -39,12 +38,6 @@ pub const UNDEAD_DICE: u8 = 2;
 pub const UNDEAD_SIGHT: u32 = 4;
 /// More stay in their graves: the world phase must stay short (§20.4).
 pub const MAX_UNDEAD: usize = 6;
-/// A settlement's militia at full strength.
-pub const MILITIA: u8 = 2;
-/// Standing at which the militia are friends, and against.
-pub const FRIENDLY: i8 = 2;
-pub const HOSTILE: i8 = -2;
-const STANDING_LIMIT: i8 = 3;
 /// Separates undead throws from battle and trial throws.
 const MOB_STREAM: u64 = 0x0000_dead;
 
@@ -64,63 +57,9 @@ impl Game {
         self.undead.iter().find(|u| u.hex == hex)
     }
 
-    /// The royal guard or an undead holds `hex`.
+    /// The royal guard, an undead or a settlement's militia holds `hex`.
     pub(super) fn mob_at(&self, hex: Hex) -> bool {
-        self.guard_at(hex) || self.undead_at(hex).is_some()
-    }
-
-    /// A settlement's militia, if it still stands.
-    pub fn militia(&self, hex: Hex) -> Option<u8> {
-        self.militia.get(&(hex.x(), hex.y())).copied()
-    }
-
-    /// What the militia think of `player`, −3..=3.
-    pub fn standing(&self, player: PlayerId) -> i8 {
-        self.standing.get(player.0 as usize).copied().unwrap_or(0)
-    }
-
-    pub(super) fn militia_of(
-        board: &crate::board::Board,
-    ) -> std::collections::BTreeMap<(i32, i32), u8> {
-        board
-            .tiles()
-            .filter(|(_, t)| t.terrain == Terrain::Settlement)
-            .map(|(h, _)| ((h.x(), h.y()), MILITIA))
-            .collect()
-    }
-
-    pub(super) fn shift_standing(&mut self, player: PlayerId, delta: i8, events: &mut Vec<Event>) {
-        let s = &mut self.standing[player.0 as usize];
-        let before = *s;
-        *s = (*s + delta).clamp(-STANDING_LIMIT, STANDING_LIMIT);
-        if *s != before {
-            let standing = *s;
-            events.push(Event::StandingChanged { player, standing });
-        }
-    }
-
-    /// A settlement within two hexes of `hex`: its people see what happens.
-    fn near_settlement(&self, hex: Hex) -> bool {
-        self.militia
-            .keys()
-            .any(|&(x, y)| Hex::new(x, y).unsigned_distance_to(hex) <= 2)
-    }
-
-    /// What a deed near a settlement does to the militia's view of its doer.
-    pub(super) fn standing_deed(&mut self, player: PlayerId, deed: Deed, events: &mut Vec<Event>) {
-        if !self.near_settlement(self.hex_of(player)) {
-            return;
-        }
-        use super::style::BodyVerb;
-        let delta = match deed {
-            Deed::Body(BodyVerb::Rest | BodyVerb::Seed) => 1,
-            Deed::Body(BodyVerb::Fuel | BodyVerb::Legion) => -1,
-            Deed::Attacked => -1,
-            _ => 0,
-        };
-        if delta != 0 {
-            self.shift_standing(player, delta, events);
-        }
+        self.guard_at(hex) || self.undead_at(hex).is_some() || self.militia_at(hex).is_some()
     }
 
     /// The age at which the body on `hex` rises, if it ever does.
@@ -169,31 +108,18 @@ impl Game {
         }
     }
 
-    /// World phase: the militia strike, then the undead walk and strike.
+    /// World phase: the undead act, the militia strike back, then militia
+    /// away from home go back.
+    ///
+    /// At a gate the two sides trade blows: each undead next to militia
+    /// knocks a man down, then the militia wound one undead that did not
+    /// just come up (an undead takes two). A lone undead left alone takes a
+    /// settlement in a few phases unless a dawn brings a man back in time
+    /// or a champion comes to help; two at once are faster.
     pub(super) fn mob_phase(&mut self, events: &mut Vec<Event>) {
-        // Each standing militia cuts down one undead next to it.
-        let posts: Vec<(i32, i32)> = self.militia.keys().copied().collect();
-        for (x, y) in posts {
-            let hex = Hex::new(x, y);
-            if self.militia(hex).is_none_or(|m| m == 0) {
-                continue;
-            }
-            let Some(id) = self
-                .undead
-                .iter()
-                .filter(|u| u.hex.unsigned_distance_to(hex) <= 1)
-                .map(|u| u.id)
-                .min()
-            else {
-                continue;
-            };
-            self.undead.retain(|u| u.id != id);
-            if let Some(m) = self.militia.get_mut(&(x, y)) {
-                *m -= 1;
-            }
-            events.push(Event::MilitiaStruck { hex, undead: id });
-        }
-
+        // Those that come up to a gate this phase are not reached by its
+        // militia until the next.
+        let mut arrived: Vec<u32> = Vec::new();
         let ids: Vec<u32> = self.undead.iter().map(|u| u.id).collect();
         for id in ids {
             let Some(u) = self.undead.iter().find(|u| u.id == id).copied() else {
@@ -209,13 +135,58 @@ impl Game {
                 self.undead_strike(id, p, events);
                 continue;
             }
-            // Standing in a settlement nobody defends: it lays it waste.
-            if self.militia(u.hex) == Some(0) {
+            // Militia next to it: it knocks a man down.
+            let guards = u
+                .hex
+                .all_neighbors()
+                .into_iter()
+                .find_map(|h| self.militia_at(h));
+            if let Some(home) = guards {
+                events.push(Event::UndeadHitMilitia { id, home });
+                self.hurt_militia(home, 1, events);
+                continue;
+            }
+            // Standing in a settlement no militia stands on (none left, or
+            // the men that came back at dawn could not get past it): it lays
+            // it waste.
+            if self.militia(u.hex).is_some() && self.militia_at(u.hex).is_none() {
                 self.ruin(u.hex, events);
                 continue;
             }
             self.undead_walk(id, events);
+            arrived.push(id);
         }
+
+        let posts: Vec<(Hex, Hex)> = self
+            .militias()
+            .filter_map(|(home, m)| m.at.filter(|_| m.men > 0).map(|at| (home, at)))
+            .collect();
+        for (_, at) in posts {
+            let Some(id) = self
+                .undead
+                .iter()
+                .filter(|u| u.hex.unsigned_distance_to(at) <= 1 && !arrived.contains(&u.id))
+                .min_by_key(|u| (u.hp, u.id))
+                .map(|u| u.id)
+            else {
+                continue;
+            };
+            let Some(u) = self.undead.iter_mut().find(|u| u.id == id) else {
+                continue;
+            };
+            u.hp = u.hp.saturating_sub(1);
+            let hp = u.hp;
+            events.push(Event::UndeadHurt { id, amount: 1, hp });
+            if hp == 0 {
+                self.undead.retain(|u| u.id != id);
+                events.push(Event::MilitiaStruck {
+                    hex: at,
+                    undead: id,
+                });
+            }
+        }
+
+        self.militia_go_home(events);
     }
 
     /// One step towards the nearest living thing it sees: a champion or a
@@ -224,16 +195,21 @@ impl Game {
         let Some(u) = self.undead.iter().find(|u| u.id == id).copied() else {
             return;
         };
-        let champions = self
-            .players()
-            .filter(|&p| !self.is_hidden(p))
-            .map(|p| self.hex_of(p));
-        let settlements = self.militia.keys().map(|&(x, y)| Hex::new(x, y));
-        let Some(goal) = champions
-            .chain(settlements)
-            .filter(|h| h.unsigned_distance_to(u.hex) <= UNDEAD_SIGHT)
-            .min_by_key(|h| (h.unsigned_distance_to(u.hex), h.x(), h.y()))
-        else {
+        // The dead are drawn to where the living gather: a settlement in
+        // sight first, a champion only when none is near.
+        let nearest = |hexes: &mut dyn Iterator<Item = Hex>| {
+            hexes
+                .filter(|h| h.unsigned_distance_to(u.hex) <= UNDEAD_SIGHT)
+                .min_by_key(|h| (h.unsigned_distance_to(u.hex), h.x(), h.y()))
+        };
+        let settlement = nearest(&mut self.militias().map(|(home, _)| home));
+        let champion = nearest(
+            &mut self
+                .players()
+                .filter(|&p| !self.is_hidden(p))
+                .map(|p| self.hex_of(p)),
+        );
+        let Some(goal) = settlement.or(champion) else {
             return;
         };
         let here = u.hex.unsigned_distance_to(goal);
@@ -243,8 +219,6 @@ impl Game {
             .into_iter()
             .filter(|&h| self.board.contains(h))
             .filter(|&h| self.champion_at(h).is_none() && !self.mob_at(h))
-            // A held settlement keeps them at its gate.
-            .filter(|&h| self.militia(h).is_none_or(|m| m == 0))
             .filter(|&h| h.unsigned_distance_to(goal) < here)
             .min_by_key(|&h| (h.unsigned_distance_to(goal), h.x(), h.y()));
         if let Some(next) = next {
@@ -265,20 +239,6 @@ impl Game {
                 self.reveal(p, RevealReason::Stumbled, events);
             }
         }
-    }
-
-    /// An undead with no militia to stop it: the settlement becomes ruins.
-    fn ruin(&mut self, hex: Hex, events: &mut Vec<Event>) {
-        self.militia.remove(&(hex.x(), hex.y()));
-        self.claims.remove(&(hex.x(), hex.y()));
-        if let Some(tile) = self.board.tile_mut(hex) {
-            tile.terrain = Terrain::Ruins;
-        }
-        events.push(Event::SettlementRuined { hex });
-        events.push(Event::TerrainChanged {
-            hex,
-            terrain: Terrain::Ruins,
-        });
     }
 
     fn undead_dice_label(&mut self, id: u32, defending: bool) -> [u64; 4] {
@@ -398,38 +358,6 @@ impl Game {
         // One in three carries something worth taking (§20.3).
         if self.rng.below(3) == 0 {
             self.gain_loot(by, events);
-        }
-    }
-
-    /// At dawn the militia fill their ranks again.
-    pub(super) fn militia_at_dawn(&mut self) {
-        for m in self.militia.values_mut() {
-            *m = MILITIA;
-        }
-    }
-
-    /// Friends of the militia rest in their settlements.
-    pub(super) fn militia_at_turn_start(&mut self, player: PlayerId, events: &mut Vec<Event>) {
-        let at = self.hex_of(player);
-        if self.militia(at).is_none() || self.standing(player) < FRIENDLY {
-            return;
-        }
-        let c = &self.champions[player.0 as usize];
-        if c.hp < c.body {
-            events.push(Event::MilitiaHelped { player, hex: at });
-            self.heal(player, 1, events);
-        }
-    }
-
-    /// The unwelcome who end their turn in a settlement are beaten out.
-    pub(super) fn militia_at_turn_end(&mut self, player: PlayerId, events: &mut Vec<Event>) {
-        let at = self.hex_of(player);
-        if self.militia(at).is_none_or(|m| m == 0) || self.standing(player) > HOSTILE {
-            return;
-        }
-        events.push(Event::MilitiaBeat { player, hex: at });
-        if self.champions[player.0 as usize].hp > 1 {
-            self.damage(player, 1, events);
         }
     }
 }

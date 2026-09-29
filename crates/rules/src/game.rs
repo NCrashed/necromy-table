@@ -155,6 +155,8 @@ pub enum Intent {
     Sacrifice {
         slot: crate::items::Slot,
     },
+    /// On your turn on the ruins of a settlement: build it again (§20.4).
+    Rebuild,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -180,6 +182,8 @@ pub enum WindowKind {
     GuardBattle { attacker: PlayerId },
     /// A champion attacks undead `id`; only they burn (§20.4).
     UndeadBattle { attacker: PlayerId, id: u32 },
+    /// A champion attacks the militia of `home`; only they burn (§20.4).
+    MilitiaBattle { attacker: PlayerId, home: Hex },
     /// Before a trial's throw: its challenger picks cards to burn (§20.2).
     Trial { player: PlayerId, hex: Hex },
 }
@@ -254,6 +258,8 @@ pub enum Fighter {
     Guard,
     /// An undead, by id (§20.4).
     Undead(u32),
+    /// A settlement's militia, by its home.
+    Militia(Hex),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -439,6 +445,47 @@ pub enum Event {
     },
     /// The militia would not let `player` take their settlement.
     MilitiaBarred {
+        player: PlayerId,
+        hex: Hex,
+    },
+    /// The militia of `home` let `player` through and stepped out to `to`.
+    MilitiaSwapped {
+        player: PlayerId,
+        home: Hex,
+        to: Hex,
+    },
+    /// The militia of `home` went back to `to` (their home).
+    MilitiaMoved {
+        home: Hex,
+        to: Hex,
+    },
+    /// The militia of `home` lost men; `men` left.
+    MilitiaHurt {
+        home: Hex,
+        men: u8,
+    },
+    /// No man of `home`'s militia is left standing.
+    MilitiaFell {
+        home: Hex,
+    },
+    /// `attacker` stepped onto militia who hold something against them.
+    MilitiaAttacked {
+        attacker: PlayerId,
+        home: Hex,
+    },
+    MilitiaResolved {
+        home: Hex,
+        champion: PlayerId,
+        militia_score: Score,
+        champion_score: Score,
+    },
+    /// World phase: undead `id` knocked down a man of `home`'s militia.
+    UndeadHitMilitia {
+        id: u32,
+        home: Hex,
+    },
+    /// `player` built the ruins on `hex` into a settlement again.
+    SettlementRebuilt {
         player: PlayerId,
         hex: Hex,
     },
@@ -886,6 +933,8 @@ pub enum RuleError {
     NotAtTemple,
     /// Nothing is worn in that slot.
     NothingWorn,
+    /// Only the ruins of a settlement can be built again.
+    NotRuins,
 }
 
 impl std::fmt::Display for RuleError {
@@ -893,6 +942,7 @@ impl std::fmt::Display for RuleError {
         match self {
             RuleError::NotYourTurn => write!(f, "not your turn"),
             RuleError::NotAtTemple => write!(f, "not at a temple"),
+            RuleError::NotRuins => write!(f, "not the ruins of a settlement"),
             RuleError::NothingWorn => write!(f, "nothing worn there"),
             RuleError::UnknownPlayer => write!(f, "unknown player"),
             RuleError::OffBoard => write!(f, "off the board"),
@@ -956,7 +1006,9 @@ pub struct Game {
     undead: Vec<mobs::Undead>,
     next_mob: u32,
     mob_throws: u64,
-    militia: BTreeMap<(i32, i32), u8>,
+    militia: BTreeMap<(i32, i32), militia::Militia>,
+    /// Settlements the undead laid waste, to be built again (§20.4).
+    ruins: std::collections::BTreeSet<(i32, i32)>,
     standing: Vec<i8>,
     taste: style::Taste,
     /// Per player, what they did since the last dusk.
@@ -1076,6 +1128,7 @@ impl Game {
             next_mob: 0,
             mob_throws: 0,
             militia,
+            ruins: Default::default(),
             standing: vec![0; setup.champions.len()],
             taste,
             deeds: vec![Vec::new(); champions_len],
@@ -1323,7 +1376,7 @@ impl Game {
         if champion.hex.unsigned_distance_to(to) != 1 {
             return Err(RuleError::NotAdjacent);
         }
-        if self.occupant(to).is_some() || self.mob_at(to) {
+        if self.occupant(to).is_some() || (self.mob_at(to) && !self.lets_pass(player, to)) {
             return Err(RuleError::Occupied);
         }
         Ok(self.terrain_cost(player, tile.terrain))
@@ -1375,7 +1428,10 @@ impl Game {
                 let Some(tile) = self.board.tile(next) else {
                     continue;
                 };
-                if next == start || self.occupant(next).is_some() || self.mob_at(next) {
+                // Militia who let one through are a hex to end on, not to pass.
+                let passing = self.lets_pass(player, next);
+                if next == start || self.occupant(next).is_some() || (self.mob_at(next) && !passing)
+                {
                     continue;
                 }
                 let total = cost + self.terrain_cost(player, tile.terrain);
@@ -1385,7 +1441,7 @@ impl Game {
                 if best.get(&next).is_none_or(|&(c, _)| total < c) {
                     best.insert(next, (total, at));
                     // A trial stops the walk: no path goes on through it.
-                    if self.trial_for(player, next).is_some() {
+                    if passing || self.trial_for(player, next).is_some() {
                         continue;
                     }
                     queue.push(std::cmp::Reverse((total, next.x(), next.y())));
@@ -1411,6 +1467,7 @@ impl Game {
                     WindowKind::Battle { .. }
                     | WindowKind::GuardBattle { .. }
                     | WindowKind::UndeadBattle { .. }
+                    | WindowKind::MilitiaBattle { .. }
                     | WindowKind::Trial { .. } => false,
                     WindowKind::Enter { .. } => def.timing == Timing::Instant,
                     // Tribute: any card of the hand may be given, free.
@@ -1619,6 +1676,7 @@ impl Game {
             Intent::Move { to } => self.step(player, to, events),
             Intent::Play { card, target } => self.play_own(player, card, target, events),
             Intent::Sacrifice { slot } => self.sacrifice(player, slot, events),
+            Intent::Rebuild => self.rebuild(player, events),
             _ => Err(RuleError::WrongTiming),
         }
     }
@@ -1640,6 +1698,7 @@ impl Game {
             }
             Intent::Play { card, target } => self.check_play(player, card, target),
             Intent::Sacrifice { slot } => self.check_sacrifice(player, slot).map(|_| ()),
+            Intent::Rebuild => self.check_rebuild(player).map(|_| ()),
             _ => Err(RuleError::WrongTiming),
         }
     }
@@ -1771,6 +1830,17 @@ impl Game {
             let cost = self.attack_cost(player, to)?;
             self.start_undead_battle(player, id, cost, events);
             return Ok(());
+        }
+        // The militia let through those they hold nothing against: they trade
+        // places and the step goes on; the others have to fight (§20.4).
+        if let Some(home) = self.militia_at(to) {
+            if self.lets_pass(player, to) {
+                self.trade_places(player, to, events);
+            } else {
+                let cost = self.attack_cost(player, to)?;
+                self.start_militia_battle(player, home, cost, events);
+                return Ok(());
+            }
         }
         if let Some(defender) = self.occupant(to)
             && defender != player
@@ -1945,6 +2015,7 @@ impl Game {
             WindowKind::Battle { .. }
                 | WindowKind::GuardBattle { .. }
                 | WindowKind::UndeadBattle { .. }
+                | WindowKind::MilitiaBattle { .. }
                 | WindowKind::Trial { .. }
         );
         let choice = match intent {
@@ -1970,7 +2041,7 @@ impl Game {
                 Choice::Burn(cards)
             }
             Intent::Burn { .. } => return Err(RuleError::WrongTiming),
-            Intent::Move { .. } | Intent::EndTurn | Intent::Sacrifice { .. } => {
+            Intent::Move { .. } | Intent::EndTurn | Intent::Sacrifice { .. } | Intent::Rebuild => {
                 return Err(RuleError::WindowOpen);
             }
             Intent::Wish { .. } | Intent::RefuseWish => return Err(RuleError::InvalidWish),
@@ -2070,6 +2141,16 @@ impl Game {
             // A battle ends the movement of whoever brought it about.
             if self.is_active(window.actor) {
                 self.turns[window.actor.0 as usize].move_points = 0;
+            }
+        }
+        if let WindowKind::MilitiaBattle { attacker, home } = window.kind {
+            let burned = match window.choices.get(&attacker) {
+                Some(Choice::Burn(cards)) => cards.clone(),
+                _ => Vec::new(),
+            };
+            self.resolve_militia_battle(attacker, home, burned, events);
+            if self.is_active(attacker) {
+                self.turns[attacker.0 as usize].move_points = 0;
             }
         }
         if let WindowKind::UndeadBattle { attacker, id } = window.kind {
@@ -2748,6 +2829,7 @@ mod battle;
 mod gear;
 mod guard;
 mod laws;
+mod militia;
 mod mobs;
 mod poison;
 mod scenario;
@@ -2763,9 +2845,11 @@ pub use battle::Score;
 pub use gear::{Gain, SACRIFICE};
 pub use guard::{GUARD_DICE, GUARD_HEALTH, GUARD_RELIEF, GUARD_STEPS, Guard};
 pub use laws::{BURDEN_FREE, CHOSEN, CRACK_REACH, Law, Patronage, SENTENCE_THRESHOLD, SIGN, VOICE};
+pub use militia::{
+    FRIENDLY, HOSTILE, MILITIA, MILITIA_PASS, Militia, REBUILD_SPIRIT, REBUILD_STANDING,
+};
 pub use mobs::{
-    FRIENDLY, HOSTILE, MAX_UNDEAD, MILITIA, UNDEAD_AGE, UNDEAD_AGE_DARK, UNDEAD_DICE,
-    UNDEAD_HEALTH, UNDEAD_SIGHT, Undead,
+    MAX_UNDEAD, UNDEAD_AGE, UNDEAD_AGE_DARK, UNDEAD_DICE, UNDEAD_HEALTH, UNDEAD_SIGHT, Undead,
 };
 pub use poison::{Cure, Poison};
 pub use scenario::{Scenario, SceneSeat, SceneWorld};

@@ -431,10 +431,18 @@ fn pose(
         let side = fighter.0;
         let who = battle.champion(side);
         // An undead stands still in its one picture (§20.4).
-        let undead = match battle.sides[side] {
-            necromy_rules::Fighter::Undead(id) => Some(id),
+        // An undead or the militia stand still in their one picture.
+        let still = match battle.sides[side] {
+            necromy_rules::Fighter::Undead(id) => {
+                Some(stats.undead[id as usize % stats.undead.len()].clone())
+            }
+            necromy_rules::Fighter::Militia(home) => Some(
+                stats.militia[crate::props::hex_seed(home, 31) as usize % stats.militia.len()]
+                    .clone(),
+            ),
             _ => None,
         };
+        let undead = still.as_ref();
         let god = who
             .and_then(|p: PlayerId| game.game.champion(p))
             .map(|c| c.god);
@@ -500,8 +508,8 @@ fn pose(
                 )
             }
             // The royal guard, or a god without a sheet.
-            _ => match undead {
-                Some(id) => (stats.undead[id as usize % stats.undead.len()].clone(), None),
+            _ => match &still {
+                Some(image) => (image.clone(), None),
                 None => (stats.guard.clone(), None),
             },
         };

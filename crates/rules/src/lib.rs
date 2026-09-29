@@ -23,11 +23,12 @@ pub use game::{
     Act, Bet, BodyVerb, Boon, CHOSEN, Champion, Character, Check, CheckKind, Condition, Cure, Deed,
     Event, FORESEE, FRIENDLY, Fighter, GUARD_DICE, GUARD_HEALTH, GUARD_RELIEF, GUARD_STEPS,
     GUARD_THRESHOLD, Gain, Game, Goal, Guard, HOSTILE, Intent, Law, Line, LineKind, MAX_ACTS,
-    MAX_UNDEAD, MILITIA, Patronage, Phase, PlayerId, Poison, Price, RevealReason, RuleError,
-    SACRIFICE, SECRET_FROM_ROUND, SIGN, STAGE_THRESHOLD, STAGES, Said, Scenario, SceneSeat, Score,
-    Setup, StyleReason, TRIAL_ROUNDS, TRIALS_ON_BOARD, TRIBUTE_THREAT, TRISHNA_DRIFT, Target,
-    Taste, TasteKind, TimeOfDay, Trap, Trial, Truce, UNDEAD_DICE, UNDEAD_HEALTH, Undead, VOICE,
-    WAGER_STAKE, Wager, Window, WindowKind, Wish, WishKind, WorldStir, trial_face,
+    MAX_UNDEAD, MILITIA, MILITIA_PASS, Militia, Patronage, Phase, PlayerId, Poison, Price,
+    REBUILD_SPIRIT, RevealReason, RuleError, SACRIFICE, SECRET_FROM_ROUND, SIGN, STAGE_THRESHOLD,
+    STAGES, Said, Scenario, SceneSeat, Score, Setup, StyleReason, TRIAL_ROUNDS, TRIALS_ON_BOARD,
+    TRIBUTE_THREAT, TRISHNA_DRIFT, Target, Taste, TasteKind, TimeOfDay, Trap, Trial, Truce,
+    UNDEAD_DICE, UNDEAD_HEALTH, Undead, VOICE, WAGER_STAKE, Wager, Window, WindowKind, Wish,
+    WishKind, WorldStir, trial_face,
 };
 pub use gods::{Element, God};
 pub use hexx::Hex;

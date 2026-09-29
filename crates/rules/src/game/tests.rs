@@ -3466,26 +3466,31 @@ fn untended_bodies_rise_where_no_grove_grows() {
 }
 
 #[test]
-fn militia_cut_down_the_undead_and_refill_at_dawn() {
-    let (mut g, _, _) = duel(3);
-    let town = g
-        .militia
-        .keys()
-        .next()
-        .map(|&(x, y)| Hex::new(x, y))
-        .unwrap();
-    let gate = town
-        .all_neighbors()
-        .into_iter()
-        .find(|&h| g.board.contains(h) && g.champion_at(h).is_none())
-        .unwrap();
-    undead_on(&mut g, gate, UNDEAD_HEALTH);
+fn a_lone_undead_wears_the_militia_down_and_dawn_brings_a_man_back() {
+    let (mut g, me, _) = duel(3);
+    let town = town_by(&mut g, me);
+    // Nobody near but the dead.
+    g.place(me, Hex::new(-4, 4));
+    undead_on(&mut g, Hex::new(1, 1), UNDEAD_HEALTH);
     let mut events = Vec::new();
     g.mob_phase(&mut events);
-    assert!(g.undead().is_empty());
+    // Blows traded: it knocks a man down, the militia wound it.
+    assert_eq!(g.undead().len(), 1);
+    assert_eq!(g.undead()[0].hp, UNDEAD_HEALTH - 1);
     assert_eq!(g.militia(town), Some(MILITIA - 1));
+    // Left alone it knocks the last man down; nobody strikes back.
+    let mut events = Vec::new();
+    g.mob_phase(&mut events);
+    assert_eq!(g.militia(town), Some(0));
+    assert_eq!(g.undead().len(), 1);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::MilitiaFell { .. }))
+    );
+    // A man a dawn comes back.
     g.militia_at_dawn();
-    assert_eq!(g.militia(town), Some(MILITIA));
+    assert_eq!(g.militia(town), Some(1));
 }
 
 #[test]
@@ -3501,7 +3506,8 @@ fn the_undead_lay_an_undefended_settlement_waste() {
                 .all(|p| g.champion(p).unwrap().hex.unsigned_distance_to(t) > 1)
         })
         .unwrap();
-    g.militia.insert((town.x(), town.y()), 0);
+    g.militia
+        .insert((town.x(), town.y()), Militia { men: 0, at: None });
     g.claims.insert((town.x(), town.y()), me);
     undead_on(&mut g, town, UNDEAD_HEALTH);
     let mut events = Vec::new();
@@ -3509,6 +3515,7 @@ fn the_undead_lay_an_undefended_settlement_waste() {
     assert_eq!(g.board.tile(town).unwrap().terrain, Terrain::Ruins);
     assert_eq!(g.militia(town), None);
     assert_eq!(g.owner(town), None);
+    assert!(g.is_ruined_settlement(town));
 }
 
 #[test]
@@ -3564,7 +3571,9 @@ fn the_militia_remember_what_is_done_near_them() {
         .next()
         .map(|&(x, y)| Hex::new(x, y))
         .unwrap();
-    // Laying the dead to rest by their gate wins them over.
+    // Laying the dead to rest by their gate wins them over. (The militia
+    // stand aside: a champion and they never share a hex.)
+    g.militia.get_mut(&(town.x(), town.y())).unwrap().at = None;
     g.place(me, town);
     g.board.tile_mut(town).unwrap().corpse = Some(Corpse { age: 0 });
     let rest = g.give(me, "Упокоить");
@@ -3605,7 +3614,7 @@ fn the_militia_remember_what_is_done_near_them() {
 #[test]
 #[ignore]
 fn when_the_dead_rise() {
-    for seed in [7u64, 13, 21] {
+    for seed in 1u64..=12 {
         let (mut g, _) = Game::new(Setup {
             seed,
             champions: God::ALL.to_vec(),
@@ -3639,5 +3648,130 @@ fn when_the_dead_rise() {
             count(|e| matches!(e, Event::SettlementRuined { .. })),
             count(|e| matches!(e, Event::UndeadStruck { .. })),
         );
+        eprintln!(
+            "    militia hit by undead {}, rebuilt {}, swaps {}, militia fought {}",
+            count(|e| matches!(e, Event::UndeadHitMilitia { .. })),
+            count(|e| matches!(e, Event::SettlementRebuilt { .. })),
+            count(|e| matches!(e, Event::MilitiaSwapped { .. })),
+            count(|e| matches!(e, Event::MilitiaAttacked { .. })),
+        );
     }
+}
+
+/// A settlement next to `me` at (0,0), its militia at home, the ground plain.
+fn town_by(g: &mut Game, me: PlayerId) -> Hex {
+    let town = Hex::new(0, 1);
+    // The only settlement that matters here: no neighbour's militia in reach.
+    g.militia.clear();
+    let tile = g.board.tile_mut(town).unwrap();
+    tile.terrain = Terrain::Settlement;
+    tile.region = Some(God::Ahamar);
+    g.militia.insert(
+        (town.x(), town.y()),
+        Militia {
+            men: MILITIA,
+            at: Some(town),
+        },
+    );
+    assert_eq!(g.champion(me).unwrap().hex, Hex::new(0, 0));
+    town
+}
+
+#[test]
+fn militia_let_the_unhated_through_by_trading_places() {
+    let (mut g, me, _) = duel(3);
+    let town = town_by(&mut g, me);
+    assert!(g.lets_pass(me, town));
+    // No fight on offer; a path ends there.
+    assert!(!g.attackable(me).contains(&town));
+    assert!(g.reachable(me).contains_key(&town));
+    let events = g.apply(me, Intent::Move { to: town }).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::MilitiaSwapped { .. }))
+    );
+    assert_eq!(g.champion(me).unwrap().hex, town);
+    assert_eq!(g.militia_unit(town).unwrap().at, Some(Hex::new(0, 0)));
+    assert_eq!(g.owner(town), Some(me));
+    // Once the champion walks on, the militia go home.
+    g.place(me, Hex::new(1, 1));
+    g.militia_go_home(&mut Vec::new());
+    assert_eq!(g.militia_unit(town).unwrap().at, Some(town));
+}
+
+#[test]
+fn militia_fight_those_they_hold_something_against() {
+    let (mut g, me, _) = duel(3);
+    let town = town_by(&mut g, me);
+    g.standing[me.0 as usize] = -1;
+    assert!(g.attackable(me).contains(&town));
+    g.champ_mut(me).might = 6;
+    let cards = burn_all(&mut g, me, "Искра");
+    g.apply(me, Intent::Move { to: town }).unwrap();
+    assert!(matches!(
+        g.to_answer(me).map(|w| w.kind),
+        Some(WindowKind::MilitiaBattle { attacker, home }) if attacker == me && home == town
+    ));
+    let events = g.apply(me, Intent::Burn { cards }).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::MilitiaFell { .. }))
+    );
+    assert_eq!(g.militia(town), Some(0));
+    assert!(g.militia_at(town).is_none());
+    // Attacking at their gate and cutting them down: far out of favour.
+    assert!(g.standing(me) <= -3);
+    // The champion stays where they stood.
+    assert_eq!(g.champion(me).unwrap().hex, Hex::new(0, 0));
+}
+
+#[test]
+fn undead_at_the_gate_wear_the_militia_down() {
+    let (mut g, me, _) = duel(3);
+    let town = town_by(&mut g, me);
+    g.place(me, Hex::new(-4, 4));
+    // Two at the gate: the militia cut one down (a man lost), the other
+    // knocks a man down.
+    undead_on(&mut g, Hex::new(1, 1), UNDEAD_HEALTH);
+    undead_on(&mut g, Hex::new(-1, 2), UNDEAD_HEALTH);
+    let mut events = Vec::new();
+    g.mob_phase(&mut events);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::UndeadHitMilitia { .. }))
+    );
+    assert_eq!(g.militia(town), Some(0));
+    // A man comes back at dawn, not all of them.
+    g.militia_at_dawn();
+    assert_eq!(g.militia(town), Some(1));
+}
+
+#[test]
+fn ruins_can_be_built_again() {
+    let (mut g, me, _) = duel(3);
+    let town = town_by(&mut g, me);
+    g.ruin(town, &mut Vec::new());
+    assert_eq!(
+        g.apply(me, Intent::Rebuild),
+        Err(RuleError::NotRuins),
+        "only standing on them"
+    );
+    g.place(me, town);
+    g.champ_mut(me).spirit_points = REBUILD_SPIRIT;
+    let events = g.apply(me, Intent::Rebuild).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::SettlementRebuilt { .. }))
+    );
+    assert_eq!(g.board.tile(town).unwrap().terrain, Terrain::Settlement);
+    assert!(!g.is_ruined_settlement(town));
+    assert_eq!(g.militia(town), Some(1));
+    assert_eq!(g.owner(town), Some(me));
+    assert_eq!(g.standing(me), REBUILD_STANDING);
+    assert_eq!(g.move_points(me), 0);
+    assert_eq!(g.champion(me).unwrap().spirit_points, 0);
 }

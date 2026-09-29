@@ -5,8 +5,8 @@
 
 use bevy::prelude::*;
 use necromy_rules::{
-    Face, Fighter, GUARD_DICE, GUARD_HEALTH, Intent, PlayerId, TimeOfDay, UNDEAD_DICE,
-    UNDEAD_HEALTH, WindowKind,
+    Face, Fighter, GUARD_DICE, GUARD_HEALTH, Hex, Intent, MILITIA, PlayerId, TimeOfDay,
+    UNDEAD_DICE, UNDEAD_HEALTH, WindowKind,
 };
 
 use crate::dice::{DiceShow, Revealed, TRAY_TEXTURE, TrayTextures};
@@ -77,6 +77,8 @@ enum Side {
     Champion(PlayerId),
     Guard,
     Undead(u32),
+    /// A settlement's militia, by its home.
+    Militia(Hex),
 }
 
 impl From<Fighter> for Side {
@@ -85,6 +87,7 @@ impl From<Fighter> for Side {
             Fighter::Champion(p) => Side::Champion(p),
             Fighter::Guard => Side::Guard,
             Fighter::Undead(id) => Side::Undead(id),
+            Fighter::Militia(home) => Side::Militia(home),
         }
     }
 }
@@ -203,6 +206,12 @@ fn side_column(
             m.name(p),
             g.dice_for(p, defending),
         ),
+        Side::Militia(home) => (
+            art.militia[crate::props::hex_seed(home, 31) as usize % art.militia.len()].clone(),
+            "Ополчение".to_string(),
+            // A die a man, as many as stood when the fight began.
+            m.shown_militia(home).map_or(MILITIA, |mil| mil.men),
+        ),
         Side::Undead(id) => (
             art.undead[id as usize % art.undead.len()].clone(),
             "Неупокоенный".to_string(),
@@ -270,6 +279,22 @@ fn side_column(
         }
     }
     // An undead's health, from the dead on the board.
+    // The militia's men, as a side's health.
+    if let Side::Militia(home) = side {
+        let heart = stats::icon_node(commands, art.icon(StatIcon::Health), 24.0, true);
+        let now = m.shown_militia(home).map_or(0, |mil| mil.men);
+        let men_now = hp_shown.unwrap_or(now);
+        let bar = stats::bar(commands, men_now, MILITIA, HEALTH, None, 10.0, 14.0);
+        let text = if fell {
+            format!("{men_now}/{MILITIA} — пали!")
+        } else {
+            format!("{men_now}/{MILITIA}")
+        };
+        let hp_text = stats::label(commands, font, &text, 13.0, fell);
+        commands
+            .entity(numbers)
+            .add_children(&[heart, bar, hp_text]);
+    }
     if let Side::Undead(id) = side {
         let heart = stats::icon_node(commands, art.icon(StatIcon::Health), 24.0, true);
         let now = g.undead().iter().find(|u| u.id == id).map_or(0, |u| u.hp);

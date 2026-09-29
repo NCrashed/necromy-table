@@ -525,12 +525,33 @@ fn tooltip(
             necromy_rules::UNDEAD_DICE
         ));
     }
-    if let Some(m) = g.militia(hex) {
+    // The militia standing here, and what a step onto them would do.
+    if let Some(home) = g.militia_at(hex) {
+        let men = g.militia(home).unwrap_or(0);
         lines.push(format!(
-            "ополчение: {m}/{} · к тебе: {}",
+            "ополчение: {men}/{} · к тебе: {}",
             necromy_rules::MILITIA,
             names::standing(g.standing(game.human))
         ));
+        lines.push(if g.lets_pass(game.human, hex) {
+            "шаг сюда — поменяться с ними местами".into()
+        } else {
+            "шаг сюда — бой с ополчением! (они тебе не рады)".into()
+        });
+    } else if let Some(men) = g.militia(hex) {
+        lines.push(format!(
+            "ополчение: {men}/{} — сейчас не на месте",
+            necromy_rules::MILITIA
+        ));
+    }
+    if g.is_ruined_settlement(hex) {
+        lines.push(format!(
+            "руины поселения: встань сюда и восстанови ({} Духа)",
+            necromy_rules::REBUILD_SPIRIT
+        ));
+        if g.champion(game.human).is_some_and(|c| c.hex == hex) && g.can_rebuild(game.human) {
+            lines.push("клик — восстановить".into());
+        }
     }
     if g.guard().is_some_and(|guard| guard.hex == hex) {
         let hp = g.guard().map_or(0, |guard| guard.hp);
@@ -540,7 +561,9 @@ fn tooltip(
         ));
     }
     if game.is_human_turn() {
-        if g.attackable(game.human).contains(&hex) {
+        if g.attackable(game.human).contains(&hex) && g.militia_at(hex).is_some() {
+            lines.push("клик — напасть на ополчение".into());
+        } else if g.attackable(game.human).contains(&hex) {
             lines.push("клик — напасть".into());
         } else if let Some(cost) = g.reachable(game.human).get(&hex) {
             lines.push(format!("клик — идти ({cost} очк.)"));

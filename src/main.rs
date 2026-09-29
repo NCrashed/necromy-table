@@ -258,6 +258,14 @@ fn auto_screenshot(
                 .is_some_and(|b| b.sides[1] == necromy_rules::Fighter::Guard)
                 && dice.settled()
         }
+        // A settlement the undead laid waste (§20.4).
+        (Some("ruins"), Some(game)) => {
+            game.game
+                .board()
+                .tiles()
+                .any(|(h, _)| game.game.is_ruined_settlement(h))
+                && game.on_screen.is_none()
+        }
         // Undead on the board and nothing over it (§20.4).
         (Some("undead"), Some(game)) => !game.game.undead().is_empty() && game.on_screen.is_none(),
         // Someone wears an item, nothing over the board (§20.3).

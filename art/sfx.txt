@@ -52,6 +52,25 @@ poison-laid	1.0	2	Poison splashes onto someone: a wet glassy splash of a vial an
 poison-bite	0.7	3	Poison stings from within: a short sickly bubbling gurgle with a small wet pop
 poison-fed	1.0	2	A poison grows stronger: a thick liquid bubbling swell rising in pitch
 poison-cured	1.2	2	Poison purged: a hissing sizzle of steam that clears into a clean soft chime
+# Trials (docs/design.md §20.2)
+trial-set	1.2	2	Ancient runes ignite in a stone circle on the ground: a low magical hum rising into a clear chime
+trial-begin	1.0	2	A hero steps into a glowing rune circle: a deep resonant thrum and one heavy drum beat
+trial-pass	1.5	2	A trial is passed: a bright triumphant rising chord of chimes with a warm swell
+trial-fail	1.2	2	A trial is failed: a dissonant magical buzz collapsing into a dull heavy thud
+# Items (§20.3)
+item-gain	1.0	3	Picking up a magic item: a leather pouch opens, metal clinks, a small bright sparkle
+item-break	0.9	2	A magic item shatters: metal snaps and glass breaks with a fizzle of released magic
+item-offer	1.5	2	A treasure is offered on a temple altar: it dissolves in a soft flaring whoosh and a temple bell rings once
+# The guard, the undead, the militia (§20.4)
+guard-fall	1.5	2	A heavily armoured knight falls: plate armour crashes onto stone and a sword clatters away
+undead-rise	1.5	2	A restless skeleton claws out of the earth: dirt shifting, dry bones creaking, a hollow ghostly exhale
+undead-strike	0.8	3	A skeleton lashes out: a dry bone clatter and a raspy ghostly hiss
+undead-rest	1.5	2	A skeleton is laid to rest: its bones collapse into a pile and a soft ghostly sigh fades away
+militia-strike	0.7	3	Village militia strike together: a spear thrust and a wooden shield bash with men grunting, no words
+militia-greet	0.8	2	Friendly village guards step aside: a spear butt taps the ground twice and light armour rattles
+militia-alarm	1.2	2	A small village alarm bell rings fast twice as spears are raised
+settlement-ruined	2.0	2	A village is overrun: wooden beams crack and collapse, fire crackles, a distant bell falls silent
+settlement-rebuilt	1.8	2	A village is rebuilt: hammer blows on timber, a beam set in place, a bright bell rings once
 crown	2.0	2	A royal crown is placed, a regal golden shimmer and a brass accent
 # Royal guard
 guard-arrive	1.5	3	The royal guard arrives: a heavy iron gate clanks open, armoured boots stamp twice and one war drum hits; no horn, no car horn, no beep

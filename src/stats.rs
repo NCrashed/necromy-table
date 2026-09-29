@@ -548,18 +548,20 @@ fn stat_sheet(
         rows.push(r);
     }
 
-    // What the militia think of them (§20.4), once they think anything.
+    // What the militia think of them (§20.4), in the colour of the pennant
+    // over every militia: whether they let this champion through.
     let standing = g.standing(player);
-    if standing != 0 {
-        let line = label(
-            commands,
-            font,
-            &format!("ополчение: {standing:+} ({})", names::standing(standing)),
-            12.0,
-            false,
-        );
-        rows.push(line);
-    }
+    let line = label(
+        commands,
+        font,
+        &format!("ополчение: {standing:+} — {}", names::standing(standing)),
+        12.0,
+        true,
+    );
+    commands
+        .entity(line)
+        .insert(TextColor(names::standing_color(standing)));
+    rows.push(line);
 
     // Worn items (§20.3): slots with a tooltip on the human's own sheet;
     // a popup vanishes when the mouse leaves its portrait, so there each

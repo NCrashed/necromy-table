@@ -55,6 +55,8 @@ impl Game {
             .all_neighbors()
             .into_iter()
             .filter(|&h| self.attack_cost(player, h).is_ok())
+            // Militia who let one through are no fight.
+            .filter(|&h| !self.lets_pass(player, h))
             .collect()
     }
 
@@ -79,7 +81,9 @@ impl Game {
     /// in one: the most cards they may burn.
     pub fn battle_dice(&self, player: PlayerId) -> Option<u8> {
         self.windows.iter().find_map(|w| match w.kind {
-            WindowKind::GuardBattle { attacker } | WindowKind::UndeadBattle { attacker, .. }
+            WindowKind::GuardBattle { attacker }
+            | WindowKind::UndeadBattle { attacker, .. }
+            | WindowKind::MilitiaBattle { attacker, .. }
                 if attacker == player =>
             {
                 Some(self.dice_for(player, false))

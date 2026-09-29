@@ -826,7 +826,7 @@ fn hear_events(
                 (Sound::new("card-draw"), Heard::Always)
             }
             Event::CardPlayed { player, .. } => (Sound::new("card-play"), by(*player)),
-            Event::Chain { player, .. } => (Sound::new("chain"), by(*player)),
+            Event::Chain { player, .. } => (Sound::new("item-gain"), by(*player)),
             Event::WindowOpened { eligible, .. } if eligible.contains(&human) => {
                 (Sound::new("window"), Heard::Always)
             }
@@ -841,16 +841,16 @@ fn hear_events(
             Event::PoisonBit { player, .. } => (Sound::new("poison-bite"), by(*player)),
             Event::PoisonFed { player, .. } => (Sound::new("poison-fed"), by(*player)),
             Event::PoisonCured { player, .. } => (Sound::new("poison-cured"), by(*player)),
-            // Items borrow what fits until they have their own (§20.3).
-            Event::ItemGained { player, .. } => (Sound::new("chain"), by(*player)),
-            Event::ItemBroken { player, .. } => (Sound::new("ward-break"), by(*player)),
-            Event::ItemSacrificed { player, .. } => (Sound::new("offer"), by(*player)),
+            // Items (§20.3).
+            Event::ItemGained { player, .. } => (Sound::new("item-gain"), by(*player)),
+            Event::ItemBroken { player, .. } => (Sound::new("item-break"), by(*player)),
+            Event::ItemSacrificed { player, .. } => (Sound::new("item-offer"), by(*player)),
             Event::ItemToll { player, .. } => (Sound::new("curse-bit").at(0.6), by(*player)),
-            // Trials borrow what fits until they have their own.
-            Event::TrialSet { trial } => (Sound::new("offer").at(0.6), Heard::At(trial.hex)),
-            Event::TrialBegun { player, .. } => (Sound::new("chain"), by(*player)),
-            Event::TrialPassed { player, .. } => (Sound::new("wish-granted"), by(*player)),
-            Event::TrialFailed { player, .. } => (Sound::new("curse-bit"), by(*player)),
+            // Trials (§20.2).
+            Event::TrialSet { trial } => (Sound::new("trial-set").at(0.7), Heard::At(trial.hex)),
+            Event::TrialBegun { player, .. } => (Sound::new("trial-begin"), by(*player)),
+            Event::TrialPassed { player, .. } => (Sound::new("trial-pass"), by(*player)),
+            Event::TrialFailed { player, .. } => (Sound::new("trial-fail"), by(*player)),
             Event::Hasted { player, .. } => (Sound::new("haste"), by(*player)),
             Event::Blinked { player, .. } => (Sound::new("blink"), by(*player)),
             Event::TrapSet { player, .. } => (Sound::new("trap-set"), by(*player)),
@@ -904,10 +904,21 @@ fn hear_events(
                     (Sound::new("battle-start"), by(*attacker))
                 }
             }
-            Event::GuardFell { by: who, .. } => (Sound::new("fall"), by(*who)),
-            // The dead and the militia (§20.4), with borrowed sounds.
-            Event::UndeadRose { undead } => {
-                (Sound::new("curse-laid").at(0.7), Heard::At(undead.hex))
+            Event::GuardFell { by: who, .. } => (Sound::new("guard-fall"), by(*who)),
+            // The dead and the militia (§20.4).
+            Event::UndeadRose { undead } => (Sound::new("undead-rise"), Heard::At(undead.hex)),
+            Event::UndeadHitMilitia { home, .. } => (Sound::new("undead-strike"), Heard::At(*home)),
+            Event::MilitiaSwapped { player, .. } => (Sound::new("militia-greet"), by(*player)),
+            Event::MilitiaAttacked { attacker, .. } => {
+                if *attacker == human {
+                    in_battle = true;
+                    (Sound::new("militia-alarm"), Heard::Always)
+                } else {
+                    (Sound::new("militia-alarm"), by(*attacker))
+                }
+            }
+            Event::SettlementRebuilt { player, .. } => {
+                (Sound::new("settlement-rebuilt"), by(*player))
             }
             Event::UndeadStruck { target, .. } => {
                 if *target == human {
@@ -925,9 +936,9 @@ fn hear_events(
                     (Sound::new("battle-start"), by(*attacker))
                 }
             }
-            Event::UndeadFell { hex, .. } => (Sound::new("fall"), Heard::At(*hex)),
-            Event::MilitiaStruck { hex, .. } => (Sound::new("hit"), Heard::At(*hex)),
-            Event::SettlementRuined { hex } => (Sound::new("fall"), Heard::At(*hex)),
+            Event::UndeadFell { hex, .. } => (Sound::new("undead-rest"), Heard::At(*hex)),
+            Event::MilitiaStruck { hex, .. } => (Sound::new("militia-strike"), Heard::At(*hex)),
+            Event::SettlementRuined { hex } => (Sound::new("settlement-ruined"), Heard::At(*hex)),
             Event::MilitiaHelped { player, .. } => (Sound::new("heal"), by(*player)),
             Event::MilitiaBeat { player, .. } => (Sound::new("hurt"), by(*player)),
             Event::GuardStruck { target } => {

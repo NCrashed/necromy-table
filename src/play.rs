@@ -113,6 +113,9 @@ pub struct Match {
     pub held_guard: Option<necromy_rules::Guard>,
     /// Undead laid to rest in the fight on screen, standing until it closes.
     pub held_undead: Vec<necromy_rules::Undead>,
+    /// A settlement's militia as they stood when the fight on screen began:
+    /// their figures keep to it until its dice are down.
+    pub held_militia: Option<(Hex, necromy_rules::Militia)>,
     /// The last card that hit the human and what it did, shown for a moment
     /// after its Target window closed.
     pub incoming_result: Option<IncomingResult>,
@@ -568,6 +571,7 @@ impl Match {
             held_falls: Vec::new(),
             held_guard: None,
             held_undead: Vec::new(),
+            held_militia: None,
             incoming_result: None,
             incoming_serial: 0,
             offerings: Vec::new(),
@@ -875,6 +879,12 @@ impl Match {
                 }
                 // Seen again: the token goes where they really are.
                 Event::Revealed { player, hex, .. } => self.steps.push((*player, *hex)),
+                // The militia in a fight the human is in keep their men on
+                // the board until the dice are down.
+                Event::MilitiaAttacked { attacker, home } if *attacker == self.human => {
+                    // The attack comes before its dice: the view has them whole.
+                    self.held_militia = self.game.militia_unit(*home).map(|m| (*home, m));
+                }
                 // So does an undead laid to rest on screen.
                 Event::UndeadFell { id, hex, by } => {
                     if self.in_show_on_screen(*by) {
@@ -959,6 +969,7 @@ impl Match {
             Event::GuardAttacked { attacker } => Some((ShowKind::Guard, vec![*attacker])),
             Event::UndeadStruck { target, .. } => Some((ShowKind::Mob, vec![*target])),
             Event::UndeadAttacked { attacker, .. } => Some((ShowKind::Mob, vec![*attacker])),
+            Event::MilitiaAttacked { attacker, .. } => Some((ShowKind::Mob, vec![*attacker])),
             Event::TrialBegun { player, .. } => Some((ShowKind::Trial, vec![*player])),
             _ => None,
         };
@@ -1002,14 +1013,14 @@ impl Match {
                 ..
             } => (None, Some(ShowKind::Guard), false, false),
             Event::DiceThrown {
-                fighter: Fighter::Undead(_),
+                fighter: Fighter::Undead(_) | Fighter::Militia(_),
                 ..
             } => (None, Some(ShowKind::Mob), false, false),
             Event::BattleResolved { defender, .. } => (Some(*defender), None, true, false),
             Event::GuardResolved { target, .. } => {
                 (Some(*target), Some(ShowKind::Guard), true, false)
             }
-            Event::UndeadResolved { champion, .. } => {
+            Event::UndeadResolved { champion, .. } | Event::MilitiaResolved { champion, .. } => {
                 (Some(*champion), Some(ShowKind::Mob), true, false)
             }
             Event::TrialPassed { player, .. } | Event::TrialFailed { player, .. } => {
@@ -1021,9 +1032,10 @@ impl Match {
             Event::GuardHurt { .. } | Event::GuardFell { .. } => {
                 (None, Some(ShowKind::Guard), false, true)
             }
-            Event::UndeadHurt { .. } | Event::UndeadFell { .. } => {
-                (None, Some(ShowKind::Mob), false, true)
-            }
+            Event::UndeadHurt { .. }
+            | Event::UndeadFell { .. }
+            | Event::MilitiaHurt { .. }
+            | Event::MilitiaFell { .. } => (None, Some(ShowKind::Mob), false, true),
             _ => return,
         };
         let Some(show) = self.shows.iter_mut().rev().find(|s| {
@@ -1085,6 +1097,15 @@ impl Match {
         let mut all = self.game.undead().to_vec();
         all.extend(self.held_undead.iter().copied());
         all
+    }
+
+    /// A settlement's militia as the board shows them: as they stood before
+    /// the fight on screen, until its dice are down.
+    pub fn shown_militia(&self, home: Hex) -> Option<necromy_rules::Militia> {
+        match self.held_militia {
+            Some((h, m)) if h == home => Some(m),
+            _ => self.game.militia_unit(home),
+        }
     }
 
     /// `player` fights in the show on the panels now.
@@ -1160,6 +1181,40 @@ impl Match {
                     Fighter::Champion(*attacker),
                     Fighter::Undead(*id),
                 ]));
+            }
+            Event::MilitiaAttacked { attacker, home } => {
+                self.battle = Some(BattleInfo::new([
+                    Fighter::Champion(*attacker),
+                    Fighter::Militia(*home),
+                ]));
+            }
+            // The champion always strikes first against the militia.
+            Event::MilitiaResolved {
+                militia_score,
+                champion_score,
+                ..
+            } => {
+                if let Some(b) = self.battle.as_mut() {
+                    b.scores = Some((*champion_score, *militia_score));
+                }
+            }
+            // Men lost, as a side's health on the panel.
+            Event::MilitiaHurt { men, .. } => {
+                if let Some(b) = self.battle.as_mut()
+                    && let Some(side) = b.foe_side()
+                    && matches!(b.sides[side], Fighter::Militia(_))
+                {
+                    let before = b.hp[side].map_or(necromy_rules::MILITIA, |(before, _)| before);
+                    b.hp[side] = Some((before, *men));
+                }
+            }
+            Event::MilitiaFell { .. } => {
+                if let Some(b) = self.battle.as_mut()
+                    && let Some(side) = b.foe_side()
+                    && matches!(b.sides[side], Fighter::Militia(_))
+                {
+                    b.fell[side] = true;
+                }
             }
             Event::UndeadResolved {
                 champion_attacked,
@@ -1255,7 +1310,9 @@ impl Match {
             } => {
                 let side = self.battle.as_ref().map_or(0, |b| match fighter {
                     Fighter::Champion(p) => b.side(*p),
-                    Fighter::Guard | Fighter::Undead(_) => b.foe_side().unwrap_or(0),
+                    Fighter::Guard | Fighter::Undead(_) | Fighter::Militia(_) => {
+                        b.foe_side().unwrap_or(0)
+                    }
                 });
                 self.throws.push(ThrowView {
                     side,
@@ -1284,6 +1341,7 @@ impl Match {
         }
         self.held_guard = None;
         self.held_undead.clear();
+        self.held_militia = None;
         self.battle = None;
         self.trial = None;
         self.on_screen = None;
@@ -1902,6 +1960,21 @@ impl Match {
             Event::MilitiaBeat { player, .. } => {
                 format!("{}: ополчение гонит из поселения.", self.name(*player))
             }
+            Event::MilitiaSwapped { player, .. } if *player == me => {
+                "Ополчение пропускает тебя и отходит в сторону.".into()
+            }
+            Event::MilitiaAttacked { attacker, .. } => {
+                format!("{} нападает на ополчение поселения!", self.name(*attacker))
+            }
+            Event::MilitiaHurt { men, .. } => {
+                format!("Ополчение: {men}/{} человек.", necromy_rules::MILITIA)
+            }
+            Event::MilitiaFell { .. } => "Ополчение поселения пало: его некому держать.".into(),
+            Event::UndeadHitMilitia { .. } => "Неупокоенный бьёт ополчение у ворот.".into(),
+            Event::SettlementRebuilt { player, .. } => format!(
+                "{} восстанавливает поселение: оно снова живо.",
+                self.name(*player)
+            ),
             Event::MilitiaBarred { player, .. } => {
                 format!(
                     "{}: ополчение не даёт занять поселение.",
@@ -1999,6 +2072,9 @@ pub fn window_name(m: &Match, kind: WindowKind) -> String {
         }
         WindowKind::Tribute { asker } => format!("дань для {}", m.name(asker)),
         WindowKind::Trial { player, .. } => format!("{} на испытании", m.name(player)),
+        WindowKind::MilitiaBattle { attacker, .. } => {
+            format!("бой: {} против ополчения", m.name(attacker))
+        }
         WindowKind::UndeadBattle { attacker, .. } => {
             format!("бой: {} против неупокоенного", m.name(attacker))
         }
@@ -2073,6 +2149,7 @@ fn reason(err: RuleError) -> String {
         RuleError::InvalidTarget => "не та цель".into(),
         RuleError::NotAtTemple => "отдать богу можно только в его храме".into(),
         RuleError::NothingWorn => "там ничего нет".into(),
+        RuleError::NotRuins => "восстановить можно только руины поселения".into(),
         RuleError::AlreadyChose => "ты уже выбрал".into(),
         other => other.to_string(),
     }
@@ -2119,6 +2196,17 @@ fn click_board(
         return;
     }
 
+    // A click on one's own hex on ruins builds the settlement again (§20.4).
+    if game.is_human_turn()
+        && game.game.champion(game.human).is_some_and(|c| c.hex == hex)
+        && game.game.can_rebuild(game.human)
+    {
+        let human = game.human;
+        if let Err(err) = game.act(human, Intent::Rebuild) {
+            game.feed.push(format!("Нельзя: {}.", reason(err)));
+        }
+        return;
+    }
     if game.is_human_turn() && game.game.attackable(game.human).contains(&hex) {
         let human = game.human;
         if let Err(err) = game.act(human, Intent::Move { to: hex }) {

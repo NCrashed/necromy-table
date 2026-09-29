@@ -21,6 +21,8 @@ fi
 
 trim="silenceremove=start_periods=1:start_threshold=-50dB,areverse,silenceremove=start_periods=1:start_threshold=-50dB,afade=t=in:d=0.02,areverse"
 for name in "${names[@]}"; do
+  # No takes here (a fresh checkout, a worktree): keep what is kept.
+  ls "$src/$name"-*.wav > /dev/null 2>&1 || continue
   rm -f "$out/$name"-*.ogg
   k=1
   for take in $(ls "$src/$name"-*.wav 2>/dev/null | sort -V); do

@@ -62,6 +62,8 @@ struct ClockChip;
 enum ActionButton {
     EndTurn,
     Pass,
+    /// Build the ruins underfoot again (§20.4).
+    Rebuild,
 }
 
 fn spawn(mut commands: Commands, font: Res<UiFont>) {
@@ -316,10 +318,17 @@ fn rebuild_action(
                     false,
                 )
             }
+            // Ruins underfoot: the one thing only this spot offers (§20.4).
+            None if game.is_human_turn() && g.can_rebuild(human) => (
+                "Ты на руинах поселения".to_string(),
+                "восстанови: 2 Духа, движение на этом ход кончается; пробел — конец хода",
+                Some((ActionButton::Rebuild, "Восстановить")),
+                true,
+            ),
             // The wish panel has the centre while the human wishes.
             None if game.is_human_turn() && g.wish_due() != Some(human) => (
                 "Твой ход".to_string(),
-                "светлая клетка — идти, красная — напасть, карта из руки — сыграть",
+                "светлая клетка — идти, зелёная — ополчение пропустит, красная — напасть, карта из руки — сыграть",
                 Some((ActionButton::EndTurn, "Конец хода\n(пробел)")),
                 true,
             ),
@@ -448,6 +457,7 @@ fn action_buttons(
         let human = game.human;
         let intent = match button {
             ActionButton::EndTurn => Intent::EndTurn,
+            ActionButton::Rebuild => Intent::Rebuild,
             ActionButton::Pass => {
                 selection.card = None;
                 Intent::Pass

@@ -215,6 +215,8 @@ enum Lit {
     Hover,
     /// The goal of one of the human's story lines.
     Quest,
+    /// Militia who let the human through: a step there trades places (§20.4).
+    Swap,
 }
 
 fn spawn_board(
@@ -442,6 +444,8 @@ fn sync_tiles(
             Lit::Attack
         } else if quests.contains(&tile.0) {
             Lit::Quest
+        } else if reachable.contains_key(&tile.0) && game.game.lets_pass(game.human, tile.0) {
+            Lit::Swap
         } else if reachable.contains_key(&tile.0) {
             Lit::Reach
         } else if hovered.0 == Some(tile.0) {
@@ -761,6 +765,8 @@ fn highlight_color(lit: Lit, region: Option<God>, night: f32) -> Color {
         Lit::Target => Color::srgba(1.0, 0.78, 0.25, 0.6),
         Lit::Attack => Color::srgba(0.95, 0.25, 0.2, 0.6),
         Lit::Quest => Color::srgba(0.75, 0.55, 1.0, 0.55),
+        // Friendly green: not a fight, a trade of places.
+        Lit::Swap => Color::srgba(0.4, 0.9, 0.45, 0.5),
     }
 }
 
@@ -951,6 +957,23 @@ fn track_hover(
     let pinned = std::env::var("NECROMY_HOVER").ok().and_then(|s| {
         if s == "guard" {
             return game.game.guard().map(|g| g.hex);
+        }
+        // The militia standing nearest the human, and the first ruins (§20.4).
+        if s == "militia" {
+            let me = game.game.champion(game.human)?.hex;
+            return game
+                .game
+                .militias()
+                .filter_map(|(_, m)| m.at.filter(|_| m.men > 0))
+                .min_by_key(|h| (me.unsigned_distance_to(*h), h.x(), h.y()));
+        }
+        if s == "ruins" {
+            return game
+                .game
+                .board()
+                .tiles()
+                .map(|(h, _)| h)
+                .find(|&h| game.game.is_ruined_settlement(h));
         }
         // The first undead on the board (§20.4).
         if s == "undead" {
