@@ -355,6 +355,9 @@ fn run_game(world: &mut World, mut begun: Local<bool>) {
 fn main_window() -> Window {
     let mut window = Window {
         title: "Necromy Table".into(),
+        // The Wayland app id (X11 WM_CLASS): GNOME finds the name and icon
+        // by it in `necromy-table.desktop` (`scripts/install-desktop.sh`).
+        name: Some("necromy-table".into()),
         ..default()
     };
     window.set_maximized(true);

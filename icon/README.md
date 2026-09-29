@@ -6,3 +6,9 @@ from it:
 
 `necromy.ico` goes into the Windows exe (`build.rs`, `necromy.rc`),
 `window.png` onto the window at run time (`src/icon.rs`).
+
+On Wayland a window cannot set its own icon: GNOME matches the window's
+app id (`necromy-table`, set in `main_window`) to a desktop entry.
+`scripts/install-desktop.sh` writes that entry (launching
+`scripts/play.sh` from the checkout) and puts `source.png` into the user's
+hicolor icons.
