@@ -45,6 +45,8 @@ pub enum Novelty {
     Feasted,
     /// A fair opened.
     HeldFair,
+    /// A gift to a ruler.
+    Gifted,
     /// A wish of this kind, granted.
     Wished(WishKind),
     /// A mechanic brought into the world.

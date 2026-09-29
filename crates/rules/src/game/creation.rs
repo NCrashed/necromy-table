@@ -334,6 +334,7 @@ impl Game {
                 }
             }
             Feature::Goods => self.make_goods(events),
+            Feature::Rulers => self.seat_rulers(),
             Feature::Fires => {
                 if let Some(p) = player {
                     self.fire_near(p, near, 1, events);

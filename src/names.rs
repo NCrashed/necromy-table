@@ -172,6 +172,7 @@ pub fn novelty(n: necromy_rules::Novelty) -> String {
         Novelty::Sowed => "засевает поле".into(),
         Novelty::Feasted => "устраивает пир".into(),
         Novelty::HeldFair => "открывает ярмарку".into(),
+        Novelty::Gifted => "одаривает правителя".into(),
         Novelty::Sacrificed => "отдаёт предмет богу".into(),
         Novelty::Hid => "уходит в тень".into(),
         Novelty::FinishedLine => "доводит до конца свою историю".into(),
@@ -291,6 +292,21 @@ pub fn great_deed(d: necromy_rules::GreatDeed) -> (&'static str, String) {
                 necromy_rules::GREAT_FIRE
             ),
         ),
+        GreatDeed::TripleUnion => (
+            "Тройная уния",
+            format!(
+                "Дарами склони правителей и пожени их: твои браки связывают {} края в один род.",
+                necromy_rules::UNION_LANDS
+            ),
+        ),
+        GreatDeed::FallenEmpire => (
+            "Падшая империя",
+            format!(
+                "{} правителя присягают тебе, ты коронуешься на Столе, а потом сеешь раздор: {} бывших вассала в распре.",
+                necromy_rules::CROWN_VASSALS,
+                necromy_rules::FEUDING
+            ),
+        ),
         GreatDeed::FairOfFive => (
             "Ярмарка пяти краёв",
             "На твоей ярмарке продан товар каждого из пяти краёв: древесина, вино, соль, железо и жемчуг.".into(),
@@ -347,6 +363,9 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::FeastHeld => "пир с гостями",
         CheckKind::FairGoods => "товаров продано на твоей ярмарке",
         CheckKind::DeadFeasts => "твоих ярмарок съели мертвецы",
+        CheckKind::UnionLands => "краёв связано твоими браками",
+        CheckKind::Crowned => "коронация на Столе",
+        CheckKind::Feuding => "бывших вассалов в распре",
         CheckKind::RiverLength => "клеток самой длинной реки",
         CheckKind::RiverSource => "исток у гор",
         CheckKind::RiverMouth => "устье на краю мира",
@@ -468,6 +487,10 @@ pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {
         Feature::Roads => (
             "Дороги",
             "шаг по дороге стоит 1 на любой земле, дорога через реку — мост; на дороге не скрыться",
+        ),
+        Feature::Rulers => (
+            "Правители",
+            "у поселений правители: дар склоняет их, присяга делает вассалом, браки связывают края",
         ),
         Feature::Goods => (
             "Товары",

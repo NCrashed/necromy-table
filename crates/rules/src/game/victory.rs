@@ -54,13 +54,18 @@ pub enum GreatDeed {
     FairOfFive,
     /// Three fairs of yours eaten by the dead.
     DeadFeast,
+    /// Marriages of your making binding three lands into one house.
+    TripleUnion,
+    /// Crowned over three vassals, then their oaths broken and three of
+    /// them feuding.
+    FallenEmpire,
     /// A whole region of another god gone into the mist, but its temple and
     /// the champions' homes, and fifteen hexes of it at least.
     DissolvedLand,
 }
 
 impl GreatDeed {
-    pub const ALL: [GreatDeed; 14] = [
+    pub const ALL: [GreatDeed; 16] = [
         GreatDeed::WorldTree,
         GreatDeed::Island,
         GreatDeed::DissolvedLand,
@@ -75,12 +80,14 @@ impl GreatDeed {
         GreatDeed::Feast,
         GreatDeed::FairOfFive,
         GreatDeed::DeadFeast,
+        GreatDeed::TripleUnion,
+        GreatDeed::FallenEmpire,
     ];
 
     /// The god whose deed it is: its card's colour, its voice.
     pub const fn patron(self) -> God {
         match self {
-            GreatDeed::WorldTree | GreatDeed::Amazon => God::Bhava,
+            GreatDeed::WorldTree | GreatDeed::Amazon | GreatDeed::TripleUnion => God::Bhava,
             GreatDeed::Island
             | GreatDeed::DissolvedLand
             | GreatDeed::River
@@ -90,7 +97,7 @@ impl GreatDeed {
             | GreatDeed::Feast
             | GreatDeed::FairOfFive
             | GreatDeed::DeadFeast => God::Trishna,
-            GreatDeed::Roads => God::Ahamar,
+            GreatDeed::Roads | GreatDeed::FallenEmpire => God::Ahamar,
             GreatDeed::Reconciliation | GreatDeed::Legion => God::Zaga,
         }
     }
@@ -107,6 +114,9 @@ impl GreatDeed {
             GreatDeed::River => &[Feature::Rivers],
             GreatDeed::Roads => &[Feature::Settlements, Feature::Roads],
             GreatDeed::GreatFire => &[Feature::Fires],
+            GreatDeed::TripleUnion | GreatDeed::FallenEmpire => {
+                &[Feature::Settlements, Feature::Rulers]
+            }
             GreatDeed::Feast => &[Feature::Settlements, Feature::Cargo, Feature::Fields],
             GreatDeed::FairOfFive => &[
                 Feature::Settlements,
@@ -175,6 +185,12 @@ pub enum CheckKind {
     FairGoods,
     /// Fairs of yours the dead have eaten.
     DeadFeasts,
+    /// Lands bound by your marriages.
+    UnionLands,
+    /// You have been crowned.
+    Crowned,
+    /// Your former vassals feuding.
+    Feuding,
     /// Hexes of the longest river.
     RiverLength,
     /// It rises by the mountains.
@@ -365,6 +381,19 @@ impl Game {
                 ]
             }
             GreatDeed::Roads => vec![check(CheckKind::TemplesLinked, self.temples_linked(), 5)],
+            GreatDeed::TripleUnion => vec![check(
+                CheckKind::UnionLands,
+                self.union_lands(player),
+                super::UNION_LANDS,
+            )],
+            GreatDeed::FallenEmpire => vec![
+                check(
+                    CheckKind::Crowned,
+                    usize::from(self.crowned[player.0 as usize]),
+                    1,
+                ),
+                check(CheckKind::Feuding, self.feuding(player), super::FEUDING),
+            ],
             GreatDeed::FairOfFive => {
                 let best = self
                     .fairs()

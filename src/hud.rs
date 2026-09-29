@@ -554,6 +554,21 @@ fn tooltip(
             "пожар{whose}: войти — обжечься; в ход мира перекинется дальше"
         ));
     }
+    if let Some(r) = g.ruler(hex) {
+        let mut says = vec![format!("к тебе {:+}", r.regard_for(game.human))];
+        if let Some(p) = r.sworn {
+            says.push(format!("присягнул {}", game.name(p)));
+        }
+        if r.spouse.is_some() {
+            says.push("в браке".into());
+        } else if r.betrothed.is_some() {
+            says.push("помолвлен".into());
+        }
+        if r.feud.is_some() {
+            says.push("в распре".into());
+        }
+        lines.push(format!("правитель: {}", says.join(", ")));
+    }
     if let Some(fair) = g.fair(hex) {
         let sold: Vec<&str> = necromy_rules::God::ALL
             .into_iter()

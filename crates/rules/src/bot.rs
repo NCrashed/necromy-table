@@ -464,6 +464,8 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
             | GreatDeed::Feast
             | GreatDeed::FairOfFive
             | GreatDeed::DeadFeast
+            | GreatDeed::TripleUnion
+            | GreatDeed::FallenEmpire
             | GreatDeed::Amazon => wish(
                 God::Maya,
                 crate::Act::Veil {
@@ -578,6 +580,35 @@ fn deed_goal(game: &Game, player: PlayerId) -> Option<Hex> {
         }
         GreatDeed::Amazon => None,
         GreatDeed::Roads => None,
+        // Rulers to win over; for the empire the Table once three are sworn,
+        // then a vassal to set against the rest.
+        GreatDeed::TripleUnion | GreatDeed::FallenEmpire => {
+            let me = game.champion(player)?.hex;
+            let nearest = |hexes: Vec<Hex>| {
+                hexes
+                    .into_iter()
+                    .filter(|h| *h != me)
+                    .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
+            };
+            if game.deed(player) == Some(GreatDeed::FallenEmpire) {
+                if game.emperor() == Some(player) {
+                    return nearest(game.vassals(player));
+                }
+                if game.vassals(player).len() >= crate::CROWN_VASSALS && !game.crowned(player) {
+                    return (me != Hex::ZERO).then_some(Hex::ZERO);
+                }
+            }
+            nearest(
+                game.rulers()
+                    .filter(|(_, r)| {
+                        r.spouse.is_none()
+                            && r.sworn != Some(player)
+                            && r.favourite() != Some(player)
+                    })
+                    .map(|(h, _)| h)
+                    .collect(),
+            )
+        }
         // Its fair: open one at home, then bring the goods it lacks; for the
         // dead, bide at the fair and let them come.
         GreatDeed::FairOfFive | GreatDeed::DeadFeast => {
@@ -775,6 +806,61 @@ fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
         })
     {
         return Some(Intent::Douse { hex });
+    }
+    // A rival's Fallen Empire on its eve: a gift makes peace.
+    if spirit_now >= 1
+        && let Some(hex) = game.giftable(player).into_iter().find(|&h| {
+            game.ruler(h)
+                .and_then(|r| r.feud)
+                .is_some_and(|by| by != player && game.on_eve(by))
+        })
+    {
+        return Some(Intent::Gift { hex });
+    }
+    match game.deed(player) {
+        Some(GreatDeed::FallenEmpire) if game.may_sow_discord(player) => {
+            return Some(Intent::Discord);
+        }
+        Some(GreatDeed::FallenEmpire) if game.may_crown(player) && !game.crowned(player) => {
+            return Some(Intent::Coronation);
+        }
+        Some(GreatDeed::TripleUnion) => {
+            // A match that adds a land to the house it has, else any.
+            let wed: Vec<God> = game
+                .rulers()
+                .filter(|(_, r)| r.spouse.is_some_and(|(_, by)| by == player))
+                .filter_map(|(h, _)| game.board().tile(h)?.region)
+                .collect();
+            let region = |h: Hex| game.board().tile(h).and_then(|t| t.region);
+            let matches = game.matches(player);
+            let best = matches
+                .iter()
+                .find(|&&(a, b)| {
+                    region(a).is_some_and(|g| wed.contains(&g))
+                        != region(b).is_some_and(|g| wed.contains(&g))
+                })
+                .or_else(|| wed.is_empty().then(|| matches.first()).flatten());
+            if let Some(&(a, b)) = best {
+                return Some(Intent::Betroth { a, b });
+            }
+        }
+        _ => {}
+    }
+    if matches!(
+        game.deed(player),
+        Some(GreatDeed::TripleUnion | GreatDeed::FallenEmpire)
+    ) && game.emperor() != Some(player)
+        && let Some(hex) = game.giftable(player).into_iter().find(|&h| {
+            game.ruler(h)
+                .is_some_and(|r| r.spouse.is_none() && r.sworn != Some(player) && r.feud.is_none())
+        })
+        && (spirit_now >= 1
+            || matches!(
+                game.cargo(player),
+                Some(crate::Cargo::Food | crate::Cargo::Goods(_))
+            ))
+    {
+        return Some(Intent::Gift { hex });
     }
     // Its fair: open it at home; bring the goods it lacks.
     if matches!(

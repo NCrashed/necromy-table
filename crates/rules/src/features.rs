@@ -67,10 +67,12 @@ pub enum Feature {
     Goods,
     /// Fairs: goods sold for Style and cards; the dead come to them.
     Fairs,
+    /// Rulers of settlements: gifts, oaths, marriages, feuds.
+    Rulers,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 25] = [
+    pub const ALL: [Feature; 26] = [
         Feature::Bodies,
         Feature::Groves,
         Feature::Settlements,
@@ -96,6 +98,7 @@ impl Feature {
         Feature::Fields,
         Feature::Goods,
         Feature::Fairs,
+        Feature::Rulers,
     ];
 
     /// What the world must have before this can come in (§21.2): all of
@@ -115,6 +118,7 @@ impl Feature {
             Feature::Fields => &[Has(Feature::Settlements), Has(Feature::Cargo)],
             Feature::Goods => &[Has(Feature::Settlements), Has(Feature::Cargo)],
             Feature::Fairs => &[Has(Feature::Goods)],
+            Feature::Rulers => &[Has(Feature::Settlements)],
             Feature::Fires => &[Land(&[Terrain::Forest, Terrain::Grove])],
             Feature::Piranhas => &[Has(Feature::Beasts), Has(Feature::Rivers)],
             Feature::Groves | Feature::Undead => &[Has(Feature::Bodies)],
@@ -149,7 +153,11 @@ impl Feature {
             | Feature::Goods
             | Feature::Fairs => God::Trishna,
             Feature::Bodies | Feature::Poison | Feature::Trials | Feature::Legion => God::Zaga,
-            Feature::Militia | Feature::Loot | Feature::Guard | Feature::Roads => God::Ahamar,
+            Feature::Militia
+            | Feature::Loot
+            | Feature::Guard
+            | Feature::Roads
+            | Feature::Rulers => God::Ahamar,
             Feature::Undead
             | Feature::Ruins
             | Feature::Stealth

@@ -195,6 +195,19 @@ pub enum Intent {
     Feast,
     /// On your turn, in a settlement of yours: open a fair.
     Fair,
+    /// On your turn: a gift to the ruler beside you or underfoot (§21.8).
+    Gift {
+        hex: Hex,
+    },
+    /// On your turn: betroth two rulers who favour you.
+    Betroth {
+        a: Hex,
+        b: Hex,
+    },
+    /// On your turn, on the Table with three vassals: be crowned.
+    Coronation,
+    /// On your turn, as emperor beside a vassal: set the vassals feuding.
+    Discord,
     /// On your turn: set the woods or settlement beside you alight.
     Kindle {
         hex: Hex,
@@ -763,6 +776,48 @@ pub enum Event {
     /// A road on `hex` (§21.8).
     RoadLaid {
         hex: Hex,
+    },
+    /// `player` gave the ruler on `hex` a gift worth `worth` (§21.8).
+    Gifted {
+        player: PlayerId,
+        hex: Hex,
+        worth: i8,
+    },
+    /// The ruler on `hex` swore to `player`.
+    Sworn {
+        hex: Hex,
+        player: PlayerId,
+    },
+    /// `player` betrothed the rulers on `a` and `b`.
+    Betrothed {
+        player: PlayerId,
+        a: Hex,
+        b: Hex,
+    },
+    /// They wed at dusk.
+    Wedding {
+        player: PlayerId,
+        a: Hex,
+        b: Hex,
+    },
+    /// One of them no longer favoured `player`: the match is off.
+    MatchBroken {
+        player: PlayerId,
+        a: Hex,
+        b: Hex,
+    },
+    /// `player` was crowned emperor on the Table.
+    Emperor {
+        player: PlayerId,
+    },
+    /// The emperor set `feuding` vassals against each other.
+    Discord {
+        player: PlayerId,
+        feuding: u8,
+    },
+    /// A feuding settlement's militia lost a man.
+    FeudStruck {
+        home: Hex,
     },
     /// A settlement made its region's goods (§21.8).
     GoodsMade {
@@ -1341,6 +1396,10 @@ pub struct Game {
     buildings: BTreeMap<(i32, i32), buildings::Building>,
     /// Roads of the register (§21.8).
     roads: std::collections::BTreeSet<(i32, i32)>,
+    /// Rulers of settlements (§21.8), the emperor, and who has been crowned.
+    rulers: BTreeMap<(i32, i32), rulers::Ruler>,
+    emperor: Option<PlayerId>,
+    crowned: Vec<bool>,
     /// Fairs open (§21.8), and per player the fairs of theirs the dead ate.
     fairs: BTreeMap<(i32, i32), trade::Fair>,
     dead_feasts: Vec<u8>,
@@ -1487,6 +1546,9 @@ impl Game {
             fires: BTreeMap::new(),
             stores: BTreeMap::new(),
             fairs: BTreeMap::new(),
+            rulers: BTreeMap::new(),
+            emperor: None,
+            crowned: vec![false; champions_len],
             dead_feasts: vec![0; champions_len],
             feasted: vec![false; champions_len],
             burnt: vec![0; champions_len],
@@ -2017,6 +2079,10 @@ impl Game {
             Intent::Sow => self.sow(player, events),
             Intent::Feast => self.hold_feast(player, events),
             Intent::Fair => self.open_fair(player, events),
+            Intent::Gift { hex } => self.gift(player, hex, events),
+            Intent::Betroth { a, b } => self.betroth(player, a, b, events),
+            Intent::Coronation => self.coronation(player, events),
+            Intent::Discord => self.sow_discord(player, events),
             Intent::Kindle { hex } => self.kindle(player, hex, events),
             Intent::Douse { hex } => self.douse(player, hex, events),
             Intent::Recruit { mob } => self.take_companion(player, mob, events),
@@ -2054,6 +2120,10 @@ impl Game {
             Intent::Sow => self.check_sow(player),
             Intent::Feast => self.check_feast(player),
             Intent::Fair => self.check_fair(player),
+            Intent::Gift { hex } => self.check_gift(player, hex),
+            Intent::Betroth { a, b } => self.check_betroth(player, a, b),
+            Intent::Coronation => self.check_crown(player),
+            Intent::Discord => self.check_discord(player),
             Intent::Kindle { hex } => self.check_kindle(player, hex),
             Intent::Douse { hex } => self.check_douse(player, hex),
             Intent::Recruit { mob } => self.check_recruit(player, mob).map(|_| ()),
@@ -2187,6 +2257,7 @@ impl Game {
                 self.harvest(events);
                 self.make_goods(events);
                 self.close_fairs(events);
+                self.weddings(events);
                 self.judge_the_day(events);
                 self.begin_dusk(events);
                 if self.dusk.is_none() {
@@ -2522,6 +2593,10 @@ impl Game {
             | Intent::Sow
             | Intent::Feast
             | Intent::Fair
+            | Intent::Gift { .. }
+            | Intent::Betroth { .. }
+            | Intent::Coronation
+            | Intent::Discord
             | Intent::Kindle { .. }
             | Intent::Douse { .. }
             | Intent::Quarter { .. }
@@ -3322,6 +3397,10 @@ impl Game {
             }
             self.mob_phase(events);
         }
+        if self.scripted.is_none() && self.has(Feature::Rulers) {
+            self.seat_rulers();
+            self.feud_phase(events);
+        }
         if self.scripted.is_none() && self.has(Feature::Fires) {
             self.fire_phase(events);
         }
@@ -3373,6 +3452,7 @@ mod mobs;
 mod novelty;
 mod poison;
 mod roads;
+mod rulers;
 mod scenario;
 mod stealth;
 mod story;
@@ -3405,6 +3485,7 @@ pub use mobs::{
 pub use novelty::{FIRST_STYLE, Novelty, VARIETY};
 pub use poison::{Cure, Poison};
 pub use roads::{PAVE_SPIRIT, ROAD_RUN};
+pub use rulers::{CROWN_VASSALS, FEUDING, MATCH_REGARD, OATH_REGARD, Ruler, UNION_LANDS};
 pub use scenario::{Scenario, SceneSeat, SceneWorld};
 pub use stealth::RevealReason;
 pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};

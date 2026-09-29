@@ -5336,3 +5336,97 @@ fn the_dead_walk_to_a_fair_and_eat_it() {
     assert!(g.fair(town).is_none());
     assert_eq!(g.dead_feasts(me), 1);
 }
+
+// ---- Rulers (§21.8) ----
+
+/// Settlements of three different lands round the Table, with rulers.
+fn three_courts(g: &mut Game) -> Vec<Hex> {
+    let mut courts = Vec::new();
+    for god in [God::Bhava, God::Trishna, God::Zaga] {
+        let hex = g
+            .board()
+            .land()
+            .filter(|(h, t)| t.region == Some(god) && h.ulength() == 2)
+            .map(|(h, _)| h)
+            .next()
+            .unwrap();
+        g.board.tile_mut(hex).unwrap().terrain = Terrain::Settlement;
+        courts.push(hex);
+    }
+    g.seat_rulers();
+    courts
+}
+
+#[test]
+fn gifts_win_an_oath_and_a_rival_can_outbid() {
+    let (mut g, me, foe) = duel(4);
+    let courts = three_courts(&mut g);
+    let court = courts[0];
+    g.place(me, court);
+    g.champ_mut(me).spirit_points = 9;
+    let mut ev = Vec::new();
+    for _ in 0..OATH_REGARD {
+        g.gift(me, court, &mut ev).unwrap();
+    }
+    assert_eq!(g.ruler(court).unwrap().sworn, Some(me));
+    g.place(foe, court.all_neighbors()[0]);
+    g.champ_mut(foe).spirit_points = 9;
+    for _ in 0..=OATH_REGARD {
+        g.gift(foe, court, &mut ev).unwrap();
+    }
+    assert_eq!(g.ruler(court).unwrap().sworn, Some(foe));
+}
+
+#[test]
+fn two_weddings_bind_three_lands() {
+    let (mut g, me, _) = duel(4);
+    g.dusks = EARLIEST_EVE;
+    let courts = three_courts(&mut g);
+    // A second court in the middle land, so it may wed twice.
+    let second = g
+        .board()
+        .land()
+        .filter(|(h, t)| t.region == Some(God::Trishna) && h.ulength() == 3)
+        .map(|(h, _)| h)
+        .next()
+        .unwrap();
+    g.board.tile_mut(second).unwrap().terrain = Terrain::Settlement;
+    g.seat_rulers();
+    for &c in courts.iter().chain([&second]) {
+        g.rulers.get_mut(&(c.x(), c.y())).unwrap().regard[me.0 as usize] = MATCH_REGARD;
+    }
+    let mut ev = Vec::new();
+    g.place(me, courts[0]);
+    g.betroth(me, courts[0], courts[1], &mut ev).unwrap();
+    g.place(me, second);
+    g.betroth(me, second, courts[2], &mut ev).unwrap();
+    g.weddings(&mut ev);
+    assert_eq!(g.union_lands(me), 3);
+    g.chosen[me.0 as usize] = Some(GreatDeed::TripleUnion);
+    assert!(g.checks(me, GreatDeed::TripleUnion).iter().all(Check::met));
+}
+
+#[test]
+fn an_emperor_breaks_the_empire_and_a_gift_ends_a_feud() {
+    let (mut g, me, foe) = duel(4);
+    let courts = three_courts(&mut g);
+    for &c in &courts {
+        let r = g.rulers.get_mut(&(c.x(), c.y())).unwrap();
+        r.regard[me.0 as usize] = OATH_REGARD;
+        r.sworn = Some(me);
+    }
+    g.place(me, Hex::ZERO);
+    let mut ev = Vec::new();
+    g.coronation(me, &mut ev).unwrap();
+    assert_eq!(g.emperor(), Some(me));
+    g.place(me, courts[0]);
+    g.sow_discord(me, &mut ev).unwrap();
+    assert_eq!(g.feuding(me), 3);
+    assert!(g.vassals(me).is_empty());
+    g.chosen[me.0 as usize] = Some(GreatDeed::FallenEmpire);
+    assert!(g.checks(me, GreatDeed::FallenEmpire).iter().all(Check::met));
+    g.place(foe, courts[1]);
+    g.champ_mut(foe).spirit_points = 2;
+    g.gift(foe, courts[1], &mut ev).unwrap();
+    assert_eq!(g.feuding(me), 2);
+}

@@ -80,6 +80,11 @@ enum ActionButton {
     Feast,
     /// Open a fair in the settlement underfoot.
     Fair,
+    /// Rulers: a gift, a betrothal, the crown, discord.
+    Gift(hexx::Hex),
+    Betroth(hexx::Hex, hexx::Hex),
+    Coronation,
+    Discord,
     /// Set a hex beside you alight, or put a fire out.
     Kindle(hexx::Hex),
     Douse(hexx::Hex),
@@ -530,6 +535,28 @@ fn rebuild_action(
                 format!("Поджечь\n{} Духа", necromy_rules::KINDLE_SPIRIT),
             ));
         }
+        if g.may_crown(human) {
+            buttons.push((ActionButton::Coronation, "Коронация\nна Столе".to_string()));
+        }
+        if g.may_sow_discord(human) {
+            buttons.push((ActionButton::Discord, "Посеять\nраздор".to_string()));
+        }
+        if let Some(&(a, b)) = g.matches(human).first() {
+            buttons.push((
+                ActionButton::Betroth(a, b),
+                "Сосватать\nправителей".to_string(),
+            ));
+        }
+        let carries = matches!(
+            g.cargo(human),
+            Some(necromy_rules::Cargo::Food | necromy_rules::Cargo::Goods(_))
+        );
+        if (spirit >= 1 || carries)
+            && let Some(&hex) = g.giftable(human).first()
+        {
+            let what = if carries { "ношу" } else { "1 Дух" };
+            buttons.push((ActionButton::Gift(hex), format!("Дар правителю\n{what}")));
+        }
         if g.may_open_fair(human) && spirit >= necromy_rules::FAIR_SPIRIT {
             buttons.push((
                 ActionButton::Fair,
@@ -606,6 +633,10 @@ fn action_buttons(
             ActionButton::Sow => Intent::Sow,
             ActionButton::Feast => Intent::Feast,
             ActionButton::Fair => Intent::Fair,
+            ActionButton::Gift(hex) => Intent::Gift { hex: *hex },
+            ActionButton::Betroth(a, b) => Intent::Betroth { a: *a, b: *b },
+            ActionButton::Coronation => Intent::Coronation,
+            ActionButton::Discord => Intent::Discord,
             ActionButton::Kindle(hex) => Intent::Kindle { hex: *hex },
             ActionButton::Douse(hex) => Intent::Douse { hex: *hex },
             ActionButton::Cycle => Intent::Cycle {

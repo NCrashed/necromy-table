@@ -432,6 +432,7 @@ impl Game {
             self.hurt_militia(home, dealt, events);
             if self.militia(home) == Some(0) {
                 self.shift_standing(attacker, KILLED_MILITIA, events);
+                self.conquer_ruler(attacker, home, events);
             }
         }
     }
