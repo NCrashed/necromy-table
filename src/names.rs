@@ -303,6 +303,10 @@ pub fn great_deed(d: necromy_rules::GreatDeed) -> (&'static str, String) {
                 necromy_rules::GREAT_FIRE
             ),
         ),
+        GreatDeed::DeadBall => (
+            "Бал мёртвых",
+            "Ночной пир в твоём поселении: рядом сидят неупокоенные, ополчение и два соперника — и до рассвета никто не дерётся.".into(),
+        ),
         GreatDeed::Arena => (
             "Арена",
             format!(
@@ -443,6 +447,7 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::GroveRooted => "твоя роща укоренилась у Стола",
         CheckKind::ArenaWins => "дуэлей выиграно на твоей арене",
         CheckKind::Debtors => "соперников у тебя в долгу",
+        CheckKind::BallKept => "бал мёртвых прошёл без драки",
         CheckKind::PenElements => "стихий зверей в твоём загоне",
         CheckKind::PenByShrine => "твоё святилище рядом",
         CheckKind::Crowned => "коронация на Столе",

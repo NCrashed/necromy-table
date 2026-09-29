@@ -351,6 +351,7 @@ impl Game {
     pub(super) fn mob_strike(&mut self, id: u32, target: PlayerId, events: &mut Vec<Event>) {
         events.push(Event::MobStruck { id, target });
         self.last_fight = self.round;
+        self.brawls += 1;
         let label = self.mob_dice_label(id, false);
         let dice = self.mob_dice(id);
         let u_faces = self.roll_with(Fighter::Mob(id), &label, dice, Vec::new(), events);
@@ -375,6 +376,7 @@ impl Game {
         }
         events.push(Event::MobAttacked { attacker, id });
         self.last_fight = self.round;
+        self.brawls += 1;
         self.record_deed(attacker, Deed::Fought);
         self.open_window(
             attacker,

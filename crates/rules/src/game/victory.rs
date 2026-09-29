@@ -73,6 +73,9 @@ pub enum GreatDeed {
     Arena,
     /// Three rivals in your debt at once.
     DebtBondage,
+    /// A night feast of yours with two rivals, the dead and the militia
+    /// near, and no fight until dawn.
+    DeadBall,
     /// Marriages of your making binding three lands into one house.
     TripleUnion,
     /// Crowned over three vassals, then their oaths broken and three of
@@ -84,7 +87,7 @@ pub enum GreatDeed {
 }
 
 impl GreatDeed {
-    pub const ALL: [GreatDeed; 25] = [
+    pub const ALL: [GreatDeed; 26] = [
         GreatDeed::WorldTree,
         GreatDeed::Island,
         GreatDeed::DissolvedLand,
@@ -110,6 +113,7 @@ impl GreatDeed {
         GreatDeed::WalkingForest,
         GreatDeed::Arena,
         GreatDeed::DebtBondage,
+        GreatDeed::DeadBall,
     ];
 
     /// The god whose deed it is: its card's colour, its voice.
@@ -124,7 +128,8 @@ impl GreatDeed {
             | GreatDeed::DissolvedLand
             | GreatDeed::River
             | GreatDeed::FloodedTable
-            | GreatDeed::Guest => God::Maya,
+            | GreatDeed::Guest
+            | GreatDeed::DeadBall => God::Maya,
             GreatDeed::City
             | GreatDeed::GreatFire
             | GreatDeed::Feast
@@ -178,6 +183,14 @@ impl GreatDeed {
             GreatDeed::Guest => &[Feature::Companions, Feature::Guests],
             GreatDeed::Arena => &[Feature::Settlements, Feature::Buildings, Feature::Arena],
             GreatDeed::DebtBondage => &[Feature::Debts],
+            GreatDeed::DeadBall => &[
+                Feature::Bodies,
+                Feature::Undead,
+                Feature::Settlements,
+                Feature::Militia,
+                Feature::Cargo,
+                Feature::Fields,
+            ],
             GreatDeed::WalkingForest => &[Feature::Bodies, Feature::Groves, Feature::WalkingGroves],
             GreatDeed::Ark => &[
                 Feature::Beasts,
@@ -278,6 +291,8 @@ pub enum CheckKind {
     ArenaWins,
     /// Rivals in your debt.
     Debtors,
+    /// A ball of the dead kept till dawn.
+    BallKept,
     /// Elements of the beasts in a pen of yours.
     PenElements,
     /// A shrine of yours in its city.
@@ -514,6 +529,11 @@ impl Game {
                 CheckKind::ArenaWins,
                 self.arena_wins(player),
                 super::ARENA_WINS,
+            )],
+            GreatDeed::DeadBall => vec![check(
+                CheckKind::BallKept,
+                usize::from(self.kept_ball(player)),
+                1,
             )],
             GreatDeed::DebtBondage => vec![check(
                 CheckKind::Debtors,

@@ -123,6 +123,7 @@ impl Game {
         self.note_bet(attacker, super::wish::Bet::Fight);
         self.note_bet(defender, super::wish::Bet::Fight);
         self.last_fight = self.round;
+        self.brawls += 1;
         // Attacking is loud (§6.5).
         self.add_threat(attacker, 1, events);
         self.record_deed(attacker, super::style::Deed::Attacked);

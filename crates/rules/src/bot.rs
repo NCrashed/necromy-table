@@ -482,6 +482,7 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
             | GreatDeed::WalkingForest
             | GreatDeed::Arena
             | GreatDeed::DebtBondage
+            | GreatDeed::DeadBall
             | GreatDeed::Amazon => wish(
                 God::Maya,
                 crate::Act::Veil {
@@ -904,7 +905,7 @@ fn deed_goal(game: &Game, player: PlayerId) -> Option<Hex> {
                 .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
         }
         // Sow, carry the harvest home, wait at the hall for guests.
-        GreatDeed::Feast => {
+        GreatDeed::Feast | GreatDeed::DeadBall => {
             let me = game.champion(player)?.hex;
             let near = |hexes: Vec<Hex>| {
                 hexes
@@ -1302,8 +1303,22 @@ fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
     }
     // Its own Feast: a feast when the guests are there, the harvest carried
     // home, fields sown by its settlements.
-    if game.deed(player) == Some(GreatDeed::Feast) {
-        if game.may_feast(player) && game.guests(player).len() >= crate::FEAST_GUESTS {
+    if matches!(
+        game.deed(player),
+        Some(GreatDeed::Feast | GreatDeed::DeadBall)
+    ) {
+        // A ball wants the night, the dead near and the militia at the gate.
+        let here = game.champion(player)?.hex;
+        let ball_ready = game.time() == crate::TimeOfDay::Night
+            && game.militia_at(here).is_some()
+            && game
+                .mobs()
+                .iter()
+                .any(|m| m.is_undead() && m.hex.unsigned_distance_to(here) <= crate::GUEST_RANGE);
+        if game.may_feast(player)
+            && game.guests(player).len() >= crate::FEAST_GUESTS
+            && (game.deed(player) == Some(GreatDeed::Feast) || ball_ready)
+        {
             return Some(Intent::Feast);
         }
         let here = game.champion(player)?.hex;

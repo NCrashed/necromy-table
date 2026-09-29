@@ -381,6 +381,7 @@ impl Game {
         }
         events.push(Event::MilitiaAttacked { attacker, home });
         self.last_fight = self.round;
+        self.brawls += 1;
         self.add_threat(attacker, 1, events);
         self.record_deed(attacker, Deed::Attacked);
         self.record_deed(attacker, Deed::Fought);

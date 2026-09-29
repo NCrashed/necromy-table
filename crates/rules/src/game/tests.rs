@@ -5736,3 +5736,39 @@ fn bets_between_players_make_debts_paid_in_style_or_blood() {
     g.pay_debt(me, foe, &mut ev).unwrap();
     assert_eq!(g.style(foe), before + u16::from(BET_STAKE));
 }
+
+// ---- The ball of the dead (§21.7) ----
+
+#[test]
+fn a_night_feast_with_the_dead_near_kept_till_dawn_is_a_ball() {
+    let (mut g, me, foe) = duel(2);
+    g.time = TimeOfDay::Night;
+    let hall = Hex::new(0, 0);
+    set_terrain(&mut g, hall, Terrain::Settlement);
+    g.claims.insert((0, 0), me);
+    g.militia.insert(
+        (0, 0),
+        Militia {
+            men: 2,
+            at: Some(hall),
+        },
+    );
+    let third = g.players().find(|&p| p != me && p != foe).unwrap();
+    g.place(third, Hex::new(0, 2));
+    undead_on(&mut g, Hex::new(-2, 0), 2);
+    g.stores.insert((0, 0), FEAST_FOOD);
+    let mut ev = Vec::new();
+    g.hold_feast(me, &mut ev).unwrap();
+    assert!(ev.iter().any(|e| matches!(e, Event::BallBegun { .. })));
+    g.ball_at_dawn(&mut ev);
+    assert!(g.kept_ball(me));
+    g.chosen[me.0 as usize] = Some(GreatDeed::DeadBall);
+    assert!(g.checks(me, GreatDeed::DeadBall).iter().all(Check::met));
+    // A fight before dawn breaks it.
+    g.balls[me.0 as usize] = false;
+    g.stores.insert((0, 0), FEAST_FOOD);
+    g.hold_feast(me, &mut ev).unwrap();
+    g.brawls += 1;
+    g.ball_at_dawn(&mut ev);
+    assert!(!g.kept_ball(me));
+}

@@ -808,6 +808,15 @@ pub enum Event {
     RoadLaid {
         hex: Hex,
     },
+    /// `host`'s night feast with the dead near: a ball, if kept till dawn.
+    BallBegun {
+        host: PlayerId,
+    },
+    /// Dawn: the ball was `kept` or broken by a fight.
+    BallEnded {
+        host: PlayerId,
+        kept: bool,
+    },
     /// `host` challenged `rival` to a duel in the arena on `hex` (§21.8).
     Challenged {
         host: PlayerId,
@@ -1546,6 +1555,11 @@ pub struct Game {
     buildings: BTreeMap<(i32, i32), buildings::Building>,
     /// Roads of the register (§21.8).
     roads: std::collections::BTreeSet<(i32, i32)>,
+    /// Fights of any kind so far, the ball of the dead under way (its host
+    /// and the fights when it began), and who kept one (§21.7).
+    brawls: u32,
+    ball: Option<(PlayerId, u32)>,
+    balls: Vec<bool>,
     /// Duels, bets between players, debts, and duels won in one's arena
     /// (§21.8).
     duels: Vec<contest::Duel>,
@@ -1716,6 +1730,9 @@ impl Game {
             stores: BTreeMap::new(),
             fairs: BTreeMap::new(),
             rulers: BTreeMap::new(),
+            brawls: 0,
+            ball: None,
+            balls: vec![false; champions_len],
             duels: Vec::new(),
             player_bets: Vec::new(),
             debts: Vec::new(),
@@ -3512,6 +3529,7 @@ impl Game {
         });
         if self.time == TimeOfDay::Day {
             events.push(Event::Dawn { round: self.round });
+            self.ball_at_dawn(events);
             if self.scripted.is_none_or(|s| s.dawn) {
                 self.dawn(events);
             }

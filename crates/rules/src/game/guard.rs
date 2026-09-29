@@ -129,6 +129,7 @@ impl Game {
     fn guard_strike(&mut self, target: PlayerId, events: &mut Vec<Event>) {
         events.push(Event::GuardStruck { target });
         self.last_fight = self.round;
+        self.brawls += 1;
         self.battles += 1;
         self.offer(None, God::Trishna, 1, events);
         let dice = self.guard_dice(target);
@@ -176,6 +177,7 @@ impl Game {
         }
         events.push(Event::GuardAttacked { attacker });
         self.last_fight = self.round;
+        self.brawls += 1;
         // Attacking is loud (§6.5), the crown's iron above all.
         self.add_threat(attacker, 1, events);
         self.record_deed(attacker, super::style::Deed::Attacked);

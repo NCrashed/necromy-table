@@ -189,9 +189,40 @@ impl Game {
         if guests.len() >= FEAST_GUESTS {
             self.feasted[player.0 as usize] = true;
         }
+        // At night, with the dead near and the militia at the gate: a ball of
+        // the dead, if nobody fights before dawn (§21.7).
+        let dead_near = self
+            .mobs
+            .iter()
+            .any(|m| m.is_undead() && m.hex.unsigned_distance_to(at) <= GUEST_RANGE);
+        if self.time == super::TimeOfDay::Night
+            && guests.len() >= FEAST_GUESTS
+            && dead_near
+            && self.militia_at(at).is_some()
+        {
+            self.ball = Some((player, self.brawls));
+            events.push(Event::BallBegun { host: player });
+        }
         self.first(player, super::Novelty::Feasted, events);
         self.turns[player.0 as usize].move_points = 0;
         Ok(())
+    }
+
+    /// Dawn: a ball of the dead nobody fought through is kept.
+    pub(super) fn ball_at_dawn(&mut self, events: &mut Vec<Event>) {
+        let Some((host, brawls)) = self.ball.take() else {
+            return;
+        };
+        let kept = self.brawls == brawls;
+        if kept {
+            self.balls[host.0 as usize] = true;
+        }
+        events.push(Event::BallEnded { host, kept });
+    }
+
+    /// Whether `player` kept a ball of the dead.
+    pub fn kept_ball(&self, player: PlayerId) -> bool {
+        self.balls.get(player.0 as usize).copied().unwrap_or(false)
     }
 
     /// A settlement of `player`'s with food enough for a feast, if any.
