@@ -450,6 +450,7 @@ impl Match {
             oracle: Some(oracle),
             // Alone, nobody waits on the human.
             timers: None,
+            mode: Default::default(),
         });
         let saver = crate::saves::start(&mut table);
         let first = table.drain(human);

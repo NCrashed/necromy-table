@@ -518,6 +518,7 @@ mod tests {
         Game::new(Setup {
             seed: 3,
             champions: God::ALL.to_vec(),
+            mode: Default::default(),
         })
         .0
     }

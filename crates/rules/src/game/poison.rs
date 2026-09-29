@@ -38,6 +38,9 @@ impl Game {
         stacks: u8,
         events: &mut Vec<Event>,
     ) {
+        if !self.has(super::Feature::Poison) {
+            return;
+        }
         let champ = self.champ_mut(player);
         let stacks = champ.poison.map_or(0, |p| p.stacks).saturating_add(stacks);
         champ.poison = Some(Poison { element, stacks });

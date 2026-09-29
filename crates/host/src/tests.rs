@@ -8,6 +8,7 @@ fn table(seats: Vec<Seat>) -> Table {
         salt: 1234,
         oracle: None,
         timers: None,
+        mode: Default::default(),
     })
 }
 

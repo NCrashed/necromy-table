@@ -7,6 +7,7 @@ fn main() {
     let (g, _) = Game::new(Setup {
         seed: 3,
         champions: God::ALL.to_vec(),
+        mode: Default::default(),
     });
     let me = PlayerId(1);
     let addr = necromy_oracle::addr_from_env();

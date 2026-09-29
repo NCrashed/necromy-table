@@ -663,7 +663,8 @@ impl Game {
                 let free: Vec<Hex> = (1..=2)
                     .flat_map(|r| me.ring(r).collect::<Vec<_>>())
                     .filter(|&h| {
-                        self.board.tile(h).is_some_and(|t| t.corpse.is_none())
+                        self.has(super::Feature::Bodies)
+                            && self.board.tile(h).is_some_and(|t| t.corpse.is_none())
                             && self.occupant(h).is_none()
                     })
                     .take(power as usize)

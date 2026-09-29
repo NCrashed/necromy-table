@@ -66,6 +66,9 @@ impl Game {
     }
 
     pub(super) fn hide(&mut self, player: PlayerId, events: &mut Vec<Event>) {
+        if !self.has(super::Feature::Stealth) {
+            return;
+        }
         // Ahamar's Exposure: in daylight nobody slips away (§5.3).
         if self.time == TimeOfDay::Day
             && self.law_active(Law::Exposure)
@@ -105,6 +108,9 @@ impl Game {
     /// The end of `player`'s turn: night cover hides them; anyone hidden
     /// next to a rival is seen.
     pub(super) fn stealth_at_turn_end(&mut self, player: PlayerId, events: &mut Vec<Event>) {
+        if !self.has(super::Feature::Stealth) {
+            return;
+        }
         let at = self.hex_of(player);
         let terrain = self.board.tile(at).map(|t| t.terrain);
         let cover = terrain.is_some_and(|t| t.gives_cover());

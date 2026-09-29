@@ -118,6 +118,7 @@ impl Game {
         let (mut game, _) = Game::new(Setup {
             seed: 1,
             champions: scene.seats.iter().map(|s| s.god).collect(),
+            mode: Default::default(),
         });
         game.scripted = Some(scene.world);
         game.board = Board::plain(scene.radius);

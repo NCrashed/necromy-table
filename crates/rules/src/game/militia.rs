@@ -262,6 +262,9 @@ impl Game {
 
     /// An undead with no militia to stop it: the settlement becomes ruins.
     pub(super) fn ruin(&mut self, hex: Hex, events: &mut Vec<Event>) {
+        if !self.has(super::Feature::Ruins) {
+            return;
+        }
         self.militia.remove(&(hex.x(), hex.y()));
         self.claims.remove(&(hex.x(), hex.y()));
         self.ruins.insert((hex.x(), hex.y()));

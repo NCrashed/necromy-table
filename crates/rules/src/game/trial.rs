@@ -282,7 +282,11 @@ impl Game {
     /// Sets a trial of the land's god on `hex`, with a boon of chance.
     pub(super) fn set_trial(&mut self, hex: Hex, events: &mut Vec<Event>) -> Option<God> {
         let god = self.board.tile(hex)?.region?;
-        let boon = *self.rng.pick(&Boon::ALL).expect("four boons");
+        let boons: Vec<Boon> = Boon::ALL
+            .into_iter()
+            .filter(|&b| b != Boon::Loot || self.has(super::Feature::Loot))
+            .collect();
+        let boon = *self.rng.pick(&boons).expect("boons besides loot");
         self.next_trial += 1;
         let trial = Trial {
             id: self.next_trial,

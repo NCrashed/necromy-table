@@ -304,6 +304,11 @@ impl Game {
         ]
         .into_iter()
         .filter(|k| !taken.contains(k))
+        .filter(|k| match k {
+            LineKind::Ordeal => self.has(super::Feature::Trials),
+            LineKind::TheDeadCall => self.has(super::Feature::Bodies),
+            _ => true,
+        })
         .collect();
         let Some(&kind) = self.rng.pick(&choices) else {
             return;
@@ -343,12 +348,19 @@ impl Game {
 
     /// The world moves by itself when nobody moves it.
     fn stir(&mut self, events: &mut Vec<Event>) {
-        let stirs = [
+        let stirs: Vec<WorldStir> = [
             WorldStir::RisingDead,
             WorldStir::Overgrowth,
             WorldStir::Unrest,
-        ];
-        let stir = *self.rng.pick(&stirs).expect("three stirs");
+        ]
+        .into_iter()
+        .filter(|s| match s {
+            WorldStir::RisingDead => self.has(super::Feature::Bodies),
+            WorldStir::Overgrowth => self.has(super::Feature::Groves),
+            WorldStir::Unrest => true,
+        })
+        .collect();
+        let stir = *self.rng.pick(&stirs).expect("unrest is always there");
         events.push(Event::WorldStirred { stir });
         match stir {
             WorldStir::RisingDead => {

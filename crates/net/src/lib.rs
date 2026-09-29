@@ -22,7 +22,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever a message changes shape; mismatched sides refuse.
-pub const PROTOCOL: u32 = 22;
+pub const PROTOCOL: u32 = 23;
 pub const DEFAULT_PORT: u16 = 7878;
 /// Our playtest server (aerospace, service/necromy-table.nix): where the
 /// menu points unless `NECROMY_SERVER` or the field says otherwise.
@@ -271,6 +271,7 @@ mod tests {
             salt: 9,
             oracle: None,
             timers: None,
+            mode: Default::default(),
         });
         let sent = table.drain(PlayerId(2));
         for m in sent.clone() {

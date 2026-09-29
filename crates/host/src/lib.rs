@@ -71,6 +71,8 @@ pub struct Config {
     pub oracle: Option<String>,
     /// Clocks on people's decisions; `None` lets them think forever (alone).
     pub timers: Option<Timers>,
+    /// A full world or one to create (§21).
+    pub mode: necromy_rules::Mode,
 }
 
 /// A seat's message to the table.
@@ -200,6 +202,7 @@ impl Table {
         let (game, events) = Game::new(Setup {
             seed: config.seed,
             champions: config.champions,
+            mode: config.mode,
         });
         Table::from_game(
             game,
@@ -291,6 +294,7 @@ impl Table {
             salt,
             oracle,
             timers,
+            mode: Default::default(),
         };
         let voice = config.oracle.map(|addr| {
             // One probe per address list and process, shared by every table.

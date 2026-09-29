@@ -410,6 +410,7 @@ impl Server {
             salt,
             oracle,
             timers,
+            mode: Default::default(),
         });
         let handed: Vec<(u64, PlayerId, u64)> = seats_of
             .iter()

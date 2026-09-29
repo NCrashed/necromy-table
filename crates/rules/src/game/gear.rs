@@ -187,6 +187,9 @@ impl Game {
 
     /// The top of the loot deck, worn at once. An empty deck gives nothing.
     pub(super) fn gain_loot(&mut self, player: PlayerId, events: &mut Vec<Event>) {
+        if !self.has(super::Feature::Loot) {
+            return;
+        }
         if let Some(item) = self.loot.pop() {
             self.equip(player, item, Gain::Loot, events);
         }

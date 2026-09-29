@@ -16,9 +16,11 @@ pub mod rng;
 
 pub use board::{Board, Corpse, Terrain, Tile};
 pub mod cards;
+pub mod features;
 pub mod items;
 
 pub use cards::{CardDef, CardId, CardKind, CardMod, DefId, Effect, TargetRule, Timing};
+pub use features::{Feature, Mode, World};
 pub use game::{
     Act, BEAST_DICE, BEAST_HEALTH, BEAST_RANGE, Bet, BodyVerb, Boon, CHOSEN, Champion, Character,
     Check, CheckKind, Condition, Cure, Deed, Event, FORESEE, FRIENDLY, Fighter, GUARD_DICE,

@@ -27,6 +27,7 @@ use crate::board::{Board, Corpse, Terrain};
 use crate::cards::{
     self, CardDef, CardId, CardKind, CardMod, DefId, Effect, TargetRule, Timing, TrapEffect,
 };
+use crate::features::{Feature, Mode, World};
 use crate::gods::{Element, God};
 use crate::rng::Rng;
 
@@ -48,6 +49,8 @@ pub struct Setup {
     pub seed: u64,
     /// One patron god per seat, 2–5 seats, no god twice.
     pub champions: Vec<God>,
+    /// A full world, or a small one the players grow (§21).
+    pub mode: Mode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1078,6 +1081,8 @@ pub struct Game {
     /// still. No new bodies, stories or draws; dawn and the guard only if
     /// the scene lets them.
     scripted: Option<scenario::SceneWorld>,
+    /// The mechanics this world has (§21.2).
+    world: World,
     log: Vec<Event>,
 }
 
@@ -1090,7 +1095,15 @@ impl Game {
         );
         let mut rng = Rng::new(setup.seed);
         let board = Board::generate(&mut rng);
-        let militia = Self::militia_of(&board);
+        let world = match setup.mode {
+            Mode::Full => World::full(),
+            Mode::Creation => World::full(),
+        };
+        let militia = if world.has(Feature::Militia) {
+            Self::militia_of(&board)
+        } else {
+            BTreeMap::new()
+        };
         let champions: Vec<Champion> = setup
             .champions
             .iter()
@@ -1180,6 +1193,7 @@ impl Game {
             wagers: Vec::new(),
             planted: BTreeMap::new(),
             scripted: None,
+            world,
             log: Vec::new(),
         };
 
@@ -1203,6 +1217,15 @@ impl Game {
 
     pub fn board(&self) -> &Board {
         &self.board
+    }
+
+    /// The mechanics this world has (§21.2).
+    pub fn world(&self) -> &World {
+        &self.world
+    }
+
+    pub fn has(&self, feature: Feature) -> bool {
+        self.world.has(feature)
     }
 
     pub fn champions(&self) -> &[Champion] {
@@ -1833,7 +1856,9 @@ impl Game {
             self.dusk(events);
             self.judge_the_day(events);
             if self.scripted.is_none() {
-                self.trials_at_dusk(events);
+                if self.has(Feature::Trials) {
+                    self.trials_at_dusk(events);
+                }
                 self.storyteller(events);
             }
         }
@@ -2566,6 +2591,9 @@ impl Game {
     }
 
     fn grow(&mut self, hex: Hex, events: &mut Vec<Event>) {
+        if !self.has(Feature::Groves) {
+            return;
+        }
         if let Some(tile) = self.board.tile_mut(hex)
             && tile.terrain.can_grow_grove()
         {
@@ -2625,7 +2653,9 @@ impl Game {
         // The Wager wants the Dominant standing through all its refusals.
         self.progress[player.0 as usize].refusals = 0;
         let at = self.hex_of(player);
-        if let Some(tile) = self.board.tile_mut(at)
+        let bodies = self.has(Feature::Bodies);
+        if bodies
+            && let Some(tile) = self.board.tile_mut(at)
             && tile.corpse.is_none()
         {
             tile.corpse = Some(Corpse { age: 0 });
@@ -2800,12 +2830,13 @@ impl Game {
     fn world_phase(&mut self, events: &mut Vec<Event>) {
         let corpses: Vec<(Hex, Corpse)> = self.board.corpses().collect();
         let ripe = self.grove_age();
+        let groves = self.has(Feature::Groves);
         for (hex, corpse) in corpses {
             let tile = self.board.tile_mut(hex).expect("corpse on the board");
             let age = corpse.age + 1;
             if age < ripe {
                 tile.corpse = Some(Corpse { age });
-            } else if tile.terrain.can_grow_grove() {
+            } else if groves && tile.terrain.can_grow_grove() {
                 tile.corpse = None;
                 tile.terrain = Terrain::Grove;
                 events.push(Event::GroveGrew { hex });
@@ -2820,18 +2851,23 @@ impl Game {
             self.spawn_corpse(events);
         }
         if self.scripted.is_none() {
-            self.raise_dead(events);
-            if self.time == TimeOfDay::Night {
+            if self.has(Feature::Undead) {
+                self.raise_dead(events);
+            }
+            if self.time == TimeOfDay::Night && self.has(Feature::Beasts) {
                 self.beasts_at_night(events);
             }
             self.mob_phase(events);
         }
-        if self.scripted.is_none_or(|s| s.guard) {
+        if self.scripted.is_none_or(|s| s.guard) && self.has(Feature::Guard) {
             self.guard_phase(events);
         }
     }
 
     fn spawn_corpse(&mut self, events: &mut Vec<Event>) {
+        if !self.has(Feature::Bodies) {
+            return;
+        }
         let free: Vec<Hex> = self
             .board
             .tiles()

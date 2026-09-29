@@ -9,6 +9,7 @@ fn five() -> Setup {
     Setup {
         seed: 7,
         champions: God::ALL.to_vec(),
+        mode: Default::default(),
     }
 }
 
@@ -632,6 +633,7 @@ fn bots_never_stall_or_break_rules() {
         let (mut g, _) = Game::new(Setup {
             seed,
             champions: God::ALL.to_vec(),
+            mode: Default::default(),
         });
         for _ in 0..1500 {
             if g.winner().is_some() {
@@ -665,6 +667,61 @@ fn bots_never_stall_or_break_rules() {
             .count();
     }
     assert!(poisoned > 0, "no bot ever poisoned anyone");
+}
+
+/// A world with only some mechanics (§21.2) plays on just the same: bots
+/// never stall, never break a rule, and what the world lacks never happens.
+#[test]
+fn bots_play_in_worlds_lacking_mechanics() {
+    for seed in 0..40u64 {
+        let (mut g, _) = Game::new(Setup {
+            seed,
+            champions: God::ALL.to_vec(),
+            mode: Default::default(),
+        });
+        let mut pick = crate::rng::Rng::new(seed ^ 0xFEA7);
+        let features: Vec<Feature> = Feature::ALL
+            .into_iter()
+            .filter(|_| pick.below(2) == 0)
+            .collect();
+        g.world = World::of(features.iter().copied());
+        if !g.has(Feature::Militia) {
+            g.militia.clear();
+        }
+        let since = g.log().len();
+        for _ in 0..1500 {
+            if g.winner().is_some() {
+                break;
+            }
+            let p = g.awaiting()[0];
+            let intent = crate::bot::choose(&g, p);
+            g.apply(p, intent.clone())
+                .unwrap_or_else(|e| panic!("seed {seed} {features:?}: bot {p:?} {intent:?}: {e}"));
+        }
+        assert!(
+            g.winner().is_some() || g.round() >= 6,
+            "seed {seed} {features:?}: only reached round {}",
+            g.round()
+        );
+        for e in &g.log()[since..] {
+            let lacking = match e {
+                Event::GroveGrew { .. } => !g.has(Feature::Groves),
+                Event::MobAppeared { mob } => match mob.kind {
+                    MobKind::Undead => !g.has(Feature::Undead),
+                    MobKind::Beast { .. } => !g.has(Feature::Beasts),
+                },
+                Event::Poisoned { .. } => !g.has(Feature::Poison),
+                Event::TrialSet { .. } => !g.has(Feature::Trials),
+                Event::ItemGained { .. } => !g.has(Feature::Loot),
+                Event::GuardSpawned { .. } => !g.has(Feature::Guard),
+                Event::Hid { .. } => !g.has(Feature::Stealth),
+                Event::SettlementRuined { .. } => !g.has(Feature::Ruins),
+                Event::CorpseAppeared { .. } => !g.has(Feature::Bodies),
+                _ => false,
+            };
+            assert!(!lacking, "seed {seed} {features:?}: {e:?}");
+        }
+    }
 }
 
 // ---- Battles (§12) ----
@@ -749,6 +806,7 @@ fn battle_damage_follows_the_faces_both_ways() {
         let (mut g, _) = Game::new(Setup {
             seed,
             champions: God::ALL.to_vec(),
+            mode: Default::default(),
         });
         let me = g.current_player();
         let foe = g.order()[1];
@@ -866,6 +924,7 @@ fn bots_fight() {
             let (mut g, _) = Game::new(Setup {
                 seed,
                 champions: God::ALL.to_vec(),
+                mode: Default::default(),
             });
             for _ in 0..1500 {
                 if g.winner().is_some() {
@@ -906,6 +965,7 @@ fn gods_start_light_or_mid() {
         let (g, _) = Game::new(Setup {
             seed,
             champions: God::ALL.to_vec(),
+            mode: Default::default(),
         });
         assert!(God::ALL.iter().all(|&god| g.stage(god) < 2), "seed {seed}");
     }
@@ -1103,6 +1163,7 @@ fn stages_move_in_bot_games() {
         let (mut g, _) = Game::new(Setup {
             seed,
             champions: God::ALL.to_vec(),
+            mode: Default::default(),
         });
         for _ in 0..1500 {
             if g.winner().is_some() {
@@ -1204,6 +1265,7 @@ fn battle_winner_takes_style_double_from_the_dominant() {
         let (mut g, _) = Game::new(Setup {
             seed,
             champions: God::ALL.to_vec(),
+            mode: Default::default(),
         });
         let me = g.current_player();
         let foe = g.order()[1];
@@ -1367,6 +1429,7 @@ fn crowns_and_guards_happen_in_bot_games() {
         let (mut g, _) = Game::new(Setup {
             seed,
             champions: God::ALL.to_vec(),
+            mode: Default::default(),
         });
         for _ in 0..1500 {
             if g.winner().is_some() {
@@ -1399,6 +1462,7 @@ fn conditions_are_drawn_open_and_secret() {
         let (g, _) = Game::new(Setup {
             seed,
             champions: God::ALL.to_vec(),
+            mode: Default::default(),
         });
         let open = g.open_conditions();
         assert_eq!(open.len(), crate::game::OPEN_COUNT);
@@ -1535,6 +1599,7 @@ fn bot_matches_end_in_many_ways() {
         let (mut g, _) = Game::new(Setup {
             seed,
             champions: God::ALL.to_vec(),
+            mode: Default::default(),
         });
         // The placeholder bots do not lighten a dark god on purpose, so a
         // match whose open conditions want the gods out of the dark runs
@@ -1858,6 +1923,7 @@ fn bots_wish_in_many_ways() {
         let (mut g, _) = Game::new(Setup {
             seed,
             champions: God::ALL.to_vec(),
+            mode: Default::default(),
         });
         for _ in 0..3000 {
             if g.winner().is_some() {
@@ -1979,6 +2045,7 @@ fn bots_live_their_lines() {
         let (mut g, _) = Game::new(Setup {
             seed,
             champions: God::ALL.to_vec(),
+            mode: Default::default(),
         });
         for _ in 0..3000 {
             if g.winner().is_some() {
@@ -3073,6 +3140,7 @@ fn bots_try_trials() {
         let (mut g, _) = Game::new(Setup {
             seed,
             champions: God::ALL.to_vec(),
+            mode: Default::default(),
         });
         for _ in 0..1500 {
             if g.winner().is_some() {
@@ -3631,6 +3699,7 @@ fn when_the_dead_rise() {
         let (mut g, _) = Game::new(Setup {
             seed,
             champions: God::ALL.to_vec(),
+            mode: Default::default(),
         });
         let mut first = None;
         let mut first_beast = None;
