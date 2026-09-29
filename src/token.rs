@@ -34,6 +34,7 @@ impl Plugin for TokenPlugin {
                     queue_steps,
                     move_tokens,
                     sync_guard,
+                    sync_dragons,
                     animate_tokens,
                 )
                     .chain(),
@@ -562,5 +563,93 @@ fn shade_tokens(
         if sprite.image != *look {
             sprite.image = look.clone();
         }
+    }
+}
+
+/// A dragon following a champion (§21.8): its figure stands beside their
+/// token, on the camera's right and a little behind, and goes where it goes.
+#[derive(Component)]
+struct DragonFigure {
+    player: PlayerId,
+}
+
+/// Where a dragon stands from its champion, in world units along the
+/// camera's right and away from it.
+const DRAGON_SIDE: f32 = 0.55;
+const DRAGON_BACK: f32 = 0.25;
+
+/// Keeps one dragon figure beside every champion a dragon follows.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn sync_dragons(
+    mut commands: Commands,
+    game: Res<Match>,
+    assets: Res<AssetServer>,
+    mut image: Local<Option<Handle<Image>>>,
+    images: Res<Assets<Image>>,
+    camera: Single<
+        &Transform,
+        (
+            With<crate::TableCamera>,
+            Without<Token>,
+            Without<DragonFigure>,
+        ),
+    >,
+    tokens: Query<(&Token, &Transform, &Visibility), Without<DragonFigure>>,
+    mut figures: Query<(Entity, &DragonFigure, &mut Transform, &mut Visibility), Without<Token>>,
+) {
+    let image = image.get_or_insert_with(|| assets.load("sprites/dragon.png"));
+    // `Sprite3d` reads the size on spawn: wait for the picture.
+    if !images.contains(&*image) {
+        return;
+    }
+    // `NECROMY_FX=dragon` puts one beside the human, for looks only.
+    let shown_off = std::env::var("NECROMY_FX").is_ok_and(|v| v == "dragon");
+    let followed = |p: PlayerId| {
+        (shown_off && p == game.human)
+            || game
+                .game
+                .companions(p)
+                .contains(&necromy_rules::Companion::Dragon)
+    };
+    let right = camera.right().with_y(0.0).normalize_or_zero();
+    let away = camera.forward().with_y(0.0).normalize_or_zero();
+    let beside = right * DRAGON_SIDE + away * DRAGON_BACK;
+    for (entity, figure, mut transform, mut visibility) in &mut figures {
+        let Some((_, token, shown)) = tokens.iter().find(|(t, ..)| t.player == figure.player)
+        else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        if !followed(figure.player) {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        transform.translation = token.translation + beside;
+        visibility.set_if_neq(*shown);
+    }
+    for (token, transform, shown) in &tokens {
+        let has = figures.iter().any(|(_, f, ..)| f.player == token.player);
+        if has || !followed(token.player) {
+            continue;
+        }
+        commands.spawn((
+            DragonFigure {
+                player: token.player,
+            },
+            Billboard,
+            NotShadowCaster,
+            NotShadowReceiver,
+            Sprite::from_image(image.clone()),
+            Sprite3d {
+                pixels_per_metre: PIXELS_PER_METRE,
+                // Feet on the ground: the picture is trimmed to the dragon.
+                pivot: Some(Vec2::new(0.5, 0.0)),
+                alpha_mode: AlphaMode::Mask(0.5),
+                unlit: false,
+                ..default()
+            },
+            Transform::from_translation(transform.translation + beside),
+            *shown,
+        ));
     }
 }
