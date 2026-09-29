@@ -88,6 +88,11 @@ impl DiceShow {
             && self.playing.iter().flatten().all(|p| p.revealed)
     }
 
+    /// Every die of the throw on screen has come to rest.
+    pub fn settled(&self) -> bool {
+        self.settled_at.is_some()
+    }
+
     /// A decided battle is still on screen; bots and turns wait for it.
     pub fn busy(&self) -> bool {
         self.busy || self.queue.iter().any(|q| !q.is_empty())
@@ -229,8 +234,10 @@ fn play_throws(
     let now = time.elapsed_secs();
     // Read through `Match` without touching it: only closing the panel below
     // may mark it changed.
-    let open = game.battle.is_some();
-    let decided = game.battle.as_ref().is_some_and(|b| b.scores.is_some());
+    // A battle or a trial (§20.2): the trial throws in the first tray.
+    let open = game.battle.is_some() || game.trial.is_some();
+    let decided = game.battle.as_ref().is_some_and(|b| b.scores.is_some())
+        || game.trial.as_ref().is_some_and(|t| t.result.is_some());
     for mut camera in &mut cameras {
         if camera.is_active != open {
             camera.is_active = open;

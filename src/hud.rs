@@ -474,6 +474,26 @@ fn tooltip(
     {
         lines.push("здесь твоя ловушка".into());
     }
+    if let Some(trial) = g.trial_at(hex) {
+        lines.push(format!(
+            "{} ({}): {}",
+            names::trial_name(trial.god),
+            names::god(trial.god),
+            names::trial_ask(g, trial)
+        ));
+        lines.push(format!(
+            "награда: {} · провал: {}",
+            names::boon(g, trial),
+            names::trial_price(g, trial.god)
+        ));
+        if trial.tried.contains(&game.human) {
+            lines.push("ты уже пробовал: второй попытки нет".into());
+        } else {
+            lines.push("шаг сюда — бросок; движение на этом кончается".into());
+        }
+        let left = trial.deadline.saturating_sub(g.round());
+        lines.push(format!("угаснет через {left} раунд(а)"));
+    }
     if let Some(p) = g.occupant(hex) {
         lines.push(format!("здесь: {}", game.name(p)));
     }

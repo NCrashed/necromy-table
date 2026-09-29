@@ -92,6 +92,8 @@ pub struct Match {
     pub throws: Vec<ThrowView>,
     /// The battle on screen, from its start until the dice show ends.
     pub battle: Option<BattleInfo>,
+    /// The trial on screen (§20.2), from its first step to the end of its dice.
+    pub trial: Option<TrialInfo>,
     /// The last card that hit the human and what it did, shown for a moment
     /// after its Target window closed.
     pub incoming_result: Option<IncomingResult>,
@@ -170,6 +172,19 @@ pub struct IncomingResult {
     pub caster: PlayerId,
     pub card: CardId,
     pub lines: Vec<String>,
+}
+
+/// A trial being thrown for, as the panel shows it.
+#[derive(Clone, Debug)]
+pub struct TrialInfo {
+    pub player: PlayerId,
+    pub hex: Hex,
+    /// As it stood when stepped onto; later from its outcome.
+    pub trial: Option<necromy_rules::Trial>,
+    /// Faces from burned cards.
+    pub burned: Vec<necromy_rules::Face>,
+    /// Counting faces, how many it asked, and whether that was enough.
+    pub result: Option<(u8, u8, bool)>,
 }
 
 /// What the battle panel shows about the current fight.
@@ -488,6 +503,7 @@ impl Match {
             autoplay,
             throws: Vec::new(),
             battle: None,
+            trial: None,
             incoming_result: None,
             incoming_serial: 0,
             offerings: Vec::new(),
@@ -815,6 +831,33 @@ impl Match {
                     self.dusk_news.push((*god, from, *stage));
                     self.stage_shifts += 1;
                 }
+                Event::TrialBegun { player, hex } => {
+                    self.trial = Some(TrialInfo {
+                        player: *player,
+                        hex: *hex,
+                        trial: self.game.trial_at(*hex).cloned(),
+                        burned: Vec::new(),
+                        result: None,
+                    });
+                }
+                Event::TrialPassed {
+                    player,
+                    trial,
+                    got,
+                    need,
+                }
+                | Event::TrialFailed {
+                    player,
+                    trial,
+                    got,
+                    need,
+                } => {
+                    let passed = matches!(event, Event::TrialPassed { .. });
+                    if let Some(t) = self.trial.as_mut().filter(|t| t.player == *player) {
+                        t.trial = Some(trial.clone());
+                        t.result = Some((*got, *need, passed));
+                    }
+                }
                 Event::BattleStarted { attacker, defender } => {
                     self.battle = Some(BattleInfo::new(Some(*attacker), *defender));
                 }
@@ -822,6 +865,9 @@ impl Match {
                     self.battle = Some(BattleInfo::new(None, *target));
                 }
                 Event::Burned { player, faces, .. } => {
+                    if let Some(t) = self.trial.as_mut().filter(|t| t.player == *player) {
+                        t.burned = faces.clone();
+                    }
                     if let Some(b) = self.battle.as_mut() {
                         let side = b.side(*player);
                         b.burned[side] = faces.clone();
@@ -900,6 +946,7 @@ impl Match {
     /// The battle panel closes: the fight is told in the feed.
     pub fn end_battle_view(&mut self) {
         self.battle = None;
+        self.trial = None;
         self.release_feed();
     }
 
@@ -1074,6 +1121,7 @@ impl Match {
                     format!("{}: {} снимает яд.", self.name(*player), names::element(*e))
                 }
                 Cure::Temple => format!("{}: храм очищает от яда.", self.name(*player)),
+                Cure::Trial => format!("{}: испытание снимает яд.", self.name(*player)),
             },
             Event::Hid { player, .. } => format!("{} уходит в тень.", self.name(*player)),
             Event::Revealed { player, why, .. } => format!(
@@ -1098,6 +1146,43 @@ impl Match {
             Event::ChampionFell { player, .. } => {
                 format!("{} падает и просыпается дома.", self.name(*player))
             }
+            Event::TrialSet { trial } => format!(
+                "{} ставит {}: {}.",
+                names::god(trial.god),
+                names::trial_name(trial.god),
+                names::trial_ask(&self.game, trial)
+            ),
+            Event::TrialBegun { player, .. } => {
+                let what = self
+                    .trial
+                    .as_ref()
+                    .and_then(|t| t.trial.as_ref())
+                    .map_or("испытание", |t| names::trial_name(t.god));
+                format!("{} выходит на {what}.", self.name(*player))
+            }
+            Event::TrialPassed {
+                player,
+                trial,
+                got,
+                need,
+            } => format!(
+                "{} проходит {} ({got} из {need}): {}.",
+                self.name(*player),
+                names::trial_name(trial.god),
+                names::boon(&self.game, trial)
+            ),
+            Event::TrialFailed {
+                player,
+                trial,
+                got,
+                need,
+            } => format!(
+                "{} не выдерживает {} ({got} из {need}): {}.",
+                self.name(*player),
+                names::trial_name(trial.god),
+                names::trial_price(&self.game, trial.god)
+            ),
+            Event::TrialFaded { .. } => "Испытание угасло: его никто не прошёл.".into(),
             Event::DeckReshuffled => "Колода перемешана.".into(),
             Event::LineTold { line } => format!(
                 "{} даёт {} линию «{}» до раунда {}.",
@@ -1481,6 +1566,7 @@ pub fn window_name(m: &Match, kind: WindowKind) -> String {
             format!("бой: {} против {}", m.name(attacker), m.name(defender))
         }
         WindowKind::Tribute { asker } => format!("дань для {}", m.name(asker)),
+        WindowKind::Trial { player, .. } => format!("{} на испытании", m.name(player)),
     }
 }
 

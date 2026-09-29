@@ -25,6 +25,8 @@ pub enum Cure {
     Heal(Element),
     /// Ending the turn on a temple.
     Temple,
+    /// A passed trial's Mending boon (§20.2).
+    Trial,
 }
 
 impl Game {

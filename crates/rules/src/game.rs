@@ -168,6 +168,8 @@ pub enum WindowKind {
     /// A wish demands tribute for `asker` (§7.3): each rival gives a card
     /// (a play of it) or takes Threat (a pass).
     Tribute { asker: PlayerId },
+    /// Before a trial's throw: its challenger picks cards to burn (§20.2).
+    Trial { player: PlayerId, hex: Hex },
 }
 
 /// Where a player stands in the round (§11.2).
@@ -517,6 +519,33 @@ pub enum Event {
     WorldStirred {
         stir: story::WorldStir,
     },
+    /// A god set a trial on a hex of its land (§20.2).
+    TrialSet {
+        trial: trial::Trial,
+    },
+    /// `player` stepped onto the trial on `hex`; the throw follows.
+    TrialBegun {
+        player: PlayerId,
+        hex: Hex,
+    },
+    /// `got` counting faces of the `need`: passed, the boon follows.
+    TrialPassed {
+        player: PlayerId,
+        trial: trial::Trial,
+        got: u8,
+        need: u8,
+    },
+    /// Short of `need`: the god's price follows; the trial stays.
+    TrialFailed {
+        player: PlayerId,
+        trial: trial::Trial,
+        got: u8,
+        need: u8,
+    },
+    /// Nobody passed it in time.
+    TrialFaded {
+        hex: Hex,
+    },
     /// The match is over.
     Victory {
         player: PlayerId,
@@ -806,6 +835,10 @@ pub struct Game {
     /// Open story lines (§8).
     lines: Vec<story::Line>,
     next_line: u32,
+    /// Trials on the board (§20.2), the last id and throws so far.
+    trials: Vec<trial::Trial>,
+    next_trial: u32,
+    trial_throws: u64,
     /// Round of the last battle or guard strike.
     last_fight: u32,
     /// Deeds since the last story check.
@@ -905,6 +938,9 @@ impl Game {
             curses: vec![Vec::new(); champions_len],
             lines: Vec::new(),
             next_line: 0,
+            trials: Vec::new(),
+            next_trial: 0,
+            trial_throws: 0,
             last_fight: 0,
             pending_story: Vec::new(),
             mods: BTreeMap::new(),
@@ -1195,6 +1231,10 @@ impl Game {
                 }
                 if best.get(&next).is_none_or(|&(c, _)| total < c) {
                     best.insert(next, (total, at));
+                    // A trial stops the walk: no path goes on through it.
+                    if self.trial_for(player, next).is_some() {
+                        continue;
+                    }
                     queue.push(std::cmp::Reverse((total, next.x(), next.y())));
                 }
             }
@@ -1215,7 +1255,7 @@ impl Game {
                 let fits = match self.windows[i].kind {
                     WindowKind::Target { .. } => def.timing == Timing::Response,
                     // Cards go into a battle only as burned faces.
-                    WindowKind::Battle { .. } => false,
+                    WindowKind::Battle { .. } | WindowKind::Trial { .. } => false,
                     WindowKind::Enter { .. } => def.timing == Timing::Instant,
                     // Tribute: any card of the hand may be given, free.
                     WindowKind::Tribute { .. } => return Ok(()),
@@ -1548,6 +1588,7 @@ impl Game {
             self.dusk(events);
             self.judge_the_day(events);
             if self.scripted.is_none() {
+                self.trials_at_dusk(events);
                 self.storyteller(events);
             }
         }
@@ -1603,6 +1644,11 @@ impl Game {
             }
             self.claim(player, at, events);
         }
+        // A trial stops whoever walks onto it and brings them into view.
+        let trial = at == to && self.trial_for(player, at).is_some();
+        if trial && self.is_hidden(player) {
+            self.reveal(player, RevealReason::Trial, events);
+        }
         // Nobody sees a hidden champion walk by, so nobody reacts to it.
         if self.is_hidden(player) {
             return Ok(());
@@ -1619,6 +1665,9 @@ impl Game {
             None,
             events,
         );
+        if trial {
+            self.begin_trial(player, at, events);
+        }
         Ok(())
     }
 
@@ -1715,8 +1764,11 @@ impl Game {
         intent: Intent,
         events: &mut Vec<Event>,
     ) -> Result<(), RuleError> {
-        let battle = matches!(self.windows[i].kind, WindowKind::Battle { .. });
         let tribute = matches!(self.windows[i].kind, WindowKind::Tribute { .. });
+        let battle = matches!(
+            self.windows[i].kind,
+            WindowKind::Battle { .. } | WindowKind::Trial { .. }
+        );
         let choice = match intent {
             Intent::Pass => Choice::Pass,
             // Tribute: any card of one's hand, given, not played.
@@ -1839,6 +1891,13 @@ impl Game {
             if self.is_active(window.actor) {
                 self.turns[window.actor.0 as usize].move_points = 0;
             }
+        }
+        if let WindowKind::Trial { player, hex } = window.kind {
+            let burned = match window.choices.get(&player) {
+                Some(Choice::Burn(cards)) => cards.clone(),
+                _ => Vec::new(),
+            };
+            self.resolve_trial(player, hex, burned, events);
         }
         self.windows.remove(i);
     }
@@ -2476,6 +2535,7 @@ mod scenario;
 mod stealth;
 mod story;
 mod style;
+mod trial;
 mod victory;
 mod view;
 mod wish;
@@ -2488,6 +2548,7 @@ pub use scenario::{Scenario, SceneSeat, SceneWorld};
 pub use stealth::RevealReason;
 pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
+pub use trial::{Boon, TRIAL_ROUNDS, TRIALS_ON_BOARD, Trial, trial_face};
 pub use victory::{Check, CheckKind, Condition, OPEN_COUNT, REFUSAL_THREAT, SECRET_FROM_ROUND};
 pub use wish::{
     Act, Bet, FORESEE, MAX_ACTS, Price, Said, TRIBUTE_THREAT, Truce, WAGER_STAKE, Wager, Wish,

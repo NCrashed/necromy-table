@@ -2880,3 +2880,197 @@ fn foreseeing_shows_the_top_to_the_seer_only() {
     let for_foe = Game::event_for(&g.view_for(Some(foe), 1), Some(foe), seen).unwrap();
     assert!(matches!(for_foe, Event::Foreseen { cards, .. } if cards.is_empty()));
 }
+
+// ---- Trials (§20.2) ----
+
+/// A trial of `god` on `hex`, the hex made plain land of that god.
+fn trial_on(g: &mut Game, hex: Hex, god: God, boon: Boon) {
+    let tile = g.board.tile_mut(hex).unwrap();
+    tile.terrain = Terrain::Plains;
+    tile.region = Some(god);
+    g.trials.push(Trial {
+        id: 99,
+        hex,
+        god,
+        boon,
+        deadline: g.round() + TRIAL_ROUNDS,
+        tried: Vec::new(),
+    });
+}
+
+/// Enough copies of a card to burn one for every die `player` throws.
+fn burn_all(g: &mut Game, player: PlayerId, name: &str) -> Vec<CardId> {
+    let might = g.champion(player).unwrap().might;
+    (0..might).map(|_| g.give(player, name)).collect()
+}
+
+#[test]
+fn a_trial_stops_the_walker_and_asks_for_a_burn() {
+    let (mut g, me, _) = duel(3);
+    trial_on(&mut g, Hex::new(1, 0), God::Zaga, Boon::Style);
+    g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    assert_eq!(g.move_points(me), 0);
+    assert!(matches!(
+        g.to_answer(me).map(|w| w.kind),
+        Some(WindowKind::Trial { player, .. }) if player == me
+    ));
+    assert_eq!(g.battle_dice(me), Some(g.champion(me).unwrap().might));
+    assert_eq!(g.trial_at(Hex::new(1, 0)).unwrap().tried, vec![me]);
+}
+
+#[test]
+fn passing_a_trial_takes_it_and_gives_the_boon() {
+    let (mut g, me, _) = duel(3);
+    trial_on(&mut g, Hex::new(1, 0), God::Zaga, Boon::Style);
+    // Bodies burn for shields: Zaga's face.
+    let cards = burn_all(&mut g, me, "Упокоить");
+    g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    let before = g.style(me);
+    let events = g.apply(me, Intent::Burn { cards }).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::TrialPassed { got, need: 2, .. } if *got >= 2))
+    );
+    // No die left to throw.
+    assert!(!events.iter().any(|e| matches!(e, Event::DiceThrown { .. })));
+    assert!(g.trials().is_empty());
+    // Mid stage: 1 + 1.
+    assert_eq!(g.style(me), before + 2);
+}
+
+#[test]
+fn failing_a_trial_costs_its_price_and_leaves_it_for_others() {
+    let (mut g, me, _) = duel(3);
+    trial_on(&mut g, Hex::new(1, 0), God::Zaga, Boon::Style);
+    // Tricks burn for strikes: nothing Zaga counts.
+    let cards = burn_all(&mut g, me, "Искра");
+    g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    let events = g.apply(me, Intent::Burn { cards }).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::TrialFailed { got: 0, .. }))
+    );
+    // Zaga's price: the earth holds on.
+    assert!(g.champion(me).unwrap().rooted);
+    assert_eq!(g.trials().len(), 1);
+    // Once is all: the same champion walks over it freely now.
+    assert!(g.trial_for(me, Hex::new(1, 0)).is_none());
+}
+
+#[test]
+fn sun_counts_by_day_only_and_the_element_always() {
+    let (mut g, _, _) = duel(3);
+    trial_on(&mut g, Hex::new(1, 0), God::Trishna, Boon::Cards);
+    let trial = g.trial_at(Hex::new(1, 0)).unwrap().clone();
+    g.time = TimeOfDay::Day;
+    assert!(g.trial_counts(&trial, Face::Sun));
+    assert!(!g.trial_counts(&trial, Face::Strike));
+    g.time = TimeOfDay::Night;
+    assert!(!g.trial_counts(&trial, Face::Sun));
+    assert!(g.trial_counts(&trial, Face::Element));
+}
+
+#[test]
+fn a_trial_stage_sets_how_many_faces_it_asks() {
+    let (mut g, _, _) = duel(3);
+    trial_on(&mut g, Hex::new(1, 0), God::Maya, Boon::Cards);
+    trial_on(&mut g, Hex::new(2, 0), God::Ahamar, Boon::Cards);
+    let maya = g.trial_at(Hex::new(1, 0)).unwrap().clone();
+    let ahamar = g.trial_at(Hex::new(2, 0)).unwrap().clone();
+    g.pantheon.stages = [0; 5];
+    assert_eq!((g.trial_need(&maya), g.trial_need(&ahamar)), (1, 1));
+    g.pantheon.stages = [2; 5];
+    assert_eq!((g.trial_need(&maya), g.trial_need(&ahamar)), (3, 2));
+}
+
+#[test]
+fn no_path_runs_through_a_trial() {
+    let (mut g, me, _) = duel(4);
+    let trial = Hex::new(1, 0);
+    trial_on(&mut g, trial, God::Bhava, Boon::Cards);
+    assert!(g.reachable(me).contains_key(&trial));
+    for hex in g.reachable(me).into_keys() {
+        let path = g.path_to(me, hex).unwrap();
+        assert!(
+            !path[..path.len() - 1].contains(&trial),
+            "{hex:?} via the trial"
+        );
+    }
+}
+
+#[test]
+fn the_gods_keep_trials_on_the_board_and_let_old_ones_fade() {
+    let (mut g, _) = Game::new(five());
+    let mut events = Vec::new();
+    g.trials_at_dusk(&mut events);
+    assert_eq!(g.trials().len(), TRIALS_ON_BOARD);
+    for t in g.trials() {
+        let tile = g.board.tile(t.hex).unwrap();
+        assert_eq!(tile.region, Some(t.god));
+        assert!(
+            g.players()
+                .all(|p| g.champion(p).unwrap().hex.unsigned_distance_to(t.hex) >= 2)
+        );
+    }
+    let old: Vec<Hex> = g.trials().iter().map(|t| t.hex).collect();
+    g.round += TRIAL_ROUNDS;
+    let mut events = Vec::new();
+    g.trials_at_dusk(&mut events);
+    let faded = events
+        .iter()
+        .filter(|e| matches!(e, Event::TrialFaded { .. }))
+        .count();
+    assert_eq!(faded, old.len());
+    assert_eq!(g.trials().len(), TRIALS_ON_BOARD);
+}
+
+#[test]
+fn passing_the_trial_of_a_line_closes_it() {
+    let (mut g, me, _) = duel(3);
+    trial_on(&mut g, Hex::new(1, 0), God::Zaga, Boon::Favour);
+    g.lines.push(Line {
+        id: 7,
+        owner: me,
+        god: God::Zaga,
+        kind: LineKind::Ordeal,
+        goal: Goal::PassTrial(Hex::new(1, 0)),
+        deadline: g.round() + 4,
+        style: 3,
+        stake: 0,
+    });
+    let cards = burn_all(&mut g, me, "Упокоить");
+    g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    let events = g.apply(me, Intent::Burn { cards }).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::LineDone { line } if line.id == 7))
+    );
+}
+
+#[test]
+fn bots_try_trials() {
+    let mut tried = 0;
+    for seed in 0..30 {
+        let (mut g, _) = Game::new(Setup {
+            seed,
+            champions: God::ALL.to_vec(),
+        });
+        for _ in 0..1500 {
+            if g.winner().is_some() {
+                break;
+            }
+            let p = g.awaiting()[0];
+            let intent = crate::bot::choose(&g, p);
+            g.apply(p, intent).unwrap();
+        }
+        tried += g
+            .log()
+            .iter()
+            .filter(|e| matches!(e, Event::TrialPassed { .. } | Event::TrialFailed { .. }))
+            .count();
+    }
+    assert!(tried > 0, "no bot ever tried a trial");
+}

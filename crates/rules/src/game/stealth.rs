@@ -30,6 +30,8 @@ pub enum RevealReason {
     Dawn,
     /// Someone walked into them.
     Stumbled,
+    /// They stepped onto a trial: the gods watch it in the open.
+    Trial,
 }
 
 impl Terrain {

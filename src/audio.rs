@@ -831,6 +831,11 @@ fn hear_events(
             Event::PoisonBit { player, .. } => (Sound::new("poison-bite"), by(*player)),
             Event::PoisonFed { player, .. } => (Sound::new("poison-fed"), by(*player)),
             Event::PoisonCured { player, .. } => (Sound::new("poison-cured"), by(*player)),
+            // Trials borrow what fits until they have their own.
+            Event::TrialSet { trial } => (Sound::new("offer").at(0.6), Heard::At(trial.hex)),
+            Event::TrialBegun { player, .. } => (Sound::new("chain"), by(*player)),
+            Event::TrialPassed { player, .. } => (Sound::new("wish-granted"), by(*player)),
+            Event::TrialFailed { player, .. } => (Sound::new("curse-bit"), by(*player)),
             Event::Hasted { player, .. } => (Sound::new("haste"), by(*player)),
             Event::Blinked { player, .. } => (Sound::new("blink"), by(*player)),
             Event::TrapSet { player, .. } => (Sound::new("trap-set"), by(*player)),

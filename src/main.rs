@@ -24,6 +24,7 @@ mod ring_ui;
 mod stats;
 mod story_ui;
 mod token;
+mod trial_ui;
 mod turn_ui;
 mod tutorial;
 mod ui_skin;
@@ -76,6 +77,7 @@ fn main() {
         .add_plugins((
             stats::StatsPlugin,
             battle_ui::BattleUiPlugin,
+            trial_ui::TrialUiPlugin,
             fight::FightPlugin,
             turn_ui::TurnUiPlugin,
             victory_ui::VictoryUiPlugin,
@@ -237,6 +239,18 @@ fn auto_screenshot(
                 && game.incoming_result.is_none()
                 && game.told.is_none()
                 && !dice.busy()
+        }
+        // Trials on the board, nothing over it: their stones and faces.
+        (Some("trials"), Some(game)) => {
+            !game.game.trials().is_empty()
+                && game.trial.is_none()
+                && game.battle.is_none()
+                && game.told.is_none()
+                && !dice.busy()
+        }
+        // A trial's result on its panel, the dice down (§20.2).
+        (Some("trial"), Some(game)) => {
+            game.trial.as_ref().is_some_and(|t| t.result.is_some()) && dice.settled()
         }
         // The human is poisoned: the drop on their sheet.
         (Some("poison"), Some(game)) => game

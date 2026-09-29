@@ -57,6 +57,7 @@ fn respond(game: &Game, player: PlayerId, kind: WindowKind) -> Intent {
                 return play(card, Target::None);
             }
         }
+        WindowKind::Trial { .. } => return burn_for_trial(game, player),
         _ => {}
     }
     Intent::Pass
@@ -131,6 +132,27 @@ fn burn(game: &Game, player: PlayerId) -> Intent {
     } else {
         Vec::new()
     };
+    Intent::Burn { cards }
+}
+
+/// Burn cards whose faces count for the trial, up to what it asks,
+/// keeping two in hand.
+fn burn_for_trial(game: &Game, player: PlayerId) -> Intent {
+    let Some(trial) = game.trial_of(player) else {
+        return Intent::Burn { cards: Vec::new() };
+    };
+    let need = game.trial_need(trial) as usize;
+    let hand = game.hand(player);
+    let spare = hand
+        .len()
+        .saturating_sub(2)
+        .min(game.battle_dice(player).unwrap_or(0) as usize);
+    let cards: Vec<CardId> = hand
+        .iter()
+        .copied()
+        .filter(|&c| game.trial_counts(trial, game.def(c).burn_face()))
+        .take(need.min(spare))
+        .collect();
     Intent::Burn { cards }
 }
 
@@ -237,9 +259,19 @@ fn walk(game: &Game, player: PlayerId) -> Intent {
     let target = game
         .lines_of(player)
         .find_map(|l| match l.goal {
-            // A pilgrimage beats any corpse.
+            // A pilgrimage or a trial of our own beats any corpse.
             Goal::ReachHex(hex) => Some(hex),
+            Goal::PassTrial(hex) if game.trial_for(player, hex).is_some() => Some(hex),
             _ => None,
+        })
+        // A trial close by, when healthy enough to risk its price.
+        .or_else(|| {
+            game.trials()
+                .iter()
+                .map(|t| t.hex)
+                .filter(|&hex| game.trial_for(player, hex).is_some())
+                .filter(|&hex| me.hex.unsigned_distance_to(hex) <= 3 && me.hp * 2 > me.body)
+                .min_by_key(|&hex| (me.hex.unsigned_distance_to(hex), hex.x(), hex.y()))
         })
         .or_else(|| {
             game.board()

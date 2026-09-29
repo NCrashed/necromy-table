@@ -40,6 +40,8 @@ pub enum LineKind {
     QuietCrown,
     /// Ahamar's trial for a bored Dominant: prove the Crown in battle.
     Trial,
+    /// Pass a trial a god set near the one lagging (§20.2).
+    Ordeal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,6 +58,8 @@ pub enum Goal {
     Body,
     /// Stay out of battles until the deadline.
     AvoidBattle,
+    /// Pass the trial on this hex.
+    PassTrial(Hex),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,6 +146,19 @@ impl Game {
             for id in broken {
                 self.finish_line(id, false, events);
             }
+        }
+    }
+
+    /// A trial passed may close a line that asked for it.
+    pub(super) fn story_trial(&mut self, player: PlayerId, hex: Hex, events: &mut Vec<Event>) {
+        let done: Vec<u32> = self
+            .lines
+            .iter()
+            .filter(|l| l.owner == player && l.goal == Goal::PassTrial(hex))
+            .map(|l| l.id)
+            .collect();
+        for id in done {
+            self.finish_line(id, true, events);
         }
     }
 
@@ -282,6 +299,7 @@ impl Game {
             LineKind::Spoils,
             LineKind::NewLand,
             LineKind::TheDeadCall,
+            LineKind::Ordeal,
         ]
         .into_iter()
         .filter(|k| !taken.contains(k))
@@ -289,6 +307,16 @@ impl Game {
         let Some(&kind) = self.rng.pick(&choices) else {
             return;
         };
+        // A trial within reach, set for them by the god of its land.
+        if kind == LineKind::Ordeal {
+            let at = self.hex_of(p);
+            if let Some(hex) = self.trial_spot(Some((at, 2, 4)))
+                && let Some(god) = self.set_trial(hex, events)
+            {
+                self.tell(p, god, kind, Goal::PassTrial(hex), 3, 0, events);
+            }
+            return;
+        }
         // The god whose favour the player most lacks calls them.
         let god = *God::ALL
             .iter()

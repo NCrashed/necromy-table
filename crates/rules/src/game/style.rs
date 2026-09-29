@@ -137,6 +137,8 @@ pub enum StyleReason {
     Wish,
     /// A story line done or failed (§8).
     Story,
+    /// A trial passed or failed (§20.2).
+    Trial,
 }
 
 /// Threat at which the royal guard comes out (§6.5).

@@ -13,7 +13,8 @@
 //! should be; the camera eases towards it every frame.
 //!
 //! Dev aid: `NECROMY_CAMERA=overview` starts over the whole board, as the
-//! old fixed camera did (handy for screenshots).
+//! old fixed camera did (handy for screenshots); `=hover` looks at the
+//! pinned `NECROMY_HOVER` hex.
 
 use std::f32::consts::{FRAC_PI_3, TAU};
 
@@ -231,7 +232,21 @@ fn steer(
 }
 
 /// While following, the focus rides on the human's champion.
-fn follow(game: Res<Match>, tokens: Query<(&Token, &Transform)>, mut rig: ResMut<Rig>) {
+fn follow(
+    game: Res<Match>,
+    tokens: Query<(&Token, &Transform)>,
+    hovered: Res<crate::board::Hovered>,
+    board: Res<Board>,
+    mut rig: ResMut<Rig>,
+) {
+    // Dev aid: `NECROMY_CAMERA=hover` looks at the pinned `NECROMY_HOVER`
+    // hex instead (a trial, the guard), for screenshots.
+    if std::env::var("NECROMY_CAMERA").is_ok_and(|v| v == "hover")
+        && let Some(hex) = hovered.0
+    {
+        rig.focus = board.hex_to_world(hex).with_y(0.0);
+        return;
+    }
     if !rig.following {
         return;
     }

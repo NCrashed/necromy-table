@@ -142,6 +142,7 @@ pub fn style_reason(reason: necromy_rules::StyleReason) -> &'static str {
         StyleReason::Oath => "нарушенная клятва",
         StyleReason::Wish => "оценку желания",
         StyleReason::Story => "сюжет",
+        StyleReason::Trial => "испытание",
     }
 }
 
@@ -371,6 +372,7 @@ pub fn line_title(kind: necromy_rules::LineKind) -> &'static str {
         LineKind::TheDeadCall => "Мёртвые зовут",
         LineKind::QuietCrown => "Тихий Венец",
         LineKind::Trial => "Испытание Венца",
+        LineKind::Ordeal => "Испытание бога",
     }
 }
 
@@ -384,6 +386,7 @@ pub fn line_voice(kind: necromy_rules::LineKind) -> &'static str {
         LineKind::TheDeadCall => "Мёртвые ждут, что ты с ними сделаешь.",
         LineKind::QuietCrown => "Ставка: удержи Венец до срока, не обнажая меча.",
         LineKind::Trial => "Докажи, что Венец твой: выиграй бой до срока.",
+        LineKind::Ordeal => "Я поставил тебе испытание рядом. Выстоишь — запомню.",
     }
 }
 
@@ -410,6 +413,7 @@ pub fn line_goal(line: &necromy_rules::Line, g: &necromy_rules::Game) -> String 
         Goal::Claim => "займи поселение или храм".into(),
         Goal::Body => "сыграй карту на тело".into(),
         Goal::AvoidBattle => "не участвуй в боях".into(),
+        Goal::PassTrial(_) => "пройди испытание (подсвечено)".into(),
     }
 }
 
@@ -444,6 +448,7 @@ pub fn reveal(why: necromy_rules::RevealReason) -> &'static str {
         Guard => "мимо прошла гвардия",
         Dawn => "рассвет в чистом поле",
         Stumbled => "на него наткнулись",
+        Trial => "вышел на испытание",
     }
 }
 
@@ -563,5 +568,60 @@ pub fn bet(bet: necromy_rules::Bet) -> &'static str {
         Bet::Claim => "займёт поселение или храм",
         Bet::Fall => "падёт",
         Bet::Hide => "скроется",
+    }
+}
+
+/// "испытание тишины": each god's trial, by what it tests (§20.2).
+pub fn trial_name(god: God) -> &'static str {
+    match god {
+        God::Bhava => "испытание чащи",
+        God::Trishna => "испытание пира",
+        God::Zaga => "испытание тишины",
+        God::Ahamar => "испытание реестра",
+        God::Maya => "испытание тумана",
+    }
+}
+
+/// What a trial asks: "2 × щит; стихия идёт в зачёт".
+pub fn trial_ask(g: &necromy_rules::Game, trial: &necromy_rules::Trial) -> String {
+    use necromy_rules::Face;
+    let face = trial.face();
+    let when = match face {
+        Face::Sun => " (только днём)",
+        Face::Moon => " (только ночью)",
+        _ => "",
+    };
+    let wild = if face == Face::Element {
+        ""
+    } else {
+        "; стихия идёт в зачёт"
+    };
+    format!("{} × {}{when}{wild}", g.trial_need(trial), self::face(face))
+}
+
+/// What passing the trial gives now.
+pub fn boon(g: &necromy_rules::Game, trial: &necromy_rules::Trial) -> String {
+    use necromy_rules::Boon;
+    let n = g.boon_amount(trial);
+    match trial.boon {
+        Boon::Style => format!("+{n} Стиля"),
+        Boon::Favour => format!("+{n} благосклонности {}", god_genitive(trial.god)),
+        Boon::Cards => format!("{n} карт(ы)"),
+        Boon::Mending => format!("+{n} здоровья, яд снят"),
+    }
+}
+
+/// What failing the trial costs; a god in its dark stage takes more.
+pub fn trial_price(g: &necromy_rules::Game, god: God) -> &'static str {
+    let dark = g.stage(god) >= 2;
+    match (god, dark) {
+        (God::Bhava, false) => "яд дерева ×2",
+        (God::Bhava, true) => "яд дерева ×3",
+        (God::Trishna, false) => "−1 здоровья",
+        (God::Trishna, true) => "−2 здоровья",
+        (God::Zaga, _) => "скован на следующий ход",
+        (God::Ahamar, false) => "−1 Стиля",
+        (God::Ahamar, true) => "−2 Стиля",
+        (God::Maya, _) => "весь Дух",
     }
 }

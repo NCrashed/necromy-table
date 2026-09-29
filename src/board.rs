@@ -194,6 +194,10 @@ struct MarkerSprites {
     trails: [Handle<Image>; 5],
     /// Over the goal of the human's quest (§8).
     quest: Handle<Image>,
+    /// A trial (§20.2), per god: a rune circle on the ground in its colour,
+    /// and the die face it asks for, framed in that colour, floating above.
+    trial_rings: [Handle<Image>; 5],
+    trial_faces: [Handle<Image>; 5],
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -356,6 +360,8 @@ fn spawn_board(
         flags: God::ALL.map(|g| images.add(pixel_sprite(&FLAG_ROWS, g.accent()))),
         trails: God::ALL.map(|g| images.add(pixel_sprite(&TRAIL_ROWS, g.accent()))),
         quest: images.add(pixel_sprite(&QUEST_ROWS, [250, 214, 120])),
+        trial_rings: God::ALL.map(|g| images.add(rune_ring(g.accent()))),
+        trial_faces: God::ALL.map(|g| images.add(trial_badge(g))),
     });
 }
 
@@ -421,7 +427,7 @@ fn sync_tiles(
         .game
         .lines_of(game.human)
         .filter_map(|l| match l.goal {
-            necromy_rules::Goal::ReachHex(h) => Some(h),
+            necromy_rules::Goal::ReachHex(h) | necromy_rules::Goal::PassTrial(h) => Some(h),
             _ => None,
         })
         .chain(focus.hexes.iter().copied())
@@ -555,7 +561,7 @@ fn sync_markers(
         .game
         .lines_of(game.human)
         .filter_map(|l| match l.goal {
-            necromy_rules::Goal::ReachHex(h) => Some(h),
+            necromy_rules::Goal::ReachHex(h) | necromy_rules::Goal::PassTrial(h) => Some(h),
             _ => None,
         })
         .chain(focus.hexes.iter().copied())
@@ -569,12 +575,38 @@ fn sync_markers(
             )
         })
         .collect();
+    // Trials: the god's stone, and the face it asks for above it.
+    let trial_marks: Vec<_> = game
+        .game
+        .trials()
+        .iter()
+        .flat_map(|t| {
+            let g = t.god.index();
+            [
+                (
+                    t.hex,
+                    sprites.trial_rings[g].clone(),
+                    Vec3::ZERO,
+                    TEXELS,
+                    true,
+                ),
+                (
+                    t.hex,
+                    sprites.trial_faces[g].clone(),
+                    Vec3::new(0.0, 0.95, 0.0),
+                    TEXELS,
+                    false,
+                ),
+            ]
+        })
+        .collect();
     let trails = trails.map(|(h, i, o, ppm)| (h, i, o, ppm, false));
     let wanted: Vec<_> = corpses
         .chain(traps)
         .chain(flags)
         .chain(trails)
         .chain(quest_marks)
+        .chain(trial_marks)
         .collect();
     // Despawning and respawning everything would blink every marker for a
     // frame (this runs on each hover): keep what is still wanted.
@@ -885,10 +917,20 @@ fn track_hover(
 ) {
     let (camera, transform) = *camera;
     // Dev aid: `NECROMY_HOVER=q,r` pins the hover for screenshots.
-    // `NECROMY_HOVER=guard` follows the royal guard.
+    // `NECROMY_HOVER=guard` follows the royal guard, `=trial` the trial
+    // nearest the human.
     let pinned = std::env::var("NECROMY_HOVER").ok().and_then(|s| {
         if s == "guard" {
             return game.game.guard().map(|g| g.hex);
+        }
+        if s == "trial" {
+            let me = game.game.champion(game.human)?.hex;
+            return game
+                .game
+                .trials()
+                .iter()
+                .map(|t| t.hex)
+                .min_by_key(|h| (me.unsigned_distance_to(*h), h.x(), h.y()));
         }
         let (q, r) = s.split_once(',')?;
         Some(Hex::new(q.trim().parse().ok()?, r.trim().parse().ok()?))
@@ -953,4 +995,82 @@ fn sync_ground(
         // `turn_flats` places it anew.
         flat.offset = shift;
     }
+}
+
+/// A circle of runes on the ground in a god's colour: a trial stands here
+/// (§20.2). Drawn from above, like bodies and traps.
+fn rune_ring(color: [u8; 3]) -> Image {
+    const N: u32 = 44;
+    let mut image = Image::new_fill(
+        Extent3d {
+            width: N,
+            height: N,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0, 0, 0, 0],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    let light = color.map(|c| (c as u16 + (255 - c as u16) / 2) as u8);
+    let data = image.data.as_mut().expect("new_fill allocates pixel data");
+    let c = (N as f32 - 1.0) / 2.0;
+    for y in 0..N {
+        for x in 0..N {
+            let (dx, dy) = (x as f32 - c, y as f32 - c);
+            let r = (dx * dx + dy * dy).sqrt();
+            // Five runes on the ring, one for each god, the ink rim around.
+            let angle = dy.atan2(dx).rem_euclid(std::f32::consts::TAU);
+            let rune = (angle / std::f32::consts::TAU * 5.0).fract();
+            let px = if (19.5..21.5).contains(&r) {
+                [light[0], light[1], light[2], 255]
+            } else if (21.5..22.5).contains(&r) || (18.5..19.5).contains(&r) {
+                [20, 16, 24, 255]
+            } else if (14.5..17.5).contains(&r) && (0.42..0.58).contains(&rune) {
+                [245, 240, 225, 255]
+            } else {
+                continue;
+            };
+            let i = ((y * N + x) * 4) as usize;
+            data[i..i + 4].copy_from_slice(&px);
+        }
+    }
+    image
+}
+
+/// The die face a god's trials ask for, in a frame of the god's colour.
+fn trial_badge(god: God) -> Image {
+    const N: u32 = 20;
+    let face = crate::dice::face_icon(necromy_rules::trial_face(god));
+    let [r, g, b] = god.accent();
+    let mut image = Image::new_fill(
+        Extent3d {
+            width: N,
+            height: N,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[r, g, b, 255],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    let data = image.data.as_mut().expect("new_fill allocates pixel data");
+    // An ink rim outside the colour.
+    for y in 0..N {
+        for x in 0..N {
+            if x == 0 || y == 0 || x == N - 1 || y == N - 1 {
+                let i = ((y * N + x) * 4) as usize;
+                data[i..i + 4].copy_from_slice(&[20, 16, 24, 255]);
+            }
+        }
+    }
+    let src = face.data.as_ref().expect("face icons have pixel data");
+    for y in 0..16 {
+        for x in 0..16 {
+            let s = ((y * 16 + x) * 4) as usize;
+            let d = (((y + 2) * N + x + 2) * 4) as usize;
+            data[d..d + 4].copy_from_slice(&src[s..s + 4]);
+        }
+    }
+    image
 }

@@ -75,9 +75,13 @@ impl Game {
         c.might + u8::from(high_ground) + u8::from(ambush)
     }
 
-    /// Dice `player` throws in an open Battle window, if they are in one.
+    /// Dice `player` throws in an open Battle or Trial window, if they are
+    /// in one: the most cards they may burn.
     pub fn battle_dice(&self, player: PlayerId) -> Option<u8> {
         self.windows.iter().find_map(|w| match w.kind {
+            WindowKind::Trial { player: p, .. } if p == player => {
+                Some(self.champions[player.0 as usize].might)
+            }
             WindowKind::Battle { attacker, .. } if attacker == player => {
                 Some(self.dice_for(player, false))
             }
@@ -226,6 +230,20 @@ impl Game {
         &mut self,
         fighter: Fighter,
         defending: bool,
+        count: u8,
+        faces: Vec<Face>,
+        events: &mut Vec<Event>,
+    ) -> Vec<Face> {
+        let label = [BATTLE_STREAM, self.battles, u64::from(defending)];
+        self.roll_with(fighter, &label, count, faces, events)
+    }
+
+    /// Throws seeded from the match seed under `label`, one more seed per
+    /// explosion depth.
+    pub(super) fn roll_with(
+        &mut self,
+        fighter: Fighter,
+        label: &[u64],
         mut count: u8,
         mut faces: Vec<Face>,
         events: &mut Vec<Event>,
@@ -234,11 +252,9 @@ impl Game {
             if count == 0 {
                 break;
             }
-            let seed = Rng::derived(
-                self.seed,
-                &[BATTLE_STREAM, self.battles, u64::from(defending), depth],
-            )
-            .next_u64();
+            let mut key = label.to_vec();
+            key.push(depth);
+            let seed = Rng::derived(self.seed, &key).next_u64();
             let throw = necromy_dice::throw(seed, count);
             events.push(Event::DiceThrown {
                 fighter,
