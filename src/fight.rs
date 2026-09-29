@@ -224,6 +224,30 @@ fn exists_then_load(assets: &AssetServer, path: &'static str) -> Option<Handle<I
         .then(|| assets.load(path))
 }
 
+/// The lowest row of opaque pixels in a cell, if any.
+fn lowest(image: &Image, row: usize, col: usize) -> Option<usize> {
+    let data = image.data.as_ref()?;
+    let width = image.width() as usize;
+    (0..CELL as usize).rev().find(|&y| {
+        (0..CELL as usize).any(|x| {
+            let (px, py) = (col * CELL as usize + x, row * CELL as usize + y);
+            data.get((py * width + px) * 4 + 3).is_some_and(|&a| a > 0)
+        })
+    })
+}
+
+/// For each frame of the death row, how many sheet pixels its lowest point
+/// sits above the feet of the first frame: the fall should end on the
+/// ground, not float where the generator centred the body.
+fn death_drops(image: &Image) -> Vec<f32> {
+    let Some(feet) = lowest(image, ROW_DEATH, 0) else {
+        return Vec::new();
+    };
+    (0..frames_in_row(image, ROW_DEATH))
+        .map(|col| lowest(image, ROW_DEATH, col).map_or(0.0, |y| feet.saturating_sub(y) as f32))
+        .collect()
+}
+
 /// Frames in a row of a sheet: cells from the left until an empty one.
 fn frames_in_row(image: &Image, row: usize) -> usize {
     let Some(data) = image.data.as_ref() else {
@@ -395,6 +419,7 @@ fn pose(
     images: Res<Assets<Image>>,
     mut fighters: Query<(&Fighter, &mut ImageNode, &mut UiTransform)>,
     mut counts: Local<HashMap<AssetId<Image>, [usize; FIGHT_ROWS as usize]>>,
+    mut drops: Local<HashMap<AssetId<Image>, Vec<f32>>>,
 ) {
     let Some(battle) = game.battle.as_ref() else {
         return;
@@ -517,7 +542,16 @@ fn pose(
             }
             _ => (0.0, Color::WHITE),
         };
-        let translation = Val2::px(dx, 0.0);
+        // A falling body drawn higher than the feet it fell from (the sheets
+        // keep it centred) is lowered back onto the ground.
+        let dy = match (fight_frame, &fight_sheet) {
+            (Some((ROW_DEATH, f)), Some(h)) => images.get(h).map_or(0.0, |sheet| {
+                let per_frame = drops.entry(h.id()).or_insert_with(|| death_drops(sheet));
+                per_frame.get(f).copied().unwrap_or(0.0) * FIGHTER / CELL as f32
+            }),
+            _ => 0.0,
+        };
+        let translation = Val2::px(dx, dy);
         if transform.translation != translation {
             transform.translation = translation;
         }

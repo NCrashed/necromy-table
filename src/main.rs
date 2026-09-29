@@ -277,9 +277,13 @@ fn auto_screenshot(
     if ready && shot.ready_at.is_none() {
         shot.ready_at = Some(now);
     }
-    let settled = shot
-        .ready_at
-        .is_some_and(|at| now - at >= SCREENSHOT_SETTLE_SECS);
+    // `NECROMY_SCREENSHOT_SETTLE=S` waits longer after the moment (the end of
+    // a death animation, say).
+    let settle = std::env::var("NECROMY_SCREENSHOT_SETTLE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(SCREENSHOT_SETTLE_SECS);
+    let settled = shot.ready_at.is_some_and(|at| now - at >= settle);
     match shot.taken_at {
         None if settled => {
             commands
