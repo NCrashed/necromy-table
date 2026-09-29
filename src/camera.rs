@@ -264,8 +264,10 @@ fn follow(
     mut rig: ResMut<Rig>,
 ) {
     // Dev aid: `NECROMY_CAMERA=hover` looks at the pinned `NECROMY_HOVER`
-    // hex instead (a trial, the guard), for screenshots.
+    // hex instead (a trial, the guard), for screenshots. Only a pinned one:
+    // chasing the mouse's own hex would drag the camera to the board's edge.
     if std::env::var("NECROMY_CAMERA").is_ok_and(|v| v == "hover")
+        && std::env::var_os("NECROMY_HOVER").is_some()
         && let Some(hex) = hovered.0
     {
         rig.focus = board.hex_to_world(hex).with_y(0.0);
