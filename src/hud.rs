@@ -517,6 +517,21 @@ fn tooltip(
     if let Some(p) = g.occupant(hex) {
         lines.push(format!("здесь: {}", game.name(p)));
     }
+    if let Some(u) = g.undead_at(hex) {
+        lines.push(format!(
+            "неупокоенный: {}/{} здоровья, бросает {} кубика",
+            u.hp,
+            necromy_rules::UNDEAD_HEALTH,
+            necromy_rules::UNDEAD_DICE
+        ));
+    }
+    if let Some(m) = g.militia(hex) {
+        lines.push(format!(
+            "ополчение: {m}/{} · к тебе: {}",
+            necromy_rules::MILITIA,
+            names::standing(g.standing(game.human))
+        ));
+    }
     if g.guard().is_some_and(|guard| guard.hex == hex) {
         let hp = g.guard().map_or(0, |guard| guard.hp);
         lines.push(format!(

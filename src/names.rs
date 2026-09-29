@@ -731,3 +731,14 @@ pub fn item_tip(
 fn god_name(god: God) -> &'static str {
     self::god(god)
 }
+
+/// What the militia think of a champion, in a word (§20.4).
+pub fn standing(standing: i8) -> &'static str {
+    match standing {
+        s if s >= necromy_rules::FRIENDLY => "друзья: лечат в поселениях",
+        s if s <= necromy_rules::HOSTILE => "враги: не дают занять, гонят",
+        s if s > 0 => "расположены",
+        s if s < 0 => "насторожены",
+        _ => "равнодушны",
+    }
+}

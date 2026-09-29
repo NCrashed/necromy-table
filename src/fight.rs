@@ -429,7 +429,12 @@ fn pose(
     let blows = blows(battle);
     for (fighter, mut image, mut transform) in &mut fighters {
         let side = fighter.0;
-        let who = battle.sides[side];
+        let who = battle.champion(side);
+        // An undead stands still in its one picture (§20.4).
+        let undead = match battle.sides[side] {
+            necromy_rules::Fighter::Undead(id) => Some(id),
+            _ => None,
+        };
         let god = who
             .and_then(|p: PlayerId| game.game.champion(p))
             .map(|c| c.god);
@@ -438,8 +443,10 @@ fn pose(
 
         // The frame: from the fight sheet when there is one, else idle.
         // No champion on this side: the royal guard.
-        let guard = who.is_none();
-        let fight_sheet = if guard {
+        let guard = matches!(battle.sides[side], necromy_rules::Fighter::Guard);
+        let fight_sheet = if undead.is_some() {
+            None
+        } else if guard {
             art.guard_fight.clone()
         } else {
             god.and_then(|g| art.fight[g.index()].clone())
@@ -467,7 +474,9 @@ fn pose(
             Act::Death { t } => row_frame(ROW_DEATH, t, true),
             Act::Idle | Act::Block { .. } => None,
         };
-        let idle_sheet = if guard {
+        let idle_sheet = if undead.is_some() {
+            None
+        } else if guard {
             art.guard_idle.clone()
         } else {
             god.and_then(|g| art.idle[g.index()].clone())
@@ -491,7 +500,10 @@ fn pose(
                 )
             }
             // The royal guard, or a god without a sheet.
-            _ => (stats.guard.clone(), None),
+            _ => match undead {
+                Some(id) => (stats.undead[id as usize % stats.undead.len()].clone(), None),
+                None => (stats.guard.clone(), None),
+            },
         };
         if image.image != new_image {
             image.image = new_image;

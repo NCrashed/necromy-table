@@ -63,6 +63,9 @@ pub struct StatArt {
     pub portraits: Vec<Handle<Image>>,
     /// The royal guard's sprite.
     pub guard: Handle<Image>,
+    /// The undead, by variant, and the militia's men (§20.4).
+    pub undead: Vec<Handle<Image>>,
+    pub militia: Vec<Handle<Image>>,
     /// Die faces as icons.
     pub faces: HashMap<necromy_rules::Face, Handle<Image>>,
     /// Element icons per god (`God::index`).
@@ -145,6 +148,12 @@ fn make_art(
     let gods = God::ALL.map(|g| images.add(icons::element_icon(g.element(), g.accent())));
     let offering = images.add(icons::offering_icon());
     // The guard's bust (`scripts/portraits.sh`), else the placeholder.
+    let undead = (1..=6)
+        .map(|n| assets.load(format!("sprites/undead-{n}.png")))
+        .collect();
+    let militia = (1..=4)
+        .map(|n| assets.load(format!("sprites/militia-{n}.png")))
+        .collect();
     let guard = if std::path::Path::new("assets/portraits/guard.png").exists() {
         assets.load("portraits/guard.png")
     } else {
@@ -169,6 +178,8 @@ fn make_art(
         gods,
         offering,
         items,
+        undead,
+        militia,
         guard,
         faces,
     });
@@ -535,6 +546,19 @@ fn stat_sheet(
             commands.entity(r).add_children(&[i, t]);
         }
         rows.push(r);
+    }
+
+    // What the militia think of them (§20.4), once they think anything.
+    let standing = g.standing(player);
+    if standing != 0 {
+        let line = label(
+            commands,
+            font,
+            &format!("ополчение: {standing:+} ({})", names::standing(standing)),
+            12.0,
+            false,
+        );
+        rows.push(line);
     }
 
     // Worn items (§20.3): slots with a tooltip on the human's own sheet;

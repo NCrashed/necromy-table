@@ -35,7 +35,7 @@ impl Game {
         if me.hex.unsigned_distance_to(to) != 1 {
             return Err(RuleError::NotAdjacent);
         }
-        if !self.guard_at(to) && self.occupant(to).is_none_or(|p| p == player) {
+        if !self.mob_at(to) && self.occupant(to).is_none_or(|p| p == player) {
             return Err(RuleError::InvalidTarget);
         }
         let cost = self.terrain_cost(player, tile.terrain);
@@ -79,7 +79,9 @@ impl Game {
     /// in one: the most cards they may burn.
     pub fn battle_dice(&self, player: PlayerId) -> Option<u8> {
         self.windows.iter().find_map(|w| match w.kind {
-            WindowKind::GuardBattle { attacker } if attacker == player => {
+            WindowKind::GuardBattle { attacker } | WindowKind::UndeadBattle { attacker, .. }
+                if attacker == player =>
+            {
                 Some(self.dice_for(player, false))
             }
             WindowKind::Trial { player: p, .. } if p == player => {

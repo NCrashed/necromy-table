@@ -3060,6 +3060,7 @@ fn bots_try_trials() {
     let mut tried = 0;
     let mut gained = 0;
     let mut fought_guard = 0;
+    let mut risen = 0;
     for seed in 0..30 {
         let (mut g, _) = Game::new(Setup {
             seed,
@@ -3083,6 +3084,11 @@ fn bots_try_trials() {
             .iter()
             .filter(|e| matches!(e, Event::ItemGained { .. }))
             .count();
+        risen += g
+            .log()
+            .iter()
+            .filter(|e| matches!(e, Event::UndeadRose { .. }))
+            .count();
         fought_guard += g
             .log()
             .iter()
@@ -3092,6 +3098,7 @@ fn bots_try_trials() {
     assert!(tried > 0, "no bot ever tried a trial");
     assert!(gained > 0, "no bot ever gained an item");
     assert!(fought_guard > 0, "no bot ever fought the guard");
+    assert!(risen > 0, "no dead ever rose");
 }
 
 #[test]
@@ -3422,4 +3429,215 @@ fn the_guard_keeps_its_wounds() {
         .sum();
     let left = g.guard().map_or(0, |g| g.hp);
     assert_eq!(left + taken, GUARD_HEALTH);
+}
+
+// ---- Mobs and factions (§20.4) ----
+
+fn undead_on(g: &mut Game, hex: Hex, hp: u8) -> u32 {
+    g.next_mob += 1;
+    let id = g.next_mob;
+    g.undead.push(Undead { id, hex, hp });
+    id
+}
+
+#[test]
+fn untended_bodies_rise_where_no_grove_grows() {
+    let (mut g, _, _) = duel(3);
+    let rock = Hex::new(0, 3);
+    let tile = g.board.tile_mut(rock).unwrap();
+    tile.terrain = Terrain::Mountain;
+    tile.region = Some(God::Ahamar);
+    tile.corpse = Some(Corpse { age: UNDEAD_AGE });
+    let meadow = Hex::new(3, -3);
+    let tile = g.board.tile_mut(meadow).unwrap();
+    tile.terrain = Terrain::Plains;
+    tile.region = Some(God::Maya);
+    tile.corpse = Some(Corpse {
+        age: UNDEAD_AGE_DARK,
+    });
+    let mut events = Vec::new();
+    g.raise_dead(&mut events);
+    assert_eq!(g.undead().len(), 1, "a meadow body waits for its grove");
+    assert_eq!(g.undead()[0].hex, rock);
+    // In the land of a dark Maya the dead rise sooner, anywhere.
+    g.pantheon.stages[God::Maya.index()] = 2;
+    g.raise_dead(&mut events);
+    assert!(g.undead_at(meadow).is_some());
+}
+
+#[test]
+fn militia_cut_down_the_undead_and_refill_at_dawn() {
+    let (mut g, _, _) = duel(3);
+    let town = g
+        .militia
+        .keys()
+        .next()
+        .map(|&(x, y)| Hex::new(x, y))
+        .unwrap();
+    let gate = town
+        .all_neighbors()
+        .into_iter()
+        .find(|&h| g.board.contains(h) && g.champion_at(h).is_none())
+        .unwrap();
+    undead_on(&mut g, gate, UNDEAD_HEALTH);
+    let mut events = Vec::new();
+    g.mob_phase(&mut events);
+    assert!(g.undead().is_empty());
+    assert_eq!(g.militia(town), Some(MILITIA - 1));
+    g.militia_at_dawn();
+    assert_eq!(g.militia(town), Some(MILITIA));
+}
+
+#[test]
+fn the_undead_lay_an_undefended_settlement_waste() {
+    let (mut g, me, _) = duel(3);
+    // A settlement with no champion next to it: nobody to strike instead.
+    let town = g
+        .militia
+        .keys()
+        .map(|&(x, y)| Hex::new(x, y))
+        .find(|&t| {
+            g.players()
+                .all(|p| g.champion(p).unwrap().hex.unsigned_distance_to(t) > 1)
+        })
+        .unwrap();
+    g.militia.insert((town.x(), town.y()), 0);
+    g.claims.insert((town.x(), town.y()), me);
+    undead_on(&mut g, town, UNDEAD_HEALTH);
+    let mut events = Vec::new();
+    g.mob_phase(&mut events);
+    assert_eq!(g.board.tile(town).unwrap().terrain, Terrain::Ruins);
+    assert_eq!(g.militia(town), None);
+    assert_eq!(g.owner(town), None);
+}
+
+#[test]
+fn the_undead_walk_to_the_living_and_strike_them() {
+    let (mut g, me, _) = duel(3);
+    // Nobody's settlements near: only the champion draws them.
+    g.militia.clear();
+    let id = undead_on(&mut g, Hex::new(0, 3), UNDEAD_HEALTH);
+    let mut events = Vec::new();
+    g.mob_phase(&mut events);
+    let at = g.undead().iter().find(|u| u.id == id).unwrap().hex;
+    assert_eq!(at.unsigned_distance_to(Hex::new(0, 0)), 2);
+    g.undead.iter_mut().for_each(|u| u.hex = Hex::new(0, 1));
+    let mut events = Vec::new();
+    g.mob_phase(&mut events);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::UndeadStruck { target, .. } if *target == me))
+    );
+}
+
+#[test]
+fn a_champion_lays_the_undead_to_rest() {
+    let (mut g, me, _) = duel(3);
+    g.champ_mut(me).might = 5;
+    let hex = Hex::new(0, 1);
+    g.board.tile_mut(hex).unwrap().terrain = Terrain::Plains;
+    let id = undead_on(&mut g, hex, UNDEAD_HEALTH);
+    assert!(g.attackable(me).contains(&hex));
+    g.apply(me, Intent::Move { to: hex }).unwrap();
+    assert!(matches!(
+        g.to_answer(me).map(|w| w.kind),
+        Some(WindowKind::UndeadBattle { attacker, id: i }) if attacker == me && i == id
+    ));
+    let cards = burn_all(&mut g, me, "Искра");
+    let events = g.apply(me, Intent::Burn { cards }).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::UndeadFell { by, .. } if *by == me))
+    );
+    assert!(g.undead().is_empty());
+    assert_eq!(g.standing(me), 1);
+}
+
+#[test]
+fn the_militia_remember_what_is_done_near_them() {
+    let (mut g, me, _) = duel(3);
+    let town = g
+        .militia
+        .keys()
+        .next()
+        .map(|&(x, y)| Hex::new(x, y))
+        .unwrap();
+    // Laying the dead to rest by their gate wins them over.
+    g.place(me, town);
+    g.board.tile_mut(town).unwrap().corpse = Some(Corpse { age: 0 });
+    let rest = g.give(me, "Упокоить");
+    g.apply(
+        me,
+        Intent::Play {
+            card: rest,
+            target: Target::Hex(town),
+        },
+    )
+    .unwrap();
+    assert_eq!(g.standing(me), 1);
+    // Friends are healed in the settlement.
+    g.standing[me.0 as usize] = FRIENDLY;
+    g.champ_mut(me).hp = 1;
+    let mut events = Vec::new();
+    g.start_turn(me, &mut events);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::MilitiaHelped { .. }))
+    );
+    // The unwelcome cannot take it.
+    g.standing[me.0 as usize] = HOSTILE;
+    g.claims.clear();
+    let mut events = Vec::new();
+    g.claim(me, town, &mut events);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::MilitiaBarred { .. }))
+    );
+    assert_eq!(g.owner(town), None);
+}
+
+/// Tuning aid for §20.4, not a check: how soon and how many rise in bot
+/// matches. `cargo test -p necromy-rules when_the_dead -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn when_the_dead_rise() {
+    for seed in [7u64, 13, 21] {
+        let (mut g, _) = Game::new(Setup {
+            seed,
+            champions: God::ALL.to_vec(),
+        });
+        let mut first = None;
+        let mut most = 0;
+        for _ in 0..3000 {
+            if g.winner().is_some() {
+                break;
+            }
+            let p = g.awaiting()[0];
+            let intent = crate::bot::choose(&g, p);
+            let events = g.apply(p, intent).unwrap();
+            if first.is_none() && events.iter().any(|e| matches!(e, Event::UndeadRose { .. })) {
+                first = Some(g.round());
+            }
+            most = most.max(g.undead().len());
+        }
+        let corpses = g
+            .log()
+            .iter()
+            .filter(|e| matches!(e, Event::CorpseAppeared { .. } | Event::ChampionFell { .. }))
+            .count();
+        let count = |f: fn(&Event) -> bool| g.log().iter().filter(|e| f(e)).count();
+        eprintln!(
+            "seed {seed}: first rise {first:?}, rounds {}, bodies {corpses}, most at once {most}, risen {}, felled by champions {}, by militia {}, ruined {}, struck champions {}",
+            g.round(),
+            count(|e| matches!(e, Event::UndeadRose { .. })),
+            count(|e| matches!(e, Event::UndeadFell { .. })),
+            count(|e| matches!(e, Event::MilitiaStruck { .. })),
+            count(|e| matches!(e, Event::SettlementRuined { .. })),
+            count(|e| matches!(e, Event::UndeadStruck { .. })),
+        );
+    }
 }

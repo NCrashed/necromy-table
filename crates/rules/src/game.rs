@@ -178,6 +178,8 @@ pub enum WindowKind {
     /// A champion attacks the royal guard: they pick cards to burn, the
     /// guard burns none (§20.4).
     GuardBattle { attacker: PlayerId },
+    /// A champion attacks undead `id`; only they burn (§20.4).
+    UndeadBattle { attacker: PlayerId, id: u32 },
     /// Before a trial's throw: its challenger picks cards to burn (§20.2).
     Trial { player: PlayerId, hex: Hex },
 }
@@ -250,6 +252,8 @@ struct Pending {
 pub enum Fighter {
     Champion(PlayerId),
     Guard,
+    /// An undead, by id (§20.4).
+    Undead(u32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -370,6 +374,73 @@ pub enum Event {
         target: PlayerId,
         guard_score: Score,
         target_score: Score,
+    },
+    /// An untended body rose as one of the undead (§20.4).
+    UndeadRose {
+        undead: mobs::Undead,
+    },
+    UndeadMoved {
+        id: u32,
+        from: Hex,
+        to: Hex,
+    },
+    /// World phase: an undead strikes `target`; its dice follow.
+    UndeadStruck {
+        id: u32,
+        target: PlayerId,
+    },
+    /// `attacker` stepped onto undead `id`; their burn choice follows.
+    UndeadAttacked {
+        attacker: PlayerId,
+        id: u32,
+    },
+    UndeadResolved {
+        id: u32,
+        champion: PlayerId,
+        /// The champion struck first, else the undead did.
+        champion_attacked: bool,
+        undead_score: Score,
+        champion_score: Score,
+    },
+    UndeadHurt {
+        id: u32,
+        amount: u8,
+        hp: u8,
+    },
+    /// Laid to rest by `by`.
+    UndeadFell {
+        id: u32,
+        hex: Hex,
+        by: PlayerId,
+    },
+    /// A settlement's militia cut down undead `undead` next to it.
+    MilitiaStruck {
+        hex: Hex,
+        undead: u32,
+    },
+    /// No militia held it: the undead laid it waste.
+    SettlementRuined {
+        hex: Hex,
+    },
+    /// What the militia think of `player` now, −3..=3.
+    StandingChanged {
+        player: PlayerId,
+        standing: i8,
+    },
+    /// A friend of the militia rested in their settlement.
+    MilitiaHelped {
+        player: PlayerId,
+        hex: Hex,
+    },
+    /// The unwelcome lingered in a settlement and were beaten.
+    MilitiaBeat {
+        player: PlayerId,
+        hex: Hex,
+    },
+    /// The militia would not let `player` take their settlement.
+    MilitiaBarred {
+        player: PlayerId,
+        hex: Hex,
     },
     /// `attacker` stepped onto the royal guard; the Battle choice follows.
     GuardAttacked {
@@ -880,6 +951,13 @@ pub struct Game {
     dominant: Option<PlayerId>,
     /// Settlements, temples and the Table, keyed by axial coordinates.
     claims: BTreeMap<(i32, i32), PlayerId>,
+    /// The undead on the board, the last id and throws so far; each
+    /// settlement's militia; what the militia think of each player (§20.4).
+    undead: Vec<mobs::Undead>,
+    next_mob: u32,
+    mob_throws: u64,
+    militia: BTreeMap<(i32, i32), u8>,
+    standing: Vec<i8>,
     taste: style::Taste,
     /// Per player, what they did since the last dusk.
     deeds: Vec<Vec<style::Deed>>,
@@ -936,6 +1014,7 @@ impl Game {
         );
         let mut rng = Rng::new(setup.seed);
         let board = Board::generate(&mut rng);
+        let militia = Self::militia_of(&board);
         let champions: Vec<Champion> = setup
             .champions
             .iter()
@@ -993,6 +1072,11 @@ impl Game {
             threat: vec![0; champions_len],
             dominant: None,
             claims: BTreeMap::new(),
+            undead: Vec::new(),
+            next_mob: 0,
+            mob_throws: 0,
+            militia,
+            standing: vec![0; setup.champions.len()],
             taste,
             deeds: vec![Vec::new(); champions_len],
             guard: None,
@@ -1239,7 +1323,7 @@ impl Game {
         if champion.hex.unsigned_distance_to(to) != 1 {
             return Err(RuleError::NotAdjacent);
         }
-        if self.occupant(to).is_some() || self.guard_at(to) {
+        if self.occupant(to).is_some() || self.mob_at(to) {
             return Err(RuleError::Occupied);
         }
         Ok(self.terrain_cost(player, tile.terrain))
@@ -1291,7 +1375,7 @@ impl Game {
                 let Some(tile) = self.board.tile(next) else {
                     continue;
                 };
-                if next == start || self.occupant(next).is_some() || self.guard_at(next) {
+                if next == start || self.occupant(next).is_some() || self.mob_at(next) {
                     continue;
                 }
                 let total = cost + self.terrain_cost(player, tile.terrain);
@@ -1326,6 +1410,7 @@ impl Game {
                     // Cards go into a battle only as burned faces.
                     WindowKind::Battle { .. }
                     | WindowKind::GuardBattle { .. }
+                    | WindowKind::UndeadBattle { .. }
                     | WindowKind::Trial { .. } => false,
                     WindowKind::Enter { .. } => def.timing == Timing::Instant,
                     // Tribute: any card of the hand may be given, free.
@@ -1385,7 +1470,7 @@ impl Game {
                 .filter(|(h, t)| {
                     h.unsigned_distance_to(me) <= range
                         && self.occupant(*h).is_none()
-                        && !self.guard_at(*h)
+                        && !self.mob_at(*h)
                         && match def.effect {
                             Effect::Grow => {
                                 t.terrain.can_grow_grove() && t.terrain != Terrain::Grove
@@ -1542,7 +1627,7 @@ impl Game {
     fn check_own(&self, player: PlayerId, intent: &Intent) -> Result<(), RuleError> {
         match *intent {
             Intent::Move { to } => {
-                if self.occupant(to).is_some_and(|d| d != player) || self.guard_at(to) {
+                if self.occupant(to).is_some_and(|d| d != player) || self.mob_at(to) {
                     self.attack_cost(player, to).map(|_| ())
                 } else {
                     let cost = self.step_cost(player, to)?;
@@ -1566,7 +1651,7 @@ impl Game {
     fn touched(&self, player: PlayerId, intent: &Intent) -> Vec<(PlayerId, bool)> {
         match *intent {
             Intent::Move { to } => {
-                if self.guard_at(to) {
+                if self.mob_at(to) {
                     // The guard is nobody's turn: it answers at once.
                     Vec::new()
                 } else if let Some(d) = self.occupant(to).filter(|&d| d != player) {
@@ -1682,6 +1767,11 @@ impl Game {
             self.start_guard_battle(player, cost, events);
             return Ok(());
         }
+        if let Some(id) = self.undead_at(to).map(|u| u.id) {
+            let cost = self.attack_cost(player, to)?;
+            self.start_undead_battle(player, id, cost, events);
+            return Ok(());
+        }
         if let Some(defender) = self.occupant(to)
             && defender != player
         {
@@ -1768,6 +1858,7 @@ impl Game {
             self.record_deed(player, style::Deed::Prayed);
             self.cure(player, Cure::Temple, events);
         }
+        self.militia_at_turn_end(player, events);
         self.stealth_at_turn_end(player, events);
     }
 
@@ -1851,7 +1942,10 @@ impl Game {
         let tribute = matches!(self.windows[i].kind, WindowKind::Tribute { .. });
         let battle = matches!(
             self.windows[i].kind,
-            WindowKind::Battle { .. } | WindowKind::GuardBattle { .. } | WindowKind::Trial { .. }
+            WindowKind::Battle { .. }
+                | WindowKind::GuardBattle { .. }
+                | WindowKind::UndeadBattle { .. }
+                | WindowKind::Trial { .. }
         );
         let choice = match intent {
             Intent::Pass => Choice::Pass,
@@ -1976,6 +2070,16 @@ impl Game {
             // A battle ends the movement of whoever brought it about.
             if self.is_active(window.actor) {
                 self.turns[window.actor.0 as usize].move_points = 0;
+            }
+        }
+        if let WindowKind::UndeadBattle { attacker, id } = window.kind {
+            let burned = match window.choices.get(&attacker) {
+                Some(Choice::Burn(cards)) => cards.clone(),
+                _ => Vec::new(),
+            };
+            self.resolve_undead_battle(attacker, id, burned, events);
+            if self.is_active(attacker) {
+                self.turns[attacker.0 as usize].move_points = 0;
             }
         }
         if let WindowKind::GuardBattle { attacker } = window.kind {
@@ -2426,7 +2530,7 @@ impl Game {
             .find(|&h| {
                 self.board.contains(h)
                     && self.champion_at(h).is_none_or(|p| p == player)
-                    && !self.guard_at(h)
+                    && !self.mob_at(h)
             })
             .unwrap_or(home);
         self.drop_on_fall(player, at, events);
@@ -2578,6 +2682,7 @@ impl Game {
         self.bite_curses(player, events);
         self.bite_poison(player, events);
         self.gear_at_turn_start(player, events);
+        self.militia_at_turn_start(player, events);
         let champ = &self.champions[player.0 as usize];
         if champ.spirit_points < champ.spirit {
             self.gain_spirit(player, 1, events);
@@ -2608,6 +2713,10 @@ impl Game {
         if self.scripted.is_none() && self.time == TimeOfDay::Night {
             self.spawn_corpse(events);
         }
+        if self.scripted.is_none() {
+            self.raise_dead(events);
+            self.mob_phase(events);
+        }
         if self.scripted.is_none_or(|s| s.guard) {
             self.guard_phase(events);
         }
@@ -2618,9 +2727,12 @@ impl Game {
             .board
             .tiles()
             .filter(|(h, t)| {
+                // Any ground but where people are: where no grove can grow,
+                // an untended body rises instead (§20.4).
                 t.corpse.is_none()
-                    && t.terrain.can_grow_grove()
+                    && !t.terrain.crowded()
                     && self.occupant(*h).is_none()
+                    && !self.mob_at(*h)
                     && !God::ALL.iter().any(|g| self.board.start_of(*g) == *h)
             })
             .map(|(h, _)| h)
@@ -2636,6 +2748,7 @@ mod battle;
 mod gear;
 mod guard;
 mod laws;
+mod mobs;
 mod poison;
 mod scenario;
 mod stealth;
@@ -2650,6 +2763,10 @@ pub use battle::Score;
 pub use gear::{Gain, SACRIFICE};
 pub use guard::{GUARD_DICE, GUARD_HEALTH, GUARD_RELIEF, GUARD_STEPS, Guard};
 pub use laws::{BURDEN_FREE, CHOSEN, CRACK_REACH, Law, Patronage, SENTENCE_THRESHOLD, SIGN, VOICE};
+pub use mobs::{
+    FRIENDLY, HOSTILE, MAX_UNDEAD, MILITIA, UNDEAD_AGE, UNDEAD_AGE_DARK, UNDEAD_DICE,
+    UNDEAD_HEALTH, UNDEAD_SIGHT, Undead,
+};
 pub use poison::{Cure, Poison};
 pub use scenario::{Scenario, SceneSeat, SceneWorld};
 pub use stealth::RevealReason;
@@ -2672,6 +2789,7 @@ impl Game {
     fn settle_story(&mut self, events: &mut Vec<Event>) {
         for (player, deed) in std::mem::take(&mut self.pending_story) {
             self.story_deed(player, deed, events);
+            self.standing_deed(player, deed, events);
         }
         self.check_lines(events);
     }

@@ -648,7 +648,7 @@ impl Game {
                     .filter(|&h| {
                         self.board.tile(h).is_some_and(|t| {
                             t.terrain.can_grow_grove() || t.terrain == Terrain::Mountain
-                        }) && !self.guard_at(h)
+                        }) && !self.mob_at(h)
                     })
                     .take(power as usize)
                     .collect();

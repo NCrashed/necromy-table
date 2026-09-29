@@ -313,7 +313,7 @@ impl Game {
                     && t.corpse.is_none()
                     && self.trial_at(*h).is_none()
                     && self.champion_at(*h).is_none()
-                    && !self.guard_at(*h)
+                    && !self.mob_at(*h)
                     && !self.traps.iter().any(|tr| tr.hex == *h)
                     && self.players().all(|p| {
                         self.champions[p.0 as usize].hex.unsigned_distance_to(*h) >= TRIAL_CLEARANCE

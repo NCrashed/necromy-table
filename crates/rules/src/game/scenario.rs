@@ -140,6 +140,9 @@ impl Game {
         game.guard = None;
         game.dominant = None;
         game.claims.clear();
+        // The scene's own settlements keep their own militia (§20.4).
+        game.militia = Self::militia_of(&game.board);
+        game.undead.clear();
         game.pantheon.stages = scene.stages;
         game.pantheon.pressure = scene.pressure;
         game.order = (0..scene.seats.len() as u8).map(PlayerId).collect();

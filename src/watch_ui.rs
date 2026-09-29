@@ -128,7 +128,7 @@ fn icons(
             continue;
         }
         let image = match show.kind {
-            ShowKind::Battle | ShowKind::Guard => art.icon(StatIcon::Might),
+            ShowKind::Battle | ShowKind::Guard | ShowKind::Mob => art.icon(StatIcon::Might),
             ShowKind::Trial => trial_face(&game, show)
                 .map_or_else(|| art.icon(StatIcon::Might), |f| art.faces[&f].clone()),
         };
@@ -209,7 +209,7 @@ fn clicks(
 
 fn word(show: &Show) -> String {
     let what = match show.kind {
-        ShowKind::Battle | ShowKind::Guard => "бой",
+        ShowKind::Battle | ShowKind::Guard | ShowKind::Mob => "бой",
         ShowKind::Trial => "испытание",
     };
     if show.done {
@@ -229,6 +229,7 @@ fn about(game: &Match, show: &Show) -> String {
             }
             _ => format!("гвардия против {}", names.join("")),
         },
+        ShowKind::Mob => format!("{} и неупокоенный", names.join("")),
         ShowKind::Trial => format!("{} на испытании", names.join("")),
     }
 }

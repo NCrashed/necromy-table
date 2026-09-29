@@ -20,6 +20,7 @@ mod lighting;
 mod lobby;
 mod menu_stage;
 mod menu_world;
+mod mobs_ui;
 mod names;
 mod play;
 mod props;
@@ -98,6 +99,7 @@ fn main() {
             menu_stage::MenuStagePlugin,
             menu_world::MenuWorldPlugin,
         ))
+        .add_plugins(mobs_ui::MobsUiPlugin)
         .add_plugins(AutoScreenshotPlugin)
         .add_systems(Startup, setup_scene)
         .run();
@@ -251,8 +253,13 @@ fn auto_screenshot(
         }
         // A champion's fight against the guard, its dice at rest (§20.4).
         (Some("guardfight"), Some(game)) => {
-            game.battle.as_ref().is_some_and(|b| b.sides[1].is_none()) && dice.settled()
+            game.battle
+                .as_ref()
+                .is_some_and(|b| b.sides[1] == necromy_rules::Fighter::Guard)
+                && dice.settled()
         }
+        // Undead on the board and nothing over it (§20.4).
+        (Some("undead"), Some(game)) => !game.game.undead().is_empty() && game.on_screen.is_none(),
         // Someone wears an item, nothing over the board (§20.3).
         (Some("gear"), Some(game)) => {
             game.game

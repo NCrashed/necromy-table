@@ -4,7 +4,10 @@
 //! show ends.
 
 use bevy::prelude::*;
-use necromy_rules::{Face, GUARD_DICE, GUARD_HEALTH, Intent, PlayerId, TimeOfDay, WindowKind};
+use necromy_rules::{
+    Face, Fighter, GUARD_DICE, GUARD_HEALTH, Intent, PlayerId, TimeOfDay, UNDEAD_DICE,
+    UNDEAD_HEALTH, WindowKind,
+};
 
 use crate::dice::{DiceShow, Revealed, TRAY_TEXTURE, TrayTextures};
 use crate::fight::{self, STAGE_W, Wounds};
@@ -73,6 +76,17 @@ fn spawn_panel(mut commands: Commands) {
 enum Side {
     Champion(PlayerId),
     Guard,
+    Undead(u32),
+}
+
+impl From<Fighter> for Side {
+    fn from(f: Fighter) -> Side {
+        match f {
+            Fighter::Champion(p) => Side::Champion(p),
+            Fighter::Guard => Side::Guard,
+            Fighter::Undead(id) => Side::Undead(id),
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -97,10 +111,7 @@ fn rebuild(
     };
     visibility.set_if_neq(Visibility::Inherited);
 
-    let sides = [
-        battle.sides[0].map_or(Side::Guard, Side::Champion),
-        battle.sides[1].map_or(Side::Guard, Side::Champion),
-    ];
+    let sides = [Side::from(battle.sides[0]), Side::from(battle.sides[1])];
     let landed = battle.scores.is_some() && dice.landed();
 
     let frame = commands
@@ -192,13 +203,18 @@ fn side_column(
             m.name(p),
             g.dice_for(p, defending),
         ),
+        Side::Undead(id) => (
+            art.undead[id as usize % art.undead.len()].clone(),
+            "Неупокоенный".to_string(),
+            UNDEAD_DICE,
+        ),
         Side::Guard => (
             art.guard.clone(),
             "Королевская гвардия".to_string(),
             // Against whom: Zaga's Sentence adds a die, but not for her Chosen.
             m.battle
                 .as_ref()
-                .and_then(|b| b.sides.iter().flatten().next().copied())
+                .and_then(|b| (0..2).find_map(|s| b.champion(s)))
                 .map_or(GUARD_DICE, |foe| g.guard_dice(foe)),
         ),
     };
@@ -252,6 +268,20 @@ fn side_column(
             let w = stats::icon_node(commands, art.wards[ward.index()].clone(), 24.0, true);
             commands.entity(numbers).add_child(w);
         }
+    }
+    // An undead's health, from the dead on the board.
+    if let Side::Undead(id) = side {
+        let heart = stats::icon_node(commands, art.icon(StatIcon::Health), 24.0, true);
+        let now = g.undead().iter().find(|u| u.id == id).map_or(0, |u| u.hp);
+        let hp_now = hp_shown.unwrap_or(now);
+        let hp = stats::bar(commands, hp_now, UNDEAD_HEALTH, HEALTH, None, 10.0, 14.0);
+        let text = if fell {
+            format!("{hp_now}/{UNDEAD_HEALTH} — упокоен!")
+        } else {
+            format!("{hp_now}/{UNDEAD_HEALTH}")
+        };
+        let hp_text = stats::label(commands, font, &text, 13.0, fell);
+        commands.entity(numbers).add_children(&[heart, hp, hp_text]);
     }
     // The guard's wounds carry over from fight to fight (§20.4).
     if let Side::Guard = side {
@@ -405,12 +435,18 @@ fn centre_column(
     let burning = g.windows().iter().any(|w| {
         matches!(
             w.kind,
-            WindowKind::Battle { .. } | WindowKind::GuardBattle { .. }
+            WindowKind::Battle { .. }
+                | WindowKind::GuardBattle { .. }
+                | WindowKind::UndeadBattle { .. }
         )
     });
     let my_choice = matches!(
         m.human_window(),
-        Some(WindowKind::Battle { .. } | WindowKind::GuardBattle { .. })
+        Some(
+            WindowKind::Battle { .. }
+                | WindowKind::GuardBattle { .. }
+                | WindowKind::UndeadBattle { .. }
+        )
     );
     let phase = if my_choice {
         let max = g.battle_dice(m.human).unwrap_or(0);

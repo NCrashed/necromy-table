@@ -902,6 +902,31 @@ fn hear_events(
                 }
             }
             Event::GuardFell { by: who, .. } => (Sound::new("fall"), by(*who)),
+            // The dead and the militia (§20.4), with borrowed sounds.
+            Event::UndeadRose { undead } => {
+                (Sound::new("curse-laid").at(0.7), Heard::At(undead.hex))
+            }
+            Event::UndeadStruck { target, .. } => {
+                if *target == human {
+                    in_battle = true;
+                    (Sound::new("battle-start"), Heard::Always)
+                } else {
+                    (Sound::new("battle-start"), by(*target))
+                }
+            }
+            Event::UndeadAttacked { attacker, .. } => {
+                if *attacker == human {
+                    in_battle = true;
+                    (Sound::new("battle-start"), Heard::Always)
+                } else {
+                    (Sound::new("battle-start"), by(*attacker))
+                }
+            }
+            Event::UndeadFell { hex, .. } => (Sound::new("fall"), Heard::At(*hex)),
+            Event::MilitiaStruck { hex, .. } => (Sound::new("hit"), Heard::At(*hex)),
+            Event::SettlementRuined { hex } => (Sound::new("fall"), Heard::At(*hex)),
+            Event::MilitiaHelped { player, .. } => (Sound::new("heal"), by(*player)),
+            Event::MilitiaBeat { player, .. } => (Sound::new("hurt"), by(*player)),
             Event::GuardStruck { target } => {
                 if *target == human {
                     in_battle = true;

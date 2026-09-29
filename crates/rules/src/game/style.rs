@@ -248,6 +248,11 @@ impl Game {
         if !claimable || self.owner(hex) == Some(player) {
             return;
         }
+        // The militia keep the unwelcome out of their settlement (§20.4).
+        if self.militia(hex).is_some() && self.standing(player) <= super::HOSTILE {
+            events.push(Event::MilitiaBarred { player, hex });
+            return;
+        }
         let from = self.claims.insert((hex.x(), hex.y()), player);
         self.record_deed(player, Deed::Claimed);
         events.push(Event::Claimed { player, hex, from });
@@ -257,6 +262,7 @@ impl Game {
     /// Dawn: land pays Style, then the Crown goes to the leader (§6.1).
     pub(super) fn dawn(&mut self, events: &mut Vec<Event>) {
         self.stealth_at_dawn(events);
+        self.militia_at_dawn();
         // Ahamar's Crack: land far from its owner pays nothing (§5.3).
         let crack = self.law_active(super::Law::Crack);
         let income: Vec<(PlayerId, u8)> = self

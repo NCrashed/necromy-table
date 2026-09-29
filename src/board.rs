@@ -952,6 +952,10 @@ fn track_hover(
         if s == "guard" {
             return game.game.guard().map(|g| g.hex);
         }
+        // The first undead on the board (§20.4).
+        if s == "undead" {
+            return game.game.undead().first().map(|u| u.hex);
+        }
         // The latest battle or trial of others (`watch_ui.rs`).
         if s == "show" {
             return game

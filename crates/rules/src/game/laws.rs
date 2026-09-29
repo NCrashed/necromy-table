@@ -207,7 +207,7 @@ impl Game {
                     t.terrain == Terrain::Plains
                         && t.region == Some(God::Bhava)
                         && self.champion_at(*h).is_none()
-                        && !self.guard_at(*h)
+                        && !self.mob_at(*h)
                 })
                 .map(|(h, _)| h)
                 .collect();
