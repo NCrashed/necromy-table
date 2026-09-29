@@ -67,6 +67,8 @@ pub struct Rig {
     yaw: f32,
     /// Keep the human's champion in focus.
     following: bool,
+    /// Whom it follows: a rival picked by number key, else the human.
+    whom: Option<necromy_rules::PlayerId>,
     /// What the camera shows now, easing towards the fields above.
     shown: (Vec3, f32, f32),
 }
@@ -92,6 +94,7 @@ impl Default for Rig {
             zoom: OVERVIEW,
             yaw: 0.0,
             following: false,
+            whom: None,
             shown: (Vec3::ZERO, OVERVIEW, 0.0),
         }
     }
@@ -124,6 +127,7 @@ fn seat_the_camera(game: Res<Match>, board: Res<Board>, mut rig: ResMut<Rig>) {
             zoom: OVERVIEW,
             yaw: 0.0,
             following: false,
+            whom: None,
             shown: (Vec3::ZERO, OVERVIEW, 0.0),
         };
         return;
@@ -145,6 +149,7 @@ fn seat_the_camera(game: Res<Match>, board: Res<Board>, mut rig: ResMut<Rig>) {
         zoom: START,
         yaw,
         following: true,
+        whom: None,
         shown: (focus, START, yaw),
     };
 }
@@ -221,6 +226,24 @@ fn steer(
         }
         if keys.just_pressed(KeyCode::KeyF) {
             rig.following = true;
+            rig.whom = None;
+        }
+        // 1..5: the champion of that seat, as the portraits bottom right
+        // stand; followed until the camera is moved.
+        const SEATS: [(KeyCode, KeyCode); 5] = [
+            (KeyCode::Digit1, KeyCode::Numpad1),
+            (KeyCode::Digit2, KeyCode::Numpad2),
+            (KeyCode::Digit3, KeyCode::Numpad3),
+            (KeyCode::Digit4, KeyCode::Numpad4),
+            (KeyCode::Digit5, KeyCode::Numpad5),
+        ];
+        for (i, (a, b)) in SEATS.into_iter().enumerate() {
+            let seat = necromy_rules::PlayerId(i as u8);
+            if (keys.just_pressed(a) || keys.just_pressed(b)) && game.game.champion(seat).is_some()
+            {
+                rig.following = true;
+                rig.whom = (seat != game.human).then_some(seat);
+            }
         }
     }
     if pan != Vec3::ZERO {
@@ -231,7 +254,8 @@ fn steer(
     }
 }
 
-/// While following, the focus rides on the human's champion.
+/// While following, the focus rides on the human's champion, or on the one
+/// picked by number key.
 fn follow(
     game: Res<Match>,
     tokens: Query<(&Token, &Transform)>,
@@ -250,7 +274,8 @@ fn follow(
     if !rig.following {
         return;
     }
-    if let Some((_, t)) = tokens.iter().find(|(token, _)| token.player == game.human) {
+    let whom = rig.whom.unwrap_or(game.human);
+    if let Some((_, t)) = tokens.iter().find(|(token, _)| token.player == whom) {
         // Look a little ahead, into the table: the champion stands low on the
         // screen with the board in front of them, not the void behind.
         let ahead = -Vec3::new(rig.yaw.sin(), 0.0, rig.yaw.cos()) * LOOK_AHEAD;
