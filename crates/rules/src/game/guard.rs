@@ -108,7 +108,8 @@ impl Game {
         // The guard fights with the kingdom's iron.
         self.element_breaks_ward(Element::Metal, target, &g_faces, events);
         let guard_score = self.score(&g_faces);
-        let target_score = self.score(&t_faces);
+        let mut target_score = self.score(&t_faces);
+        target_score.shields += self.item_shields(target);
         events.push(Event::GuardResolved {
             target,
             guard_score,

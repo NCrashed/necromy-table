@@ -9,6 +9,7 @@ mod dice;
 mod effects;
 mod feed;
 mod fight;
+mod gear_ui;
 mod god_pick;
 mod gods_ui;
 mod gpu;
@@ -81,6 +82,7 @@ fn main() {
             battle_ui::BattleUiPlugin,
             trial_ui::TrialUiPlugin,
             watch_ui::WatchUiPlugin,
+            gear_ui::GearUiPlugin,
             fight::FightPlugin,
             turn_ui::TurnUiPlugin,
             victory_ui::VictoryUiPlugin,
@@ -243,6 +245,14 @@ fn auto_screenshot(
                 && game.incoming_result.is_none()
                 && game.told.is_none()
                 && !dice.busy()
+        }
+        // Someone wears an item, nothing over the board (§20.3).
+        (Some("gear"), Some(game)) => {
+            game.game
+                .players()
+                .any(|p| game.game.gear(p).iter().any(Option::is_some))
+                && game.on_screen.is_none()
+                && game.told.is_none()
         }
         // Someone else's battle or trial waits behind its icon.
         (Some("watch"), Some(game)) => {

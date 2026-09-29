@@ -68,6 +68,8 @@ pub struct StatArt {
     /// Element icons per god (`God::index`).
     pub gods: [Handle<Image>; 5],
     offering: Handle<Image>,
+    /// Item pictures by `ItemId` (`assets/items/`, §20.3).
+    pub items: Vec<Handle<Image>>,
 }
 
 impl StatArt {
@@ -121,6 +123,10 @@ fn make_art(
         .collect();
     let wards = God::ALL.map(|g| images.add(icons::ward_icon(g.accent())));
     let poisons = God::ALL.map(|g| images.add(icons::poison_icon(g.accent())));
+    let items = necromy_rules::ITEMS
+        .iter()
+        .map(|d| assets.load(format!("items/{}.png", crate::gear_ui::art_file(d.name))))
+        .collect();
     let portraits = game
         .game
         .champions()
@@ -162,6 +168,7 @@ fn make_art(
         portraits,
         gods,
         offering,
+        items,
         guard,
         faces,
     });
@@ -311,11 +318,20 @@ fn track_seat_hover(
     game: Res<Match>,
     mut hovered: ResMut<HoveredSeat>,
 ) {
-    // Dev aid: `NECROMY_SEAT=n` pins the popup on a seat for screenshots.
+    // Dev aid: `NECROMY_SEAT=n` pins the popup on a seat for screenshots;
+    // `=gear` on the first rival wearing an item (§20.3).
     let pinned = std::env::var("NECROMY_SEAT")
         .ok()
-        .and_then(|s| s.parse().ok())
-        .map(|n| (Card::Champion(PlayerId(n)), HoverSource::Portrait));
+        .and_then(|s| {
+            if s == "gear" {
+                return game
+                    .game
+                    .players()
+                    .find(|&p| p != game.human && game.game.gear(p).iter().any(Option::is_some));
+            }
+            s.parse().ok().map(PlayerId)
+        })
+        .map(|p| (Card::Champion(p), HoverSource::Portrait));
     let portrait = || {
         seats
             .iter()
@@ -520,6 +536,9 @@ fn stat_sheet(
         }
         rows.push(r);
     }
+
+    // Worn items (§20.3).
+    rows.push(crate::gear_ui::gear_row(commands, art, font, m, player));
 
     // Character: what earns and costs Style at dusk (§6.2).
     if let Some(ch) = g.character(player) {

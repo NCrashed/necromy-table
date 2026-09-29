@@ -76,6 +76,13 @@ fn own_turn(game: &Game, player: PlayerId) -> Intent {
             target: Target::Hex(hex_of(game, player)),
         };
     }
+    // A dark god's item costs more than it gives: back to a god it goes.
+    if let Some(slot) = crate::items::Slot::ALL.into_iter().find(|&s| {
+        game.gear(player)[s.index()].is_some_and(|i| game.item_tolls(player, i))
+            && game.can_sacrifice(player, s)
+    }) {
+        return Intent::Sacrifice { slot };
+    }
     if let Some(intent) = mend(game, player, &cards) {
         return intent;
     }
@@ -263,6 +270,15 @@ fn walk(game: &Game, player: PlayerId) -> Intent {
             Goal::ReachHex(hex) => Some(hex),
             Goal::PassTrial(hex) if game.trial_for(player, hex).is_some() => Some(hex),
             _ => None,
+        })
+        // Something lying close by.
+        .or_else(|| {
+            game.ground_items()
+                .iter()
+                .map(|(hex, _)| *hex)
+                .filter(|&hex| hex != me.hex && me.hex.unsigned_distance_to(hex) <= 3)
+                .filter(|&hex| game.occupant(hex).is_none())
+                .min_by_key(|&hex| (me.hex.unsigned_distance_to(hex), hex.x(), hex.y()))
         })
         // A trial close by, when healthy enough to risk its price.
         .or_else(|| {

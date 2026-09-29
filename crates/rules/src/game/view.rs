@@ -55,6 +55,8 @@ impl Game {
         v.planted
             .retain(|c, _| hidden.binary_search(&(c.0 as usize)).is_err());
         v.rng.shuffle(&mut v.deck);
+        // The loot deck's order too (§20.3).
+        v.rng.shuffle(&mut v.loot);
 
         // A hidden rival stands where they were last seen (§11.6).
         for (i, c) in v.champions.iter_mut().enumerate() {

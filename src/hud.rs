@@ -482,6 +482,18 @@ fn tooltip(
     {
         lines.push("здесь твоя ловушка".into());
     }
+    let lying: Vec<&str> = g
+        .ground_items()
+        .iter()
+        .filter(|(h, _)| *h == hex)
+        .map(|(_, i)| i.def().name)
+        .collect();
+    if !lying.is_empty() {
+        lines.push(format!(
+            "на земле: {} — шаг сюда подберёт первое",
+            lying.join(", ")
+        ));
+    }
     if let Some(trial) = g.trial_at(hex) {
         lines.push(format!(
             "{} ({}): {}",

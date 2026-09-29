@@ -72,7 +72,7 @@ impl Game {
                 w.ambush == Some(player)
                     && matches!(w.kind, WindowKind::Battle { attacker, .. } if attacker == player)
             });
-        c.might + u8::from(high_ground) + u8::from(ambush)
+        c.might + u8::from(high_ground) + u8::from(ambush) + self.item_dice(player, defending)
     }
 
     /// Dice `player` throws in an open Battle or Trial window, if they are
@@ -80,7 +80,7 @@ impl Game {
     pub fn battle_dice(&self, player: PlayerId) -> Option<u8> {
         self.windows.iter().find_map(|w| match w.kind {
             WindowKind::Trial { player: p, .. } if p == player => {
-                Some(self.champions[player.0 as usize].might)
+                Some(self.champions[player.0 as usize].might + self.item_trial_dice(player))
             }
             WindowKind::Battle { attacker, .. } if attacker == player => {
                 Some(self.dice_for(player, false))
@@ -155,8 +155,11 @@ impl Game {
         self.element_breaks_ward(a_el, defender, &a_faces, events);
         self.element_breaks_ward(d_el, attacker, &d_faces, events);
 
-        let attacker_score = self.score(&a_faces);
-        let defender_score = self.score(&d_faces);
+        let mut attacker_score = self.score(&a_faces);
+        let mut defender_score = self.score(&d_faces);
+        // Armour adds its shields to whatever the dice gave (§20.3).
+        attacker_score.shields += self.item_shields(attacker);
+        defender_score.shields += self.item_shields(defender);
         events.push(Event::BattleResolved {
             attacker,
             defender,
@@ -297,6 +300,8 @@ impl Game {
         if !faces.contains(&Face::Element) {
             return;
         }
+        // The same blow breaks a worn item it quenches (§20.3).
+        self.crack_item(target, element, events);
         let Some(ward) = self.champions[target.0 as usize].ward else {
             return;
         };

@@ -993,6 +993,15 @@ impl Match {
         }
     }
 
+    /// The human gives the item in `slot` to the god of the temple they
+    /// stand on (§20.3).
+    pub fn sacrifice(&mut self, slot: necromy_rules::Slot) {
+        let human = self.human;
+        if let Err(err) = self.act(human, Intent::Sacrifice { slot }) {
+            self.feed.push(format!("Нельзя: {}.", reason(err)));
+        }
+    }
+
     /// The human looks away from a show that is not theirs.
     pub fn close_show(&mut self) {
         self.end_battle_view();
@@ -1341,6 +1350,52 @@ impl Match {
                 names::trial_price(&self.game, trial.god)
             ),
             Event::TrialFaded { .. } => "Испытание угасло: его никто не прошёл.".into(),
+            Event::ItemGained { player, item, from } => match from {
+                necromy_rules::Gain::Loot => format!(
+                    "{} получает из добычи: {} ({}).",
+                    self.name(*player),
+                    item.def().name,
+                    names::slot(item.def().slot)
+                ),
+                necromy_rules::Gain::Ground => {
+                    format!("{} подбирает: {}.", self.name(*player), item.def().name)
+                }
+            },
+            Event::ItemDropped { player, item, .. } => {
+                format!(
+                    "{} оставляет на земле: {}.",
+                    self.name(*player),
+                    item.def().name
+                )
+            }
+            Event::ItemBroken { player, item, by } => format!(
+                "{}: {} ломает «{}».",
+                self.name(*player),
+                names::element(*by),
+                item.def().name
+            ),
+            Event::ItemSacrificed { player, item, god } => format!(
+                "{} отдаёт {}: {}.",
+                self.name(*player),
+                names::god_dative(*god),
+                item.def().name
+            ),
+            Event::ItemWorked { player, item } => format!(
+                "{}: {} — {}.",
+                self.name(*player),
+                item.def().name,
+                names::item_does(&self.game, *item)
+            ),
+            Event::ItemToll { player, item } => {
+                let god = God::from_index(item.def().element.index());
+                format!(
+                    "{}: тёмный {} берёт плату за «{}» — {}.",
+                    self.name(*player),
+                    names::god(god),
+                    item.def().name,
+                    names::item_toll(god)
+                )
+            }
             Event::DeckReshuffled => "Колода перемешана.".into(),
             Event::LineTold { line } => format!(
                 "{} даёт {} линию «{}» до раунда {}.",
@@ -1791,6 +1846,8 @@ fn reason(err: RuleError) -> String {
         RuleError::WrongTiming => "сейчас не время для этой карты".into(),
         RuleError::NotEnoughSpirit { need, have } => format!("нужно {need} Духа, есть {have}"),
         RuleError::InvalidTarget => "не та цель".into(),
+        RuleError::NotAtTemple => "отдать богу можно только в его храме".into(),
+        RuleError::NothingWorn => "там ничего нет".into(),
         RuleError::AlreadyChose => "ты уже выбрал".into(),
         other => other.to_string(),
     }

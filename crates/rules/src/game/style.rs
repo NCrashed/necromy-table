@@ -139,6 +139,8 @@ pub enum StyleReason {
     Story,
     /// A trial passed or failed (§20.2).
     Trial,
+    /// A dark god's toll on its item (§20.3).
+    Item,
 }
 
 /// Threat at which the royal guard comes out (§6.5).

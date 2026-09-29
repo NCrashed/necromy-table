@@ -72,6 +72,8 @@ pub struct Champion {
     pub seen_at: Hex,
     /// Loses a health each turn, down to one (§20.1).
     pub poison: Option<Poison>,
+    /// Worn items by `Slot::index` (§20.3).
+    pub gear: [Option<crate::items::ItemId>; 3],
 }
 
 impl Champion {
@@ -103,6 +105,7 @@ impl Champion {
             hidden: false,
             seen_at: hex,
             poison: None,
+            gear: [None; 3],
         }
     }
 
@@ -148,6 +151,10 @@ pub enum Intent {
     RefuseWish,
     /// In a window: play nothing.
     Pass,
+    /// On your turn at a temple: give the item in `slot` to its god (§20.3).
+    Sacrifice {
+        slot: crate::items::Slot,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -519,6 +526,40 @@ pub enum Event {
     WorldStirred {
         stir: story::WorldStir,
     },
+    /// An item worn: drawn from the loot deck or picked up (§20.3).
+    ItemGained {
+        player: PlayerId,
+        item: crate::items::ItemId,
+        from: gear::Gain,
+    },
+    /// An item left on the ground: pushed off by another, or dropped by the fallen.
+    ItemDropped {
+        player: PlayerId,
+        item: crate::items::ItemId,
+        hex: Hex,
+    },
+    /// The element that quenches it broke the item.
+    ItemBroken {
+        player: PlayerId,
+        item: crate::items::ItemId,
+        by: Element,
+    },
+    /// Given to the temple's god; the offering follows.
+    ItemSacrificed {
+        player: PlayerId,
+        item: crate::items::ItemId,
+        god: God,
+    },
+    /// An item did its turn-start work; its effect follows.
+    ItemWorked {
+        player: PlayerId,
+        item: crate::items::ItemId,
+    },
+    /// The item's god is dark and takes its toll; the cost follows.
+    ItemToll {
+        player: PlayerId,
+        item: crate::items::ItemId,
+    },
     /// A god set a trial on a hex of its land (§20.2).
     TrialSet {
         trial: trial::Trial,
@@ -753,12 +794,18 @@ pub enum RuleError {
     TooManyBurned {
         max: u8,
     },
+    /// Items are given to a god only at its temple.
+    NotAtTemple,
+    /// Nothing is worn in that slot.
+    NothingWorn,
 }
 
 impl std::fmt::Display for RuleError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RuleError::NotYourTurn => write!(f, "not your turn"),
+            RuleError::NotAtTemple => write!(f, "not at a temple"),
+            RuleError::NothingWorn => write!(f, "nothing worn there"),
             RuleError::UnknownPlayer => write!(f, "unknown player"),
             RuleError::OffBoard => write!(f, "off the board"),
             RuleError::NotAdjacent => write!(f, "not an adjacent hex"),
@@ -837,6 +884,9 @@ pub struct Game {
     next_line: u32,
     /// Trials on the board (§20.2), the last id and throws so far.
     trials: Vec<trial::Trial>,
+    /// The loot deck, top last, and items lying on the board (§20.3).
+    loot: Vec<crate::items::ItemId>,
+    ground: Vec<(Hex, crate::items::ItemId)>,
     next_trial: u32,
     trial_throws: u64,
     /// Round of the last battle or guard strike.
@@ -939,6 +989,8 @@ impl Game {
             lines: Vec::new(),
             next_line: 0,
             trials: Vec::new(),
+            loot: Self::loot_deck(setup.seed),
+            ground: Vec::new(),
             next_trial: 0,
             trial_throws: 0,
             last_fight: 0,
@@ -1462,6 +1514,7 @@ impl Game {
         match intent {
             Intent::Move { to } => self.step(player, to, events),
             Intent::Play { card, target } => self.play_own(player, card, target, events),
+            Intent::Sacrifice { slot } => self.sacrifice(player, slot, events),
             _ => Err(RuleError::WrongTiming),
         }
     }
@@ -1482,6 +1535,7 @@ impl Game {
                 }
             }
             Intent::Play { card, target } => self.check_play(player, card, target),
+            Intent::Sacrifice { slot } => self.check_sacrifice(player, slot).map(|_| ()),
             _ => Err(RuleError::WrongTiming),
         }
     }
@@ -1643,6 +1697,7 @@ impl Game {
                 self.reveal(player, RevealReason::Crowd, events);
             }
             self.claim(player, at, events);
+            self.pick_up(player, at, events);
         }
         // A trial stops whoever walks onto it. Out in the open it brings them
         // into view; under cover (woods, groves, swamps) the one in hiding
@@ -1794,7 +1849,9 @@ impl Game {
                 Choice::Burn(cards)
             }
             Intent::Burn { .. } => return Err(RuleError::WrongTiming),
-            Intent::Move { .. } | Intent::EndTurn => return Err(RuleError::WindowOpen),
+            Intent::Move { .. } | Intent::EndTurn | Intent::Sacrifice { .. } => {
+                return Err(RuleError::WindowOpen);
+            }
             Intent::Wish { .. } | Intent::RefuseWish => return Err(RuleError::InvalidWish),
         };
         let window = &mut self.windows[i];
@@ -2133,6 +2190,7 @@ impl Game {
                     self.spring_traps(caster, to, events);
                     if self.hex_of(caster) == to {
                         self.claim(caster, to, events);
+                        self.pick_up(caster, to, events);
                     }
                 }
             }
@@ -2189,24 +2247,30 @@ impl Game {
         element: Option<Element>,
         events: &mut Vec<Event>,
     ) -> bool {
-        let Some(ward) = self.champions[target.0 as usize].ward else {
-            return true;
+        let through = match self.champions[target.0 as usize].ward {
+            None => true,
+            Some(ward) if element == Some(ward.quenched_by()) => {
+                self.champ_mut(target).ward = None;
+                events.push(Event::WardBroken {
+                    player: target,
+                    ward,
+                    by: ward.quenched_by(),
+                });
+                true
+            }
+            Some(ward) => {
+                events.push(Event::Blocked {
+                    player: target,
+                    ward,
+                });
+                false
+            }
         };
-        if element == Some(ward.quenched_by()) {
-            self.champ_mut(target).ward = None;
-            events.push(Event::WardBroken {
-                player: target,
-                ward,
-                by: ward.quenched_by(),
-            });
-            true
-        } else {
-            events.push(Event::Blocked {
-                player: target,
-                ward,
-            });
-            false
+        // What gets through breaks a worn item it quenches, as a ward (§20.3).
+        if through && let Some(e) = element {
+            self.crack_item(target, e, events);
         }
+        through
     }
 
     fn damage(&mut self, player: PlayerId, amount: u8, events: &mut Vec<Event>) {
@@ -2328,6 +2392,7 @@ impl Game {
                     && !self.guard_at(h)
             })
             .unwrap_or(home);
+        self.drop_on_fall(player, at, events);
         // Whoever falls wakes at home, in plain sight.
         self.reveal(player, stealth::RevealReason::Stumbled, events);
         let champ = self.champ_mut(player);
@@ -2401,7 +2466,7 @@ impl Game {
         if self.scripted.is_some() {
             return;
         }
-        let limit = self.champions[player.0 as usize].hand_limit();
+        let limit = self.hand_limit(player);
         let have = self.hands[player.0 as usize].len();
         self.draw(player, limit.saturating_sub(have), events);
     }
@@ -2438,7 +2503,7 @@ impl Game {
     fn start_turn(&mut self, player: PlayerId, events: &mut Vec<Event>) {
         self.turns[player.0 as usize] = Turn {
             phase: Phase::Acting,
-            move_points: MOVE_POINTS,
+            move_points: MOVE_POINTS + self.stride(player),
             last_element: None,
             cards: 0,
         };
@@ -2475,6 +2540,7 @@ impl Game {
         });
         self.bite_curses(player, events);
         self.bite_poison(player, events);
+        self.gear_at_turn_start(player, events);
         let champ = &self.champions[player.0 as usize];
         if champ.spirit_points < champ.spirit {
             self.gain_spirit(player, 1, events);
@@ -2530,6 +2596,7 @@ impl Game {
 }
 
 mod battle;
+mod gear;
 mod guard;
 mod laws;
 mod poison;
@@ -2543,6 +2610,7 @@ mod view;
 mod wish;
 mod world;
 pub use battle::Score;
+pub use gear::{Gain, SACRIFICE};
 pub use guard::{GUARD_DICE, GUARD_RELIEF, GUARD_STEPS, Guard};
 pub use laws::{BURDEN_FREE, CHOSEN, CRACK_REACH, Law, Patronage, SENTENCE_THRESHOLD, SIGN, VOICE};
 pub use poison::{Cure, Poison};

@@ -53,10 +53,18 @@ pub enum Boon {
     Cards,
     /// Health back, and the poison gone.
     Mending,
+    /// An item from the loot deck (§20.3).
+    Loot,
 }
 
 impl Boon {
-    pub const ALL: [Boon; 4] = [Boon::Style, Boon::Favour, Boon::Cards, Boon::Mending];
+    pub const ALL: [Boon; 5] = [
+        Boon::Style,
+        Boon::Favour,
+        Boon::Cards,
+        Boon::Mending,
+        Boon::Loot,
+    ];
 }
 
 /// The face a god's trials want: each god's nature on the die.
@@ -178,6 +186,7 @@ impl Game {
         self.discard.extend(burned.iter().copied());
         let count = self.champions[player.0 as usize]
             .might
+            .saturating_add(self.item_trial_dice(player))
             .saturating_sub(burned.len() as u8);
         self.trial_throws += 1;
         let label = [TRIAL_STREAM, self.trial_throws];
@@ -220,6 +229,7 @@ impl Game {
                 self.cure(player, super::Cure::Trial, events);
                 self.heal(player, n, events);
             }
+            Boon::Loot => self.gain_loot(player, events),
         }
     }
 

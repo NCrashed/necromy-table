@@ -143,6 +143,7 @@ pub fn style_reason(reason: necromy_rules::StyleReason) -> &'static str {
         StyleReason::Wish => "оценку желания",
         StyleReason::Story => "сюжет",
         StyleReason::Trial => "испытание",
+        StyleReason::Item => "плату тёмному богу",
     }
 }
 
@@ -608,6 +609,7 @@ pub fn boon(g: &necromy_rules::Game, trial: &necromy_rules::Trial) -> String {
         Boon::Favour => format!("+{n} благосклонности {}", god_genitive(trial.god)),
         Boon::Cards => format!("{n} карт(ы)"),
         Boon::Mending => format!("+{n} здоровья, яд снят"),
+        Boon::Loot => "предмет из добычи".into(),
     }
 }
 
@@ -635,4 +637,97 @@ pub fn bet_you(bet: necromy_rules::Bet) -> &'static str {
         Bet::Fall => "падёшь",
         Bet::Hide => "скроешься",
     }
+}
+
+/// "оружие": a slot for items (§20.3).
+pub fn slot(slot: necromy_rules::Slot) -> &'static str {
+    use necromy_rules::Slot;
+    match slot {
+        Slot::Weapon => "оружие",
+        Slot::Armour => "облачение",
+        Slot::Relic => "реликвия",
+    }
+}
+
+/// What an item does now, its number as its god's stage has it.
+pub fn item_does(g: &necromy_rules::Game, item: necromy_rules::ItemId) -> String {
+    use necromy_rules::{ItemEffect, When};
+    let n = g.item_power(item);
+    let def = item.def();
+    match def.effect {
+        ItemEffect::Dice(when) => {
+            let when = match when {
+                When::Always => " в бою",
+                When::Attacking => ", когда нападаешь",
+                When::Defending => " в защите",
+                When::Day => " в бою днём",
+                When::Night => " в бою ночью",
+            };
+            format!("+{n} кубик(а){when}")
+        }
+        ItemEffect::Shields => format!("+{n} щит(а) в каждом бою"),
+        ItemEffect::Mend => format!("в начале хода +{n} здоровья"),
+        ItemEffect::Wellspring => format!("в начале хода +{n} Духа"),
+        ItemEffect::Hush => format!("в начале хода −{n} Угрозы"),
+        ItemEffect::Hands => format!("+{n} к пределу руки"),
+        ItemEffect::Stride => format!("+{n} очк. движения каждый ход"),
+        ItemEffect::TrialDice => format!("+{n} кубик(а) в испытаниях"),
+        ItemEffect::Shade => "ночью скрываешься на любой клетке".into(),
+        ItemEffect::Ward => format!("в начале хода оберег ({})", element(def.element)),
+    }
+}
+
+/// What a dark god takes each turn from whoever wears its item.
+pub fn item_toll(god: God) -> &'static str {
+    match god {
+        God::Bhava => "яд дерева",
+        God::Trishna => "−1 здоровья (не до смерти)",
+        God::Zaga => "+1 Угрозы",
+        God::Ahamar => "−1 Стиля",
+        God::Maya => "−1 Духа",
+    }
+}
+
+/// An item's tooltip: what it is, does, what breaks it, how its god bends it.
+pub fn item_tip(
+    g: &necromy_rules::Game,
+    wearer: Option<necromy_rules::PlayerId>,
+    item: necromy_rules::ItemId,
+) -> String {
+    let def = item.def();
+    let god = God::from_index(def.element.index());
+    let mut lines = vec![
+        format!(
+            "{} · {} · {}",
+            def.name,
+            slot(def.slot),
+            element(def.element)
+        ),
+        item_does(g, item),
+        format!(
+            "ломает: {} (карта или грань стихии)",
+            element(def.element.quenched_by())
+        ),
+    ];
+    match g.stage(god) {
+        0 if def.effect.scales() => lines.push(format!("{} светел: сильнее на 1", god_name(god))),
+        2 => {
+            let spared = wearer.is_some_and(|p| !g.item_tolls(p, item));
+            if spared {
+                lines.push(format!("{} тёмен, но щадит избранника", god_name(god)));
+            } else {
+                lines.push(format!(
+                    "{} тёмен: каждый ход {}",
+                    god_name(god),
+                    item_toll(god)
+                ));
+            }
+        }
+        _ => {}
+    }
+    lines.join("\n")
+}
+
+fn god_name(god: God) -> &'static str {
+    self::god(god)
 }

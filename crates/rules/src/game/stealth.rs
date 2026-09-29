@@ -111,7 +111,8 @@ impl Game {
         // At night under cover; Maya's Manipulation hides anywhere at night,
         // Bhava's Thicket keeps the woods dark by day (§5.3).
         let may_hide = match self.time {
-            TimeOfDay::Night => cover || self.law_active(Law::Manipulation),
+            // A moss cloak does as much (§20.3).
+            TimeOfDay::Night => cover || self.law_active(Law::Manipulation) || self.shaded(player),
             TimeOfDay::Day => {
                 self.law_active(Law::Thicket)
                     && matches!(terrain, Some(Terrain::Forest | Terrain::Grove))

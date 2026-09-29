@@ -198,6 +198,8 @@ struct MarkerSprites {
     /// and the die face it asks for, framed in that colour, floating above.
     trial_rings: [Handle<Image>; 5],
     trial_faces: [Handle<Image>; 5],
+    /// Something lying on the ground (§20.3): a pouch, drawn flat.
+    pouch: Handle<Image>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -360,6 +362,7 @@ fn spawn_board(
         flags: God::ALL.map(|g| images.add(pixel_sprite(&FLAG_ROWS, g.accent()))),
         trails: God::ALL.map(|g| images.add(pixel_sprite(&TRAIL_ROWS, g.accent()))),
         quest: images.add(pixel_sprite(&QUEST_ROWS, [250, 214, 120])),
+        pouch: assets.load("items/ground-pouch.png"),
         trial_rings: God::ALL.map(|g| images.add(rune_ring(g.accent()))),
         trial_faces: God::ALL.map(|g| images.add(trial_badge(g))),
     });
@@ -575,6 +578,23 @@ fn sync_markers(
             )
         })
         .collect();
+    // Items on the ground: a pouch lying by the hex's edge, once loaded.
+    let ground: Vec<_> = game
+        .game
+        .ground_items()
+        .iter()
+        .map(|(hex, _)| *hex)
+        .filter(|_| images.contains(&sprites.pouch))
+        .map(|hex| {
+            (
+                hex,
+                sprites.pouch.clone(),
+                Vec3::new(0.3, 0.0, 0.3),
+                TEXELS,
+                true,
+            )
+        })
+        .collect();
     // Trials: the god's stone, and the face it asks for above it.
     let trial_marks: Vec<_> = game
         .game
@@ -607,6 +627,7 @@ fn sync_markers(
         .chain(trails)
         .chain(quest_marks)
         .chain(trial_marks)
+        .chain(ground)
         .collect();
     // Despawning and respawning everything would blink every marker for a
     // frame (this runs on each hover): keep what is still wanted.

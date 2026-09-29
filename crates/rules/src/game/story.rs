@@ -194,8 +194,9 @@ impl Game {
                 StyleReason::Story,
                 events,
             );
-            // The god remembers who answered.
+            // The god remembers who answered, and gives from the loot (§20.3).
             self.offer(Some(line.owner), line.god, 1, events);
+            self.gain_loot(line.owner, events);
         } else {
             events.push(Event::LineFailed { line });
             if line.stake > 0 {

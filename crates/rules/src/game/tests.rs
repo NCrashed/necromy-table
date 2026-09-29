@@ -3053,6 +3053,7 @@ fn passing_the_trial_of_a_line_closes_it() {
 #[test]
 fn bots_try_trials() {
     let mut tried = 0;
+    let mut gained = 0;
     for seed in 0..30 {
         let (mut g, _) = Game::new(Setup {
             seed,
@@ -3071,8 +3072,14 @@ fn bots_try_trials() {
             .iter()
             .filter(|e| matches!(e, Event::TrialPassed { .. } | Event::TrialFailed { .. }))
             .count();
+        gained += g
+            .log()
+            .iter()
+            .filter(|e| matches!(e, Event::ItemGained { .. }))
+            .count();
     }
     assert!(tried > 0, "no bot ever tried a trial");
+    assert!(gained > 0, "no bot ever gained an item");
 }
 
 #[test]
@@ -3143,4 +3150,173 @@ fn a_trial_in_the_open_brings_the_hidden_out_but_cover_keeps_them() {
             Event::TrialPassed { .. } | Event::TrialFailed { .. } | Event::Burned { .. }
         ) || Game::event_for(&view, Some(foe), e).is_none()
     }));
+}
+
+// ---- Items (§20.3) ----
+
+fn item_named(name: &str) -> crate::items::ItemId {
+    crate::items::ItemId(
+        crate::items::ITEMS
+            .iter()
+            .position(|d| d.name == name)
+            .unwrap_or_else(|| panic!("no item {name}")) as u16,
+    )
+}
+
+fn wear(g: &mut Game, player: PlayerId, name: &str) -> crate::items::ItemId {
+    let item = item_named(name);
+    g.loot.retain(|&i| i != item);
+    g.equip(player, item, Gain::Loot, &mut Vec::new());
+    item
+}
+
+#[test]
+fn a_new_item_pushes_the_old_one_to_the_ground() {
+    let (mut g, me, _) = duel(3);
+    let bow = wear(&mut g, me, "Тисовый лук");
+    let sword = wear(&mut g, me, "Меч присяги");
+    assert_eq!(g.gear(me)[crate::items::Slot::Weapon.index()], Some(sword));
+    assert_eq!(g.ground_items(), &[(Hex::new(0, 0), bow)]);
+}
+
+#[test]
+fn weapons_add_dice_and_the_light_adds_more() {
+    let (mut g, me, _) = duel(3);
+    let might = g.champion(me).unwrap().might;
+    wear(&mut g, me, "Меч присяги");
+    assert_eq!(g.dice_for(me, false), might + 1);
+    // Ahamar in his light stage: the sword gives two.
+    g.pantheon.stages[God::Ahamar.index()] = 0;
+    assert_eq!(g.dice_for(me, false), might + 2);
+    // A bow counts only in attack.
+    let (mut g, me, _) = duel(3);
+    wear(&mut g, me, "Тисовый лук");
+    assert_eq!(g.dice_for(me, true), might);
+    assert_eq!(g.dice_for(me, false), might + 1);
+}
+
+#[test]
+fn the_quenching_element_breaks_an_item() {
+    // A metal card that gets through breaks a wood item.
+    let (mut g, me, foe) = duel(2);
+    let bow = wear(&mut g, foe, "Тисовый лук");
+    g.champ_mut(me).spirit_points = 3;
+    play_at(&mut g, me, "Приговор порядка", foe);
+    assert_eq!(g.gear(foe), [None; 3]);
+    assert_eq!(g.loot[0], bow, "under the loot deck");
+    // An Element face of a metal patron does the same in battle.
+    let (mut g, _, foe) = duel(2);
+    wear(&mut g, foe, "Посох-корень");
+    let mut events = Vec::new();
+    g.element_breaks_ward(Element::Metal, foe, &[Face::Element], &mut events);
+    assert!(events.iter().any(|e| matches!(e, Event::ItemBroken { .. })));
+    // Other elements leave it be.
+    let (mut g, me, foe) = duel(2);
+    wear(&mut g, foe, "Тисовый лук");
+    play_at(&mut g, me, "Искра", foe);
+    assert!(g.gear(foe)[0].is_some());
+}
+
+#[test]
+fn the_fallen_drop_an_item_and_a_step_picks_it_up() {
+    let (mut g, me, foe) = duel(2);
+    let seal = wear(&mut g, foe, "Печать реестра");
+    let at = g.champion(foe).unwrap().hex;
+    g.fall(foe, &mut Vec::new());
+    assert_eq!(g.ground_items(), &[(at, seal)]);
+    // `me` walks over and puts it on.
+    g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    g.pass_all();
+    g.apply(me, Intent::Move { to: at }).unwrap();
+    assert_eq!(g.gear(me)[crate::items::Slot::Relic.index()], Some(seal));
+    assert!(g.ground_items().is_empty());
+    assert_eq!(g.hand_limit(me), g.champion(me).unwrap().hand_limit() + 1);
+}
+
+#[test]
+fn an_item_given_at_a_temple_is_a_great_offering() {
+    let (mut g, me, _) = duel(3);
+    wear(&mut g, me, "Кубок пира");
+    let slot = crate::items::Slot::Relic;
+    assert_eq!(
+        g.apply(me, Intent::Sacrifice { slot }),
+        Err(RuleError::NotAtTemple)
+    );
+    let tile = g.board.tile_mut(Hex::new(0, 0)).unwrap();
+    tile.terrain = Terrain::Temple;
+    tile.region = Some(God::Zaga);
+    let before = g.favor(me, God::Zaga);
+    g.apply(me, Intent::Sacrifice { slot }).unwrap();
+    assert_eq!(g.gear(me), [None; 3]);
+    assert_eq!(g.favor(me, God::Zaga), before + u16::from(SACRIFICE));
+    assert_eq!(
+        g.apply(me, Intent::Sacrifice { slot }),
+        Err(RuleError::NothingWorn)
+    );
+}
+
+#[test]
+fn items_work_as_the_turn_starts_and_dark_gods_take_a_toll() {
+    let (mut g, me, _) = duel(3);
+    wear(&mut g, me, "Посох-корень");
+    wear(&mut g, me, "Сандалии пути");
+    g.champ_mut(me).hp = 1;
+    let mut events = Vec::new();
+    g.start_turn(me, &mut events);
+    assert_eq!(g.champion(me).unwrap().hp, 2);
+    assert_eq!(g.move_points(me), MOVE_POINTS + 1);
+
+    // Trishna dark: her cup burns whoever holds it, never to death.
+    let (mut g, me, _) = duel(3);
+    wear(&mut g, me, "Кубок пира");
+    g.pantheon.stages[God::Trishna.index()] = 2;
+    let hp = g.champion(me).unwrap().hp;
+    let mut events = Vec::new();
+    g.start_turn(me, &mut events);
+    assert!(events.iter().any(|e| matches!(e, Event::ItemToll { .. })));
+    assert_eq!(g.champion(me).unwrap().hp, hp - 1);
+    g.champ_mut(me).hp = 1;
+    g.start_turn(me, &mut Vec::new());
+    assert_eq!(g.champion(me).unwrap().hp, 1);
+}
+
+#[test]
+fn trials_and_story_lines_give_loot() {
+    let (mut g, me, _) = duel(3);
+    trial_on(&mut g, Hex::new(1, 0), God::Zaga, Boon::Loot);
+    let top = *g.loot.last().unwrap();
+    let cards = burn_all(&mut g, me, "Упокоить");
+    g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    g.apply(me, Intent::Burn { cards }).unwrap();
+    assert!(g.gear(me).contains(&Some(top)));
+
+    let (mut g, me, _) = duel(3);
+    g.lines.push(Line {
+        id: 7,
+        owner: me,
+        god: God::Maya,
+        kind: LineKind::Pilgrimage,
+        goal: Goal::ReachHex(Hex::new(1, 0)),
+        deadline: g.round() + 4,
+        style: 2,
+        stake: 0,
+    });
+    let loot = g.loot_len();
+    g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    g.pass_all();
+    assert_eq!(g.loot_len(), loot - 1);
+    assert!(g.gear(me).iter().any(Option::is_some));
+}
+
+#[test]
+fn a_view_hides_the_loot_order_not_what_is_worn() {
+    let (mut g, me, foe) = duel(3);
+    let bow = wear(&mut g, foe, "Тисовый лук");
+    let v = g.view_for(Some(me), 11);
+    assert_eq!(v.gear(foe)[0], Some(bow));
+    let mut a = g.loot.clone();
+    let mut b = v.loot.clone();
+    a.sort();
+    b.sort();
+    assert_eq!(a, b);
 }
