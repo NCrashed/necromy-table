@@ -79,10 +79,14 @@ pub enum Feature {
     Dragons,
     /// Strangers from beyond the mist.
     Guests,
+    /// Beasts out of the woods of every land, each of its element.
+    Wilds,
+    /// Pens where tamed beasts are tethered.
+    Pens,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 31] = [
+    pub const ALL: [Feature; 33] = [
         Feature::Bodies,
         Feature::Groves,
         Feature::Settlements,
@@ -114,6 +118,8 @@ impl Feature {
         Feature::Monsters,
         Feature::Dragons,
         Feature::Guests,
+        Feature::Wilds,
+        Feature::Pens,
     ];
 
     /// What the world must have before this can come in (§21.2): all of
@@ -144,6 +150,12 @@ impl Feature {
                 Has(Feature::Cargo),
             ],
             Feature::Guests => &[Has(Feature::Companions)],
+            Feature::Wilds => &[Has(Feature::Beasts)],
+            Feature::Pens => &[
+                Has(Feature::Beasts),
+                Has(Feature::Companions),
+                Has(Feature::Buildings),
+            ],
             Feature::Fires => &[Land(&[Terrain::Forest, Terrain::Grove])],
             Feature::Piranhas => &[Has(Feature::Beasts), Has(Feature::Rivers)],
             Feature::Groves | Feature::Undead => &[Has(Feature::Bodies)],
@@ -169,7 +181,9 @@ impl Feature {
             | Feature::Beasts
             | Feature::Companions
             | Feature::Piranhas
-            | Feature::Fields => God::Bhava,
+            | Feature::Fields
+            | Feature::Wilds
+            | Feature::Pens => God::Bhava,
             Feature::Settlements
             | Feature::Cargo
             | Feature::Buildings

@@ -361,7 +361,9 @@ impl Game {
             | Feature::Burial
             | Feature::Ritual
             | Feature::Monsters
-            | Feature::Dragons => {}
+            | Feature::Dragons
+            | Feature::Wilds
+            | Feature::Pens => {}
         }
     }
 

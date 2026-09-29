@@ -65,6 +65,8 @@ pub enum GreatDeed {
     Dragon,
     /// The stranger from beyond the mist led to the Table alive.
     Guest,
+    /// A pen of yours by a shrine of yours with a beast of every element.
+    Ark,
     /// Marriages of your making binding three lands into one house.
     TripleUnion,
     /// Crowned over three vassals, then their oaths broken and three of
@@ -76,7 +78,7 @@ pub enum GreatDeed {
 }
 
 impl GreatDeed {
-    pub const ALL: [GreatDeed; 21] = [
+    pub const ALL: [GreatDeed; 22] = [
         GreatDeed::WorldTree,
         GreatDeed::Island,
         GreatDeed::DissolvedLand,
@@ -98,12 +100,15 @@ impl GreatDeed {
         GreatDeed::Summoning,
         GreatDeed::Dragon,
         GreatDeed::Guest,
+        GreatDeed::Ark,
     ];
 
     /// The god whose deed it is: its card's colour, its voice.
     pub const fn patron(self) -> God {
         match self {
-            GreatDeed::WorldTree | GreatDeed::Amazon | GreatDeed::TripleUnion => God::Bhava,
+            GreatDeed::WorldTree | GreatDeed::Amazon | GreatDeed::TripleUnion | GreatDeed::Ark => {
+                God::Bhava
+            }
             GreatDeed::Island
             | GreatDeed::DissolvedLand
             | GreatDeed::River
@@ -156,6 +161,14 @@ impl GreatDeed {
                 Feature::Dragons,
             ],
             GreatDeed::Guest => &[Feature::Companions, Feature::Guests],
+            GreatDeed::Ark => &[
+                Feature::Beasts,
+                Feature::Companions,
+                Feature::Wilds,
+                Feature::Settlements,
+                Feature::Buildings,
+                Feature::Pens,
+            ],
             GreatDeed::TripleUnion | GreatDeed::FallenEmpire => {
                 &[Feature::Settlements, Feature::Rulers]
             }
@@ -241,6 +254,10 @@ pub enum CheckKind {
     DragonFollows,
     /// The guest led home.
     GuestHome,
+    /// Elements of the beasts in a pen of yours.
+    PenElements,
+    /// A shrine of yours in its city.
+    PenByShrine,
     /// Lands bound by your marriages.
     UnionLands,
     /// You have been crowned.
@@ -459,6 +476,13 @@ impl Game {
                 usize::from(self.companions(player).contains(&super::Companion::Dragon)),
                 1,
             )],
+            GreatDeed::Ark => {
+                let (elements, shrine) = self.best_ark(player);
+                vec![
+                    check(CheckKind::PenElements, elements, super::ARK),
+                    check(CheckKind::PenByShrine, usize::from(shrine), 1),
+                ]
+            }
             GreatDeed::Guest => vec![check(
                 CheckKind::GuestHome,
                 usize::from(self.guest_home(player)),
@@ -735,7 +759,7 @@ impl Game {
                     super::Building::Tavern => has[0] = true,
                     super::Building::Forge => has[1] = true,
                     super::Building::Shrine(_) => has[2] = true,
-                    super::Building::Wall => {}
+                    super::Building::Wall | super::Building::Pen => {}
                 }
             }
             let found = (city.len(), has.iter().filter(|&&x| x).count());

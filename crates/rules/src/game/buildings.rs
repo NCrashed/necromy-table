@@ -23,6 +23,8 @@ pub enum Building {
     /// A shrine of one god (both the same) or of two whose lands meet.
     Shrine([God; 2]),
     Wall,
+    /// A pen where tamed beasts are tethered (§21.8).
+    Pen,
 }
 
 /// Spirit a building costs.
@@ -60,6 +62,9 @@ impl Game {
             return Vec::new();
         };
         let mut all = vec![Building::Tavern, Building::Forge, Building::Wall];
+        if self.has(Feature::Pens) {
+            all.push(Building::Pen);
+        }
         all.push(Building::Shrine([own, own]));
         // A shrine of two where the land touches another god's.
         let mut others: Vec<God> = at

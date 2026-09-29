@@ -303,6 +303,13 @@ pub fn great_deed(d: necromy_rules::GreatDeed) -> (&'static str, String) {
                 necromy_rules::GREAT_FIRE
             ),
         ),
+        GreatDeed::Ark => (
+            "Ковчег",
+            format!(
+                "Загон у своего святилища, и в нём на привязи по зверю каждой из {} стихий.",
+                necromy_rules::ARK
+            ),
+        ),
         GreatDeed::Summoning => (
             "Призыв",
             format!(
@@ -415,6 +422,8 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::Summoned => "твоё чудовище пало от твоей руки",
         CheckKind::DragonFollows => "за тобой идёт дракон",
         CheckKind::GuestHome => "гость доведён до Стола",
+        CheckKind::PenElements => "стихий зверей в твоём загоне",
+        CheckKind::PenByShrine => "твоё святилище рядом",
         CheckKind::Crowned => "коронация на Столе",
         CheckKind::Feuding => "бывших вассалов в распре",
         CheckKind::RiverLength => "клеток самой длинной реки",
@@ -538,6 +547,14 @@ pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {
         Feature::Roads => (
             "Дороги",
             "шаг по дороге стоит 1 на любой земле, дорога через реку — мост; на дороге не скрыться",
+        ),
+        Feature::Wilds => (
+            "Звери стихий",
+            "звери выходят из лесов любого края, каждый — стихии своего края",
+        ),
+        Feature::Pens => (
+            "Загоны",
+            "на поселении можно поставить загон и привязать там прирученного зверя; чужого можно увести",
         ),
         Feature::Ritual => (
             "Ритуал",
@@ -1125,6 +1142,7 @@ pub fn building(b: necromy_rules::Building) -> String {
         Building::Tavern => "таверна".into(),
         Building::Forge => "кузня".into(),
         Building::Wall => "стена".into(),
+        Building::Pen => "загон".into(),
         Building::Shrine([a, b]) if a == b => format!("святилище {}", god_genitive(a)),
         Building::Shrine([a, b]) => {
             format!("святилище {} и {}", god_genitive(a), god_genitive(b))
@@ -1136,7 +1154,7 @@ pub fn building(b: necromy_rules::Building) -> String {
 pub fn companion(c: necromy_rules::Companion) -> &'static str {
     use necromy_rules::Companion;
     match c {
-        Companion::Beast => "зверь",
+        Companion::Beast(_) => "зверь",
         Companion::Undead => "мертвец",
         Companion::Dragon => "дракон",
         Companion::Guest => "гость",

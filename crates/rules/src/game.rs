@@ -195,6 +195,14 @@ pub enum Intent {
     Feast,
     /// On your turn, in a settlement of yours: open a fair.
     Fair,
+    /// On your turn, in a pen of yours: tether a tamed beast (§21.8).
+    Tether {
+        element: Element,
+    },
+    /// On your turn, in a rival's pen: untie a beast and lead it away.
+    Untether {
+        element: Element,
+    },
     /// On your turn: a circle on the stones underfoot (§21.8).
     DrawCircle,
     /// On your turn: the ground underfoot becomes a graveyard (§21.8).
@@ -786,6 +794,18 @@ pub enum Event {
     /// A road on `hex` (§21.8).
     RoadLaid {
         hex: Hex,
+    },
+    /// `player` tethered a beast of `element` in the pen on `hex` (§21.8).
+    Tethered {
+        player: PlayerId,
+        hex: Hex,
+        element: Element,
+    },
+    /// `player` untied a beast from the pen on `hex` and led it away.
+    Untethered {
+        player: PlayerId,
+        hex: Hex,
+        element: Element,
     },
     /// `player` drew a circle on `hex` (§21.8).
     CircleDrawn {
@@ -1457,6 +1477,8 @@ pub struct Game {
     buildings: BTreeMap<(i32, i32), buildings::Building>,
     /// Roads of the register (§21.8).
     roads: std::collections::BTreeSet<(i32, i32)>,
+    /// Tethered beasts in pens, by element (§21.8).
+    pens: BTreeMap<(i32, i32), u8>,
     /// Circles on the stones and wonders done (§21.8).
     circles: BTreeMap<(i32, i32), ritual::Circle>,
     wonders: Vec<ritual::Wonders>,
@@ -1616,6 +1638,7 @@ impl Game {
             stores: BTreeMap::new(),
             fairs: BTreeMap::new(),
             rulers: BTreeMap::new(),
+            pens: BTreeMap::new(),
             circles: BTreeMap::new(),
             wonders: vec![ritual::Wonders::default(); champions_len],
             graves: BTreeMap::new(),
@@ -2154,6 +2177,8 @@ impl Game {
             Intent::Feast => self.hold_feast(player, events),
             Intent::Fair => self.open_fair(player, events),
             Intent::DrawCircle => self.draw_circle(player, events),
+            Intent::Tether { element } => self.tether(player, element, events),
+            Intent::Untether { element } => self.untether(player, element, events),
             Intent::Consecrate => self.consecrate(player, events),
             Intent::DigPit => self.dig_pit(player, events),
             Intent::SettlePit { raise } => self.settle_pit(player, raise, events),
@@ -2199,6 +2224,8 @@ impl Game {
             Intent::Feast => self.check_feast(player),
             Intent::Fair => self.check_fair(player),
             Intent::DrawCircle => self.check_circle(player),
+            Intent::Tether { element } => self.check_tether(player, element),
+            Intent::Untether { element } => self.check_untether(player, element),
             Intent::Consecrate | Intent::DigPit => self.check_consecrate(player),
             Intent::SettlePit { .. } => self.check_settle_pit(player),
             Intent::Gift { hex } => self.check_gift(player, hex),
@@ -2679,6 +2706,8 @@ impl Game {
             | Intent::Feast
             | Intent::Fair
             | Intent::DrawCircle
+            | Intent::Tether { .. }
+            | Intent::Untether { .. }
             | Intent::Consecrate
             | Intent::DigPit
             | Intent::SettlePit { .. }
@@ -3540,6 +3569,7 @@ mod laws;
 mod militia;
 mod mobs;
 mod novelty;
+mod pens;
 mod poison;
 mod ritual;
 mod roads;
@@ -3575,6 +3605,7 @@ pub use mobs::{
     MAX_UNDEAD, Mob, MobKind, UNDEAD_AGE, UNDEAD_AGE_DARK, UNDEAD_DICE, UNDEAD_HEALTH, UNDEAD_SIGHT,
 };
 pub use novelty::{FIRST_STYLE, Novelty, VARIETY};
+pub use pens::ARK;
 pub use poison::{Cure, Poison};
 pub use ritual::{
     CIRCLE_SPIRIT, Circle, EGG_WARMTH, MONSTER_DICE, MONSTER_HEALTH, SUMMON_BODIES, Wonders,

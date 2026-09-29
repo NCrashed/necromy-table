@@ -221,7 +221,7 @@ struct MarkerSprites {
     /// Goods lying on the ground, a sack in its land's colour.
     goods: [Handle<Image>; 5],
     /// A building's sign (§21.8): tavern, forge, wall, and a shrine per god.
-    signs: [Handle<Image>; 3],
+    signs: [Handle<Image>; 4],
     shrines: [Handle<Image>; 5],
 }
 
@@ -343,8 +343,13 @@ fn spawn_board(
         fair: images.add(pixel_sprite(&BANNER_ROWS, [210, 60, 120])),
         egg: images.add(pixel_sprite(&EGG_ROWS, [170, 60, 50])),
         goods: God::ALL.map(|g| images.add(pixel_sprite(&SACK_ROWS, g.accent()))),
-        signs: [[220, 160, 60], [200, 84, 44], [150, 150, 160]]
-            .map(|c| images.add(pixel_sprite(&SIGN_ROWS, c))),
+        signs: [
+            [220, 160, 60],
+            [200, 84, 44],
+            [150, 150, 160],
+            [110, 170, 70],
+        ]
+        .map(|c| images.add(pixel_sprite(&SIGN_ROWS, c))),
         shrines: God::ALL.map(|g| images.add(pixel_sprite(&SIGN_ROWS, g.accent()))),
         trial_rings: God::ALL.map(|g| images.add(rune_ring(g.accent()))),
         trial_faces: God::ALL.map(|g| images.add(trial_badge(g))),
@@ -802,6 +807,7 @@ fn sync_markers(
                 necromy_rules::Building::Tavern => sprites.signs[0].clone(),
                 necromy_rules::Building::Forge => sprites.signs[1].clone(),
                 necromy_rules::Building::Wall => sprites.signs[2].clone(),
+                necromy_rules::Building::Pen => sprites.signs[3].clone(),
                 necromy_rules::Building::Shrine([g, _]) => sprites.shrines[g.index()].clone(),
             };
             (hex, image, Vec3::new(0.45, 0.0, -0.2), TEXELS, false)

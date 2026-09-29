@@ -82,6 +82,9 @@ enum ActionButton {
     Fair,
     /// A circle on the stones underfoot.
     DrawCircle,
+    /// Tether a beast in one's pen; untie one in a rival's.
+    Tether(necromy_rules::Element),
+    Untether(necromy_rules::Element),
     /// Burial: a graveyard, a pit, a pit settled.
     Consecrate,
     DigPit,
@@ -541,6 +544,12 @@ fn rebuild_action(
                 format!("Поджечь\n{} Духа", necromy_rules::KINDLE_SPIRIT),
             ));
         }
+        if let Some(&e) = g.tetherable(human).first() {
+            buttons.push((ActionButton::Tether(e), "Привязать\nзверя".to_string()));
+        }
+        if let Some(&e) = g.untetherable(human).first() {
+            buttons.push((ActionButton::Untether(e), "Увести\nзверя".to_string()));
+        }
         if g.may_draw_circle(human) && spirit >= necromy_rules::CIRCLE_SPIRIT {
             buttons.push((
                 ActionButton::DrawCircle,
@@ -657,6 +666,8 @@ fn action_buttons(
             ActionButton::Feast => Intent::Feast,
             ActionButton::Fair => Intent::Fair,
             ActionButton::DrawCircle => Intent::DrawCircle,
+            ActionButton::Tether(element) => Intent::Tether { element: *element },
+            ActionButton::Untether(element) => Intent::Untether { element: *element },
             ActionButton::Consecrate => Intent::Consecrate,
             ActionButton::DigPit => Intent::DigPit,
             ActionButton::SettlePit(raise) => Intent::SettlePit { raise: *raise },

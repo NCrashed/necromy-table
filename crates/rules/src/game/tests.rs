@@ -3749,6 +3749,7 @@ fn beast_on(g: &mut Game, lair: Hex, hex: Hex) -> u32 {
 #[test]
 fn beasts_come_out_of_bhavas_woods_unless_he_is_light() {
     let (mut g, _, _) = duel(3);
+    without(&mut g, &[Feature::Wilds]);
     g.time = TimeOfDay::Night;
     g.pantheon.stages[God::Bhava.index()] = 0;
     let mut events = Vec::new();
@@ -4951,18 +4952,18 @@ fn a_beast_is_tamed_for_spirit() {
     let lair = g.mobs().iter().find(|m| m.id == id).unwrap().hex;
     g.mobs.iter_mut().find(|m| m.id == id).unwrap().kind = MobKind::Beast { lair };
     g.apply(me, Intent::Recruit { mob: id }).unwrap();
-    assert_eq!(g.companions(me), &[Companion::Beast]);
+    assert!(matches!(g.companions(me), [Companion::Beast(_)]));
     assert_eq!(g.champion(me).unwrap().spirit_points, 5 - TAME_SPIRIT);
 }
 
 #[test]
 fn companions_go_to_the_winner_and_scatter_on_a_fall() {
     let (mut g, me, foe) = duel(3);
-    g.champ_mut(foe).companions = vec![Companion::Beast, Companion::Undead];
+    g.champ_mut(foe).companions = vec![Companion::Beast(Element::Wood), Companion::Undead];
     let mut ev = Vec::new();
     g.seize_companion(me, foe, &mut ev);
     assert_eq!(g.companions(me), &[Companion::Undead]);
-    assert_eq!(g.companions(foe), &[Companion::Beast]);
+    assert_eq!(g.companions(foe), &[Companion::Beast(Element::Wood)]);
     // The fallen lose the rest; an undead rises where they fell.
     let at = g.champion(me).unwrap().hex;
     let undead = g.mobs().iter().filter(|m| m.is_undead()).count();
@@ -5578,4 +5579,46 @@ fn the_guest_is_led_to_the_table() {
     assert!(g.guest_home(me));
     g.chosen[me.0 as usize] = Some(GreatDeed::Guest);
     assert!(g.checks(me, GreatDeed::Guest).iter().all(Check::met));
+}
+
+// ---- Pens and the Ark (§21.8) ----
+
+#[test]
+fn beasts_of_every_element_tethered_by_a_shrine_are_the_ark() {
+    let (mut g, me, foe) = duel(4);
+    g.chosen[me.0 as usize] = Some(GreatDeed::Ark);
+    let town = Hex::new(0, 2);
+    settled(&mut g, me, town);
+    g.apply(
+        me,
+        Intent::Build {
+            building: Building::Pen,
+        },
+    )
+    .unwrap();
+    g.champ_mut(me).companions = crate::gods::Element::ALL.map(Companion::Beast).to_vec();
+    let mut ev = Vec::new();
+    for e in crate::gods::Element::ALL {
+        g.tether(me, e, &mut ev).unwrap();
+    }
+    assert!(g.companions(me).is_empty());
+    assert_eq!(g.best_ark(me), (ARK, false));
+    let shrine = Hex::new(1, 2);
+    g.board.tile_mut(shrine).unwrap().terrain = Terrain::Settlement;
+    g.claims.insert((shrine.x(), shrine.y()), me);
+    g.buildings.insert(
+        (shrine.x(), shrine.y()),
+        Building::Shrine([God::Bhava, God::Bhava]),
+    );
+    assert!(g.checks(me, GreatDeed::Ark).iter().all(Check::met));
+    // A rival in the pen leads one away.
+    g.place(me, Hex::new(-1, 2));
+    g.place(foe, town);
+    g.untether(foe, crate::gods::Element::Fire, &mut ev)
+        .unwrap();
+    assert!(
+        g.companions(foe)
+            .contains(&Companion::Beast(crate::gods::Element::Fire))
+    );
+    assert!(!g.checks(me, GreatDeed::Ark).iter().all(Check::met));
 }

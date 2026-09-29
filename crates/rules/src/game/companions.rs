@@ -12,12 +12,13 @@ use serde::{Deserialize, Serialize};
 use super::mobs::{Mob, MobKind};
 use super::{Event, Game, PlayerId, RuleError};
 use crate::features::Feature;
+use crate::gods::Element;
 
 /// Who follows a champion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Companion {
-    /// A tamed beast of Bhava's woods.
-    Beast,
+    /// A tamed beast, of the element of the land it came from.
+    Beast(Element),
     /// An undead of the legion.
     Undead,
     /// A dragon hatched from an egg: worth two.
@@ -60,7 +61,7 @@ impl Game {
         }
         match mob.kind {
             MobKind::Beast { .. } if self.has(Feature::Companions) => {
-                Some((Companion::Beast, TAME_SPIRIT))
+                Some((Companion::Beast(self.beast_element(mob)), TAME_SPIRIT))
             }
             MobKind::Guest if self.has(Feature::Guests) => Some((Companion::Guest, 0)),
             MobKind::Undead if self.has(Feature::Legion) => {

@@ -554,6 +554,10 @@ fn tooltip(
             "пожар{whose}: войти — обжечься; в ход мира перекинется дальше"
         ));
     }
+    let penned = g.penned(hex).count_ones();
+    if penned > 0 {
+        lines.push(format!("в загоне зверей: {penned}"));
+    }
     if let Some(c) = g.circle(hex) {
         lines.push(format!(
             "круг {}: напоен телами {}/{}",

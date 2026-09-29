@@ -38,6 +38,20 @@ impl Game {
         }
     }
 
+    /// A beast's element: its lair's land's (§21.8), Bhava's wood where
+    /// the land has no god.
+    pub fn beast_element(&self, mob: &Mob) -> crate::gods::Element {
+        let lair = match mob.kind {
+            MobKind::Beast { lair } => lair,
+            _ => mob.hex,
+        };
+        self.board
+            .tile(lair)
+            .and_then(|t| t.region)
+            .unwrap_or(God::Bhava)
+            .element()
+    }
+
     /// The land a beast keeps: within `BEAST_RANGE` of its lair.
     pub fn beast_land(mob: &Mob, hex: Hex) -> bool {
         match mob.kind {
@@ -61,7 +75,7 @@ impl Game {
             .board
             .tiles()
             .filter(|(h, t)| {
-                t.region == Some(God::Bhava)
+                (t.region == Some(God::Bhava) || self.has(crate::features::Feature::Wilds))
                     && matches!(t.terrain, Terrain::Forest | Terrain::Grove)
                     && self.champion_at(*h).is_none()
                     && !self.mob_at(*h)

@@ -471,6 +471,7 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
             | GreatDeed::Summoning
             | GreatDeed::Dragon
             | GreatDeed::Guest
+            | GreatDeed::Ark
             | GreatDeed::Amazon => wish(
                 God::Maya,
                 crate::Act::Veil {
@@ -664,6 +665,45 @@ fn deed_goal(game: &Game, player: PlayerId) -> Option<Hex> {
                                 .is_some_and(|x| x.terrain == crate::Terrain::Mountain)
                     })
                     .map(|t| t.hex)
+                    .collect(),
+            )
+        }
+        // Home to build the pen, beasts of the elements it lacks, the pen to
+        // tether them in.
+        GreatDeed::Ark => {
+            let me = game.champion(player)?.hex;
+            let nearest = |hexes: Vec<Hex>| {
+                hexes
+                    .into_iter()
+                    .filter(|h| *h != me)
+                    .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
+            };
+            let pen = game
+                .buildings()
+                .find(|&(h, b)| b == crate::Building::Pen && game.owner(h) == Some(player))
+                .map(|(h, _)| h);
+            let Some(pen) = pen else {
+                return nearest(
+                    game.claims()
+                        .filter(|&(h, p)| p == player && game.building(h).is_none())
+                        .map(|(h, _)| h)
+                        .collect(),
+                );
+            };
+            let lacks = |e: crate::Element| game.penned(pen) & (1 << e.index()) == 0;
+            if game
+                .companions(player)
+                .iter()
+                .any(|c| matches!(c, crate::Companion::Beast(e) if lacks(*e)))
+            {
+                return (me != pen).then_some(pen);
+            }
+            nearest(
+                game.mobs()
+                    .iter()
+                    .filter(|m| m.is_beast() && lacks(game.beast_element(m)))
+                    .flat_map(|m| m.hex.all_neighbors())
+                    .filter(|&h| game.board().contains(h) && game.occupant(h).is_none())
                     .collect(),
             )
         }
@@ -970,6 +1010,29 @@ fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
     {
         return Some(Intent::Douse { hex });
     }
+    // Its Ark: a pen at home, a shrine near it, beasts tethered.
+    if game.deed(player) == Some(GreatDeed::Ark) {
+        let can = game.may_build(player);
+        let pens = game
+            .buildings()
+            .any(|(h, b)| b == crate::Building::Pen && game.owner(h) == Some(player));
+        if let Some(&element) = game.tetherable(player).first() {
+            return Some(Intent::Tether { element });
+        }
+        if spirit_now >= crate::BUILD_SPIRIT {
+            if !pens && can.contains(&crate::Building::Pen) {
+                return Some(Intent::Build {
+                    building: crate::Building::Pen,
+                });
+            }
+            if pens
+                && !game.best_ark(player).1
+                && let Some(&b) = can.iter().find(|b| matches!(b, crate::Building::Shrine(_)))
+            {
+                return Some(Intent::Build { building: b });
+            }
+        }
+    }
     // Its circle: draw it, feed it.
     if game.deed(player) == Some(GreatDeed::Summoning) {
         let here = game.champion(player)?.hex;
@@ -1184,6 +1247,12 @@ fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
                 && match m.kind {
                     crate::MobKind::Undead => game.deed(player) == Some(GreatDeed::Legion),
                     crate::MobKind::Guest => game.deed(player) == Some(GreatDeed::Guest),
+                    crate::MobKind::Beast { .. } if game.deed(player) == Some(GreatDeed::Ark) => {
+                        !game
+                            .companions(player)
+                            .iter()
+                            .any(|c| *c == crate::Companion::Beast(game.beast_element(m)))
+                    }
                     _ => spare,
                 }
         })

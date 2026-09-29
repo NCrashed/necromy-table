@@ -185,6 +185,8 @@ pub fn feature_id(f: Feature) -> &'static str {
         Feature::Monsters => "monsters",
         Feature::Dragons => "dragons",
         Feature::Guests => "guests",
+        Feature::Wilds => "wilds",
+        Feature::Pens => "pens",
     }
 }
 
@@ -222,6 +224,8 @@ fn feature_words(f: Feature) -> &'static str {
         Feature::Monsters => "чудовища из врат",
         Feature::Dragons => "драконы из яиц",
         Feature::Guests => "гости из-за мглы",
+        Feature::Wilds => "звери стихий во всех краях",
+        Feature::Pens => "загоны для прирученных зверей",
     }
 }
 

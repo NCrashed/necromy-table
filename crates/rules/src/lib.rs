@@ -21,6 +21,7 @@ pub mod items;
 
 pub use cards::{CardDef, CardId, CardKind, CardMod, DefId, Effect, TargetRule, Timing};
 pub use features::{Feature, Mode, World};
+pub use game::ARK;
 pub use game::Cargo;
 pub use game::EARLIEST_EVE;
 pub use game::LEGION;
