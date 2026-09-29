@@ -63,8 +63,10 @@ pub struct StatArt {
     pub portraits: Vec<Handle<Image>>,
     /// The royal guard's sprite.
     pub guard: Handle<Image>,
-    /// The undead, by variant, and the militia's men (§20.4).
+    /// The undead and Bhava's beasts, by variant, and the militia's men
+    /// (§20.4).
     pub undead: Vec<Handle<Image>>,
+    pub beasts: Vec<Handle<Image>>,
     pub militia: Vec<Handle<Image>>,
     /// Die faces as icons.
     pub faces: HashMap<necromy_rules::Face, Handle<Image>>,
@@ -78,6 +80,15 @@ pub struct StatArt {
 impl StatArt {
     pub fn icon(&self, icon: StatIcon) -> Handle<Image> {
         self.icons[&icon].clone()
+    }
+
+    /// A mob's picture: its kind, the variant by its id.
+    pub fn mob(&self, kind: necromy_rules::MobKind, id: u32) -> Handle<Image> {
+        let set = match kind {
+            necromy_rules::MobKind::Undead => &self.undead,
+            necromy_rules::MobKind::Beast { .. } => &self.beasts,
+        };
+        set[id as usize % set.len()].clone()
     }
 }
 
@@ -151,6 +162,9 @@ fn make_art(
     let undead = (1..=6)
         .map(|n| assets.load(format!("sprites/undead-{n}.png")))
         .collect();
+    let beasts = (1..=6)
+        .map(|n| assets.load(format!("sprites/beast-{n}.png")))
+        .collect();
     let militia = (1..=4)
         .map(|n| assets.load(format!("sprites/militia-{n}.png")))
         .collect();
@@ -179,6 +193,7 @@ fn make_art(
         offering,
         items,
         undead,
+        beasts,
         militia,
         guard,
         faces,

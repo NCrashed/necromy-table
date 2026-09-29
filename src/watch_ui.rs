@@ -229,7 +229,21 @@ fn about(game: &Match, show: &Show) -> String {
             }
             _ => format!("гвардия против {}", names.join("")),
         },
-        ShowKind::Mob => format!("{} и неупокоенный", names.join("")),
+        ShowKind::Mob => {
+            let foe = show.events.iter().find_map(|e| match e {
+                necromy_rules::Event::MobAttacked { id, .. }
+                | necromy_rules::Event::MobStruck { id, .. } => {
+                    Some(game.mob_name(*id).0.to_lowercase())
+                }
+                necromy_rules::Event::MilitiaAttacked { .. } => Some("ополчение".into()),
+                _ => None,
+            });
+            format!(
+                "{} и {}",
+                names.join(""),
+                foe.unwrap_or_else(|| "неупокоенный".into())
+            )
+        }
         ShowKind::Trial => format!("{} на испытании", names.join("")),
     }
 }

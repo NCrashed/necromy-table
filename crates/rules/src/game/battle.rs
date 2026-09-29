@@ -82,7 +82,7 @@ impl Game {
     pub fn battle_dice(&self, player: PlayerId) -> Option<u8> {
         self.windows.iter().find_map(|w| match w.kind {
             WindowKind::GuardBattle { attacker }
-            | WindowKind::UndeadBattle { attacker, .. }
+            | WindowKind::MobBattle { attacker, .. }
             | WindowKind::MilitiaBattle { attacker, .. }
                 if attacker == player =>
             {

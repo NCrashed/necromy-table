@@ -754,3 +754,22 @@ pub fn standing_color(standing: i8) -> bevy::prelude::Color {
         Color::srgb_u8(176, 44, 36)
     }
 }
+
+/// Bhava's beasts by variant (`id` modulo the count, as their pictures
+/// `sprites/beast-N.png`): nominative, accusative (§20.4).
+const BEASTS: [(&str, &str); 6] = [
+    ("Волк", "волка"),
+    ("Вепрь", "вепря"),
+    ("Медведь", "медведя"),
+    ("Рысь", "рысь"),
+    ("Чёрный волк", "чёрного волка"),
+    ("Лесной лис", "лесного лиса"),
+];
+
+/// A mob's name, nominative and accusative (§20.4).
+pub fn mob(kind: necromy_rules::MobKind, id: u32) -> (&'static str, &'static str) {
+    match kind {
+        necromy_rules::MobKind::Undead => ("Неупокоенный", "неупокоенного"),
+        necromy_rules::MobKind::Beast { .. } => BEASTS[id as usize % BEASTS.len()],
+    }
+}

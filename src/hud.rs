@@ -517,12 +517,31 @@ fn tooltip(
     if let Some(p) = g.occupant(hex) {
         lines.push(format!("здесь: {}", game.name(p)));
     }
-    if let Some(u) = g.undead_at(hex) {
+    if let Some(u) = g.mob_on(hex) {
         lines.push(format!(
-            "неупокоенный: {}/{} здоровья, бросает {} кубика",
+            "{}: {}/{} здоровья, бросает {} кубика",
+            names::mob(u.kind, u.id).0.to_lowercase(),
             u.hp,
-            necromy_rules::UNDEAD_HEALTH,
-            necromy_rules::UNDEAD_DICE
+            u.kind.health(),
+            u.kind.dice()
+        ));
+        if u.kind.is_beast() {
+            lines.push(format!(
+                "держит лес на {} гекса от логова: бьёт вошедших рядом, рвёт нежить",
+                necromy_rules::BEAST_RANGE
+            ));
+            lines.push("избранных Бхавы и укрывшихся не трогает".into());
+        }
+    }
+    // A beast's land, when the hex lies in one and no beast stands here.
+    else if let Some(b) = g
+        .mobs()
+        .iter()
+        .find(|m| m.is_beast() && necromy_rules::Game::beast_land(m, hex))
+    {
+        lines.push(format!(
+            "здесь охотится {}: ночью подойдёт и нападёт",
+            names::mob(b.kind, b.id).0.to_lowercase()
         ));
     }
     // The militia standing here, and what a step onto them would do.

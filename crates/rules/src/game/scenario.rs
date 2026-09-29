@@ -142,7 +142,7 @@ impl Game {
         game.claims.clear();
         // The scene's own settlements keep their own militia (§20.4).
         game.militia = Self::militia_of(&game.board);
-        game.undead.clear();
+        game.mobs.clear();
         game.ruins.clear();
         game.pantheon.stages = scene.stages;
         game.pantheon.pressure = scene.pressure;

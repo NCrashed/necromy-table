@@ -266,8 +266,13 @@ fn auto_screenshot(
                 .any(|(h, _)| game.game.is_ruined_settlement(h))
                 && game.on_screen.is_none()
         }
-        // Undead on the board and nothing over it (§20.4).
-        (Some("undead"), Some(game)) => !game.game.undead().is_empty() && game.on_screen.is_none(),
+        // Undead (or Bhava's beasts) on the board and nothing over it (§20.4).
+        (Some("undead"), Some(game)) => {
+            game.game.mobs().iter().any(|m| m.is_undead()) && game.on_screen.is_none()
+        }
+        (Some("beast"), Some(game)) => {
+            game.game.mobs().iter().any(|m| m.is_beast()) && game.on_screen.is_none()
+        }
         // Someone wears an item, nothing over the board (§20.3).
         (Some("gear"), Some(game)) => {
             game.game

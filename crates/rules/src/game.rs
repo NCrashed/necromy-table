@@ -181,7 +181,7 @@ pub enum WindowKind {
     /// guard burns none (§20.4).
     GuardBattle { attacker: PlayerId },
     /// A champion attacks undead `id`; only they burn (§20.4).
-    UndeadBattle { attacker: PlayerId, id: u32 },
+    MobBattle { attacker: PlayerId, id: u32 },
     /// A champion attacks the militia of `home`; only they burn (§20.4).
     MilitiaBattle { attacker: PlayerId, home: Hex },
     /// Before a trial's throw: its challenger picks cards to burn (§20.2).
@@ -257,7 +257,7 @@ pub enum Fighter {
     Champion(PlayerId),
     Guard,
     /// An undead, by id (§20.4).
-    Undead(u32),
+    Mob(u32),
     /// A settlement's militia, by its home.
     Militia(Hex),
 }
@@ -382,39 +382,48 @@ pub enum Event {
         target_score: Score,
     },
     /// An untended body rose as one of the undead (§20.4).
-    UndeadRose {
-        undead: mobs::Undead,
+    MobAppeared {
+        mob: mobs::Mob,
     },
-    UndeadMoved {
+    /// A beast went back into Bhava's woods: his light calmed them.
+    MobLeft {
+        id: u32,
+    },
+    /// A beast tore apart an undead that wandered onto its land.
+    BeastMauled {
+        beast: u32,
+        undead: u32,
+    },
+    MobMoved {
         id: u32,
         from: Hex,
         to: Hex,
     },
     /// World phase: an undead strikes `target`; its dice follow.
-    UndeadStruck {
+    MobStruck {
         id: u32,
         target: PlayerId,
     },
     /// `attacker` stepped onto undead `id`; their burn choice follows.
-    UndeadAttacked {
+    MobAttacked {
         attacker: PlayerId,
         id: u32,
     },
-    UndeadResolved {
+    MobResolved {
         id: u32,
         champion: PlayerId,
         /// The champion struck first, else the undead did.
         champion_attacked: bool,
-        undead_score: Score,
+        mob_score: Score,
         champion_score: Score,
     },
-    UndeadHurt {
+    MobHurt {
         id: u32,
         amount: u8,
         hp: u8,
     },
     /// Laid to rest by `by`.
-    UndeadFell {
+    MobFell {
         id: u32,
         hex: Hex,
         by: PlayerId,
@@ -1003,7 +1012,7 @@ pub struct Game {
     claims: BTreeMap<(i32, i32), PlayerId>,
     /// The undead on the board, the last id and throws so far; each
     /// settlement's militia; what the militia think of each player (§20.4).
-    undead: Vec<mobs::Undead>,
+    mobs: Vec<mobs::Mob>,
     next_mob: u32,
     mob_throws: u64,
     militia: BTreeMap<(i32, i32), militia::Militia>,
@@ -1124,7 +1133,7 @@ impl Game {
             threat: vec![0; champions_len],
             dominant: None,
             claims: BTreeMap::new(),
-            undead: Vec::new(),
+            mobs: Vec::new(),
             next_mob: 0,
             mob_throws: 0,
             militia,
@@ -1466,7 +1475,7 @@ impl Game {
                     // Cards go into a battle only as burned faces.
                     WindowKind::Battle { .. }
                     | WindowKind::GuardBattle { .. }
-                    | WindowKind::UndeadBattle { .. }
+                    | WindowKind::MobBattle { .. }
                     | WindowKind::MilitiaBattle { .. }
                     | WindowKind::Trial { .. } => false,
                     WindowKind::Enter { .. } => def.timing == Timing::Instant,
@@ -1826,9 +1835,9 @@ impl Game {
             self.start_guard_battle(player, cost, events);
             return Ok(());
         }
-        if let Some(id) = self.undead_at(to).map(|u| u.id) {
+        if let Some(id) = self.mob_on(to).map(|u| u.id) {
             let cost = self.attack_cost(player, to)?;
-            self.start_undead_battle(player, id, cost, events);
+            self.start_mob_battle(player, id, cost, events);
             return Ok(());
         }
         // The militia let through those they hold nothing against: they trade
@@ -2014,7 +2023,7 @@ impl Game {
             self.windows[i].kind,
             WindowKind::Battle { .. }
                 | WindowKind::GuardBattle { .. }
-                | WindowKind::UndeadBattle { .. }
+                | WindowKind::MobBattle { .. }
                 | WindowKind::MilitiaBattle { .. }
                 | WindowKind::Trial { .. }
         );
@@ -2153,12 +2162,12 @@ impl Game {
                 self.turns[attacker.0 as usize].move_points = 0;
             }
         }
-        if let WindowKind::UndeadBattle { attacker, id } = window.kind {
+        if let WindowKind::MobBattle { attacker, id } = window.kind {
             let burned = match window.choices.get(&attacker) {
                 Some(Choice::Burn(cards)) => cards.clone(),
                 _ => Vec::new(),
             };
-            self.resolve_undead_battle(attacker, id, burned, events);
+            self.resolve_mob_battle(attacker, id, burned, events);
             if self.is_active(attacker) {
                 self.turns[attacker.0 as usize].move_points = 0;
             }
@@ -2796,6 +2805,9 @@ impl Game {
         }
         if self.scripted.is_none() {
             self.raise_dead(events);
+            if self.time == TimeOfDay::Night {
+                self.beasts_at_night(events);
+            }
             self.mob_phase(events);
         }
         if self.scripted.is_none_or(|s| s.guard) {
@@ -2826,6 +2838,7 @@ impl Game {
 }
 
 mod battle;
+mod beasts;
 mod gear;
 mod guard;
 mod laws;
@@ -2842,6 +2855,7 @@ mod view;
 mod wish;
 mod world;
 pub use battle::Score;
+pub use beasts::{BEAST_DICE, BEAST_HEALTH, BEAST_RANGE};
 pub use gear::{Gain, SACRIFICE};
 pub use guard::{GUARD_DICE, GUARD_HEALTH, GUARD_RELIEF, GUARD_STEPS, Guard};
 pub use laws::{BURDEN_FREE, CHOSEN, CRACK_REACH, Law, Patronage, SENTENCE_THRESHOLD, SIGN, VOICE};
@@ -2849,7 +2863,7 @@ pub use militia::{
     FRIENDLY, HOSTILE, MILITIA, MILITIA_PASS, Militia, REBUILD_SPIRIT, REBUILD_STANDING,
 };
 pub use mobs::{
-    MAX_UNDEAD, UNDEAD_AGE, UNDEAD_AGE_DARK, UNDEAD_DICE, UNDEAD_HEALTH, UNDEAD_SIGHT, Undead,
+    MAX_UNDEAD, Mob, MobKind, UNDEAD_AGE, UNDEAD_AGE_DARK, UNDEAD_DICE, UNDEAD_HEALTH, UNDEAD_SIGHT,
 };
 pub use poison::{Cure, Poison};
 pub use scenario::{Scenario, SceneSeat, SceneWorld};

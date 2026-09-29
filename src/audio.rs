@@ -905,8 +905,21 @@ fn hear_events(
                 }
             }
             Event::GuardFell { by: who, .. } => (Sound::new("guard-fall"), by(*who)),
-            // The dead and the militia (§20.4).
-            Event::UndeadRose { undead } => (Sound::new("undead-rise"), Heard::At(undead.hex)),
+            // The dead, Bhava's beasts and the militia (§20.4).
+            Event::MobAppeared { mob } if mob.is_beast() => {
+                (Sound::new("beast-appear"), Heard::At(mob.hex))
+            }
+            Event::MobAppeared { mob } => (Sound::new("undead-rise"), Heard::At(mob.hex)),
+            Event::MobLeft { id } => (
+                Sound::new("beast-leave"),
+                game.seen_mob(*id)
+                    .map_or(Heard::Aside, |m| Heard::At(m.hex)),
+            ),
+            Event::BeastMauled { beast, .. } => (
+                Sound::new("beast-strike"),
+                game.seen_mob(*beast)
+                    .map_or(Heard::Aside, |m| Heard::At(m.hex)),
+            ),
             Event::UndeadHitMilitia { home, .. } => (Sound::new("undead-strike"), Heard::At(*home)),
             Event::MilitiaSwapped { player, .. } => (Sound::new("militia-greet"), by(*player)),
             Event::MilitiaAttacked { attacker, .. } => {
@@ -920,15 +933,20 @@ fn hear_events(
             Event::SettlementRebuilt { player, .. } => {
                 (Sound::new("settlement-rebuilt"), by(*player))
             }
-            Event::UndeadStruck { target, .. } => {
+            Event::MobStruck { id, target } => {
+                let name = if game.mob_kind(*id).is_beast() {
+                    "beast-strike"
+                } else {
+                    "battle-start"
+                };
                 if *target == human {
                     in_battle = true;
-                    (Sound::new("battle-start"), Heard::Always)
+                    (Sound::new(name), Heard::Always)
                 } else {
-                    (Sound::new("battle-start"), by(*target))
+                    (Sound::new(name), by(*target))
                 }
             }
-            Event::UndeadAttacked { attacker, .. } => {
+            Event::MobAttacked { attacker, .. } => {
                 if *attacker == human {
                     in_battle = true;
                     (Sound::new("battle-start"), Heard::Always)
@@ -936,7 +954,10 @@ fn hear_events(
                     (Sound::new("battle-start"), by(*attacker))
                 }
             }
-            Event::UndeadFell { hex, .. } => (Sound::new("undead-rest"), Heard::At(*hex)),
+            Event::MobFell { id, hex, .. } if game.mob_kind(*id).is_beast() => {
+                (Sound::new("beast-fall"), Heard::At(*hex))
+            }
+            Event::MobFell { hex, .. } => (Sound::new("undead-rest"), Heard::At(*hex)),
             Event::MilitiaStruck { hex, .. } => (Sound::new("militia-strike"), Heard::At(*hex)),
             Event::SettlementRuined { hex } => (Sound::new("settlement-ruined"), Heard::At(*hex)),
             Event::MilitiaHelped { player, .. } => (Sound::new("heal"), by(*player)),

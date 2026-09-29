@@ -433,9 +433,7 @@ fn pose(
         // An undead stands still in its one picture (§20.4).
         // An undead or the militia stand still in their one picture.
         let still = match battle.sides[side] {
-            necromy_rules::Fighter::Undead(id) => {
-                Some(stats.undead[id as usize % stats.undead.len()].clone())
-            }
+            necromy_rules::Fighter::Mob(id) => Some(stats.mob(game.mob_kind(id), id)),
             necromy_rules::Fighter::Militia(home) => Some(
                 stats.militia[crate::props::hex_seed(home, 31) as usize % stats.militia.len()]
                     .clone(),

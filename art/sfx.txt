@@ -71,6 +71,11 @@ militia-greet	0.8	2	Friendly village guards step aside: a spear butt taps the gr
 militia-alarm	1.2	2	A small village alarm bell rings fast twice as spears are raised
 settlement-ruined	2.0	2	A village is overrun: wooden beams crack and collapse, fire crackles, a distant bell falls silent
 settlement-rebuilt	1.8	2	A village is rebuilt: hammer blows on timber, a beam set in place, a bright bell rings once
+# Beasts of Bhava's forests (§20.4)
+beast-appear	1.5	2	A wild beast emerges from a deep forest: a low wolf howl over rustling leaves and snapping twigs
+beast-strike	0.8	3	A wild beast lunges and bites: a snarl, a snap of jaws and claws tearing
+beast-fall	1.2	2	A wild beast is slain: a pained yelp fading into a heavy thud on leaves
+beast-leave	1.5	2	Wild beasts slip away into a calming forest: soft footfalls fading into rustling leaves and a distant bird call
 crown	2.0	2	A royal crown is placed, a regal golden shimmer and a brass accent
 # Royal guard
 guard-arrive	1.5	3	The royal guard arrives: a heavy iron gate clanks open, armoured boots stamp twice and one war drum hits; no horn, no car horn, no beep

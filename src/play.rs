@@ -111,8 +111,11 @@ pub struct Match {
     pub held_falls: Vec<(PlayerId, Hex, Hex)>,
     /// A guard felled in the fight on screen stands until its panel closes.
     pub held_guard: Option<necromy_rules::Guard>,
-    /// Undead laid to rest in the fight on screen, standing until it closes.
-    pub held_undead: Vec<necromy_rules::Undead>,
+    /// Mob laid to rest in the fight on screen, standing until it closes.
+    pub held_mobs: Vec<necromy_rules::Mob>,
+    /// Every mob seen so far, as last seen: for panels, lines and sounds
+    /// about one that has already left the board.
+    seen_mobs: std::collections::BTreeMap<u32, necromy_rules::Mob>,
     /// A settlement's militia as they stood when the fight on screen began:
     /// their figures keep to it until its dice are down.
     pub held_militia: Option<(Hex, necromy_rules::Militia)>,
@@ -570,7 +573,8 @@ impl Match {
             show_serial: 0,
             held_falls: Vec::new(),
             held_guard: None,
-            held_undead: Vec::new(),
+            held_mobs: Vec::new(),
+            seen_mobs: Default::default(),
             held_militia: None,
             incoming_result: None,
             incoming_serial: 0,
@@ -732,6 +736,9 @@ impl Match {
                 } => {
                     self.game = *view;
                     self.serial = serial;
+                    for m in self.game.mobs() {
+                        self.seen_mobs.insert(m.id, *m);
+                    }
                     self.record(&events);
                     if let Some((writer, ..)) = self.drafting
                         && self.game.wish_due() != Some(writer)
@@ -886,10 +893,11 @@ impl Match {
                     self.held_militia = self.game.militia_unit(*home).map(|m| (*home, m));
                 }
                 // So does an undead laid to rest on screen.
-                Event::UndeadFell { id, hex, by } => {
+                Event::MobFell { id, hex, by } => {
                     if self.in_show_on_screen(*by) {
-                        self.held_undead.push(necromy_rules::Undead {
+                        self.held_mobs.push(necromy_rules::Mob {
                             id: *id,
+                            kind: self.mob_kind(*id),
                             hex: *hex,
                             hp: 0,
                         });
@@ -967,8 +975,8 @@ impl Match {
             }
             Event::GuardStruck { target } => Some((ShowKind::Guard, vec![*target])),
             Event::GuardAttacked { attacker } => Some((ShowKind::Guard, vec![*attacker])),
-            Event::UndeadStruck { target, .. } => Some((ShowKind::Mob, vec![*target])),
-            Event::UndeadAttacked { attacker, .. } => Some((ShowKind::Mob, vec![*attacker])),
+            Event::MobStruck { target, .. } => Some((ShowKind::Mob, vec![*target])),
+            Event::MobAttacked { attacker, .. } => Some((ShowKind::Mob, vec![*attacker])),
             Event::MilitiaAttacked { attacker, .. } => Some((ShowKind::Mob, vec![*attacker])),
             Event::TrialBegun { player, .. } => Some((ShowKind::Trial, vec![*player])),
             _ => None,
@@ -1013,14 +1021,14 @@ impl Match {
                 ..
             } => (None, Some(ShowKind::Guard), false, false),
             Event::DiceThrown {
-                fighter: Fighter::Undead(_) | Fighter::Militia(_),
+                fighter: Fighter::Mob(_) | Fighter::Militia(_),
                 ..
             } => (None, Some(ShowKind::Mob), false, false),
             Event::BattleResolved { defender, .. } => (Some(*defender), None, true, false),
             Event::GuardResolved { target, .. } => {
                 (Some(*target), Some(ShowKind::Guard), true, false)
             }
-            Event::UndeadResolved { champion, .. } | Event::MilitiaResolved { champion, .. } => {
+            Event::MobResolved { champion, .. } | Event::MilitiaResolved { champion, .. } => {
                 (Some(*champion), Some(ShowKind::Mob), true, false)
             }
             Event::TrialPassed { player, .. } | Event::TrialFailed { player, .. } => {
@@ -1032,8 +1040,8 @@ impl Match {
             Event::GuardHurt { .. } | Event::GuardFell { .. } => {
                 (None, Some(ShowKind::Guard), false, true)
             }
-            Event::UndeadHurt { .. }
-            | Event::UndeadFell { .. }
+            Event::MobHurt { .. }
+            | Event::MobFell { .. }
             | Event::MilitiaHurt { .. }
             | Event::MilitiaFell { .. } => (None, Some(ShowKind::Mob), false, true),
             _ => return,
@@ -1091,11 +1099,28 @@ impl Match {
         self.game.guard().or(self.held_guard)
     }
 
-    /// The undead as the board shows them: with those whose fall the dice
+    /// What mob `id` is (or was); the undead if never seen.
+    pub fn mob_kind(&self, id: u32) -> necromy_rules::MobKind {
+        self.seen_mobs
+            .get(&id)
+            .map_or(necromy_rules::MobKind::Undead, |m| m.kind)
+    }
+
+    /// Mob `id` as last seen.
+    pub fn seen_mob(&self, id: u32) -> Option<necromy_rules::Mob> {
+        self.seen_mobs.get(&id).copied()
+    }
+
+    /// Mob `id`'s name, nominative and accusative.
+    pub fn mob_name(&self, id: u32) -> (&'static str, &'static str) {
+        names::mob(self.mob_kind(id), id)
+    }
+
+    /// The mobs as the board shows them: with those whose fall the dice
     /// on screen have not told yet.
-    pub fn shown_undead(&self) -> Vec<necromy_rules::Undead> {
-        let mut all = self.game.undead().to_vec();
-        all.extend(self.held_undead.iter().copied());
+    pub fn shown_mobs(&self) -> Vec<necromy_rules::Mob> {
+        let mut all = self.game.mobs().to_vec();
+        all.extend(self.held_mobs.iter().copied());
         all
     }
 
@@ -1170,16 +1195,16 @@ impl Match {
                     Fighter::Guard,
                 ]));
             }
-            Event::UndeadStruck { id, target } => {
+            Event::MobStruck { id, target } => {
                 self.battle = Some(BattleInfo::new([
-                    Fighter::Undead(*id),
+                    Fighter::Mob(*id),
                     Fighter::Champion(*target),
                 ]));
             }
-            Event::UndeadAttacked { attacker, id } => {
+            Event::MobAttacked { attacker, id } => {
                 self.battle = Some(BattleInfo::new([
                     Fighter::Champion(*attacker),
-                    Fighter::Undead(*id),
+                    Fighter::Mob(*id),
                 ]));
             }
             Event::MilitiaAttacked { attacker, home } => {
@@ -1216,21 +1241,21 @@ impl Match {
                     b.fell[side] = true;
                 }
             }
-            Event::UndeadResolved {
+            Event::MobResolved {
                 champion_attacked,
-                undead_score,
+                mob_score,
                 champion_score,
                 ..
             } => {
                 if let Some(b) = self.battle.as_mut() {
                     b.scores = Some(if *champion_attacked {
-                        (*champion_score, *undead_score)
+                        (*champion_score, *mob_score)
                     } else {
-                        (*undead_score, *champion_score)
+                        (*mob_score, *champion_score)
                     });
                 }
             }
-            Event::UndeadHurt { amount, hp, .. } => {
+            Event::MobHurt { amount, hp, .. } => {
                 if let Some(b) = self.battle.as_mut()
                     && let Some(side) = b.foe_side()
                 {
@@ -1238,7 +1263,7 @@ impl Match {
                     b.hp[side] = Some((before, *hp));
                 }
             }
-            Event::UndeadFell { .. } => {
+            Event::MobFell { .. } => {
                 if let Some(b) = self.battle.as_mut()
                     && let Some(side) = b.foe_side()
                 {
@@ -1310,7 +1335,7 @@ impl Match {
             } => {
                 let side = self.battle.as_ref().map_or(0, |b| match fighter {
                     Fighter::Champion(p) => b.side(*p),
-                    Fighter::Guard | Fighter::Undead(_) | Fighter::Militia(_) => {
+                    Fighter::Guard | Fighter::Mob(_) | Fighter::Militia(_) => {
                         b.foe_side().unwrap_or(0)
                     }
                 });
@@ -1340,7 +1365,7 @@ impl Match {
             self.steps.push((player, respawn));
         }
         self.held_guard = None;
-        self.held_undead.clear();
+        self.held_mobs.clear();
         self.held_militia = None;
         self.battle = None;
         self.trial = None;
@@ -1930,18 +1955,39 @@ impl Match {
             Event::GuardHurt { amount, hp } => {
                 format!("Гвардия: −{amount} ({hp}/{}).", necromy_rules::GUARD_HEALTH)
             }
-            Event::UndeadRose { .. } => "Нетронутое тело поднимается: неупокоенный.".into(),
-            Event::UndeadStruck { target, .. } => {
-                format!("Неупокоенный бьёт {}!", self.name_accusative(*target))
-            }
-            Event::UndeadAttacked { attacker, .. } => {
-                format!("{} нападает на неупокоенного.", self.name(*attacker))
-            }
-            Event::UndeadHurt { amount, hp, .. } => format!(
-                "Неупокоенный: −{amount} ({hp}/{}).",
-                necromy_rules::UNDEAD_HEALTH
+            Event::MobAppeared { mob } if mob.is_beast() => format!(
+                "Из леса Бхавы выходит зверь: {}.",
+                names::mob(mob.kind, mob.id).1
             ),
-            Event::UndeadFell { by, .. } => {
+            Event::MobAppeared { .. } => "Нетронутое тело поднимается: неупокоенный.".into(),
+            Event::MobLeft { .. } => "Бхава светел: звери уходят в чащу.".into(),
+            Event::BeastMauled { beast, .. } => format!(
+                "{} рвёт неупокоенного, забредшего в его лес.",
+                self.mob_name(*beast).0
+            ),
+            Event::MobStruck { id, target } => {
+                format!(
+                    "{} бьёт {}!",
+                    self.mob_name(*id).0,
+                    self.name_accusative(*target)
+                )
+            }
+            Event::MobAttacked { attacker, id } => {
+                format!(
+                    "{} нападает на {}.",
+                    self.name(*attacker),
+                    self.mob_name(*id).1
+                )
+            }
+            Event::MobHurt { id, amount, hp } => format!(
+                "{}: −{amount} ({hp}/{}).",
+                self.mob_name(*id).0,
+                self.mob_kind(*id).health()
+            ),
+            Event::MobFell { id, by, .. } if self.mob_kind(*id).is_beast() => {
+                format!("{} убивает {}.", self.name(*by), self.mob_name(*id).1)
+            }
+            Event::MobFell { by, .. } => {
                 format!("{} упокаивает неупокоенного.", self.name(*by))
             }
             Event::MilitiaStruck { .. } => "Ополчение поселения рубит неупокоенного.".into(),
@@ -2075,8 +2121,8 @@ pub fn window_name(m: &Match, kind: WindowKind) -> String {
         WindowKind::MilitiaBattle { attacker, .. } => {
             format!("бой: {} против ополчения", m.name(attacker))
         }
-        WindowKind::UndeadBattle { attacker, .. } => {
-            format!("бой: {} против неупокоенного", m.name(attacker))
+        WindowKind::MobBattle { attacker, id } => {
+            format!("бой: {} против {}", m.name(attacker), m.mob_name(id).1)
         }
         WindowKind::GuardBattle { attacker } => {
             format!("бой: {} против гвардии", m.name(attacker))

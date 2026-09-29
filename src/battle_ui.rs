@@ -5,8 +5,7 @@
 
 use bevy::prelude::*;
 use necromy_rules::{
-    Face, Fighter, GUARD_DICE, GUARD_HEALTH, Hex, Intent, MILITIA, PlayerId, TimeOfDay,
-    UNDEAD_DICE, UNDEAD_HEALTH, WindowKind,
+    Face, Fighter, GUARD_DICE, GUARD_HEALTH, Hex, Intent, MILITIA, PlayerId, TimeOfDay, WindowKind,
 };
 
 use crate::dice::{DiceShow, Revealed, TRAY_TEXTURE, TrayTextures};
@@ -76,7 +75,7 @@ fn spawn_panel(mut commands: Commands) {
 enum Side {
     Champion(PlayerId),
     Guard,
-    Undead(u32),
+    Mob(u32),
     /// A settlement's militia, by its home.
     Militia(Hex),
 }
@@ -86,7 +85,7 @@ impl From<Fighter> for Side {
         match f {
             Fighter::Champion(p) => Side::Champion(p),
             Fighter::Guard => Side::Guard,
-            Fighter::Undead(id) => Side::Undead(id),
+            Fighter::Mob(id) => Side::Mob(id),
             Fighter::Militia(home) => Side::Militia(home),
         }
     }
@@ -212,10 +211,10 @@ fn side_column(
             // A die a man, as many as stood when the fight began.
             m.shown_militia(home).map_or(MILITIA, |mil| mil.men),
         ),
-        Side::Undead(id) => (
-            art.undead[id as usize % art.undead.len()].clone(),
-            "Неупокоенный".to_string(),
-            UNDEAD_DICE,
+        Side::Mob(id) => (
+            art.mob(m.mob_kind(id), id),
+            m.mob_name(id).0.to_string(),
+            m.mob_kind(id).dice(),
         ),
         Side::Guard => (
             art.guard.clone(),
@@ -295,15 +294,17 @@ fn side_column(
             .entity(numbers)
             .add_children(&[heart, bar, hp_text]);
     }
-    if let Side::Undead(id) = side {
+    if let Side::Mob(id) = side {
         let heart = stats::icon_node(commands, art.icon(StatIcon::Health), 24.0, true);
-        let now = g.undead().iter().find(|u| u.id == id).map_or(0, |u| u.hp);
+        let now = g.mobs().iter().find(|u| u.id == id).map_or(0, |u| u.hp);
         let hp_now = hp_shown.unwrap_or(now);
-        let hp = stats::bar(commands, hp_now, UNDEAD_HEALTH, HEALTH, None, 10.0, 14.0);
-        let text = if fell {
-            format!("{hp_now}/{UNDEAD_HEALTH} — упокоен!")
-        } else {
-            format!("{hp_now}/{UNDEAD_HEALTH}")
+        let kind = m.mob_kind(id);
+        let full = kind.health();
+        let hp = stats::bar(commands, hp_now, full, HEALTH, None, 10.0, 14.0);
+        let text = match (fell, kind.is_beast()) {
+            (true, true) => format!("{hp_now}/{full} — убит!"),
+            (true, false) => format!("{hp_now}/{full} — упокоен!"),
+            _ => format!("{hp_now}/{full}"),
         };
         let hp_text = stats::label(commands, font, &text, 13.0, fell);
         commands.entity(numbers).add_children(&[heart, hp, hp_text]);
@@ -462,7 +463,7 @@ fn centre_column(
             w.kind,
             WindowKind::Battle { .. }
                 | WindowKind::GuardBattle { .. }
-                | WindowKind::UndeadBattle { .. }
+                | WindowKind::MobBattle { .. }
         )
     });
     let my_choice = matches!(
@@ -470,7 +471,7 @@ fn centre_column(
         Some(
             WindowKind::Battle { .. }
                 | WindowKind::GuardBattle { .. }
-                | WindowKind::UndeadBattle { .. }
+                | WindowKind::MobBattle { .. }
         )
     );
     let phase = if my_choice {

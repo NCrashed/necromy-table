@@ -24,7 +24,7 @@ pub struct MobsUiPlugin;
 impl Plugin for MobsUiPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, make_pennants)
-            .add_systems(crate::InGame, (sync_undead, sync_militia));
+            .add_systems(crate::InGame, (sync_mobs, sync_militia));
     }
 }
 
@@ -56,7 +56,7 @@ fn figure(image: Handle<Image>, at: Vec3) -> impl Bundle {
 }
 
 /// One token per undead the board shows, walking to where it stands.
-fn sync_undead(
+fn sync_mobs(
     mut commands: Commands,
     time: Res<Time>,
     game: Res<Match>,
@@ -65,7 +65,7 @@ fn sync_undead(
     images: Res<Assets<Image>>,
     mut tokens: Query<(Entity, &UndeadToken, &mut Transform)>,
 ) {
-    let shown = game.shown_undead();
+    let shown = game.shown_mobs();
     for (entity, token, mut transform) in &mut tokens {
         let Some(u) = shown.iter().find(|u| u.id == token.0) else {
             commands.entity(entity).despawn();
@@ -79,7 +79,7 @@ fn sync_undead(
         if tokens.iter().any(|(_, t, _)| t.0 == u.id) {
             continue;
         }
-        let image = art.undead[u.id as usize % art.undead.len()].clone();
+        let image = art.mob(u.kind, u.id);
         // `Sprite3d` reads the size on spawn: wait for the picture.
         if !images.contains(&image) {
             continue;

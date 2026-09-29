@@ -975,9 +975,15 @@ fn track_hover(
                 .map(|(h, _)| h)
                 .find(|&h| game.game.is_ruined_settlement(h));
         }
-        // The first undead on the board (§20.4).
-        if s == "undead" {
-            return game.game.undead().first().map(|u| u.hex);
+        // The first undead or beast on the board (§20.4).
+        if s == "undead" || s == "beast" {
+            let beast = s == "beast";
+            return game
+                .game
+                .mobs()
+                .iter()
+                .find(|m| m.is_beast() == beast)
+                .map(|m| m.hex);
         }
         // The latest battle or trial of others (`watch_ui.rs`).
         if s == "show" {

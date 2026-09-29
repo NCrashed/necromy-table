@@ -175,13 +175,14 @@ fn attack(game: &Game, player: PlayerId) -> Option<Intent> {
     if game.lines_of(player).any(|l| l.goal == Goal::AvoidBattle) {
         return None;
     }
-    // The restless dead next to us, laid to rest while we are hale (§20.4).
-    if me.hp >= 3
-        && let Some(u) = game
-            .undead()
-            .iter()
-            .filter(|u| game.attack_cost(player, u.hex).is_ok())
-            .min_by_key(|u| (u.hp, u.id))
+    // Mobs next to us, fought while we are hale: the restless dead at 3
+    // health, a beast of the woods (stronger) at 4 (§20.4).
+    if let Some(u) = game
+        .mobs()
+        .iter()
+        .filter(|u| game.attack_cost(player, u.hex).is_ok())
+        .filter(|u| me.hp >= if u.is_beast() { 4 } else { 3 })
+        .min_by_key(|u| (u.hp, u.id))
     {
         return Some(Intent::Move { to: u.hex });
     }

@@ -1531,7 +1531,10 @@ fn bot_matches_end_in_many_ways() {
             seed,
             champions: God::ALL.to_vec(),
         });
-        for _ in 0..6000 {
+        // The placeholder bots do not lighten a dark god on purpose, so a
+        // match whose open conditions want the gods out of the dark runs
+        // long (seed 16: Overthrow in round 333).
+        for _ in 0..10000 {
             if g.winner().is_some() {
                 break;
             }
@@ -3087,7 +3090,7 @@ fn bots_try_trials() {
         risen += g
             .log()
             .iter()
-            .filter(|e| matches!(e, Event::UndeadRose { .. }))
+            .filter(|e| matches!(e, Event::MobAppeared { .. }))
             .count();
         fought_guard += g
             .log()
@@ -3436,7 +3439,12 @@ fn the_guard_keeps_its_wounds() {
 fn undead_on(g: &mut Game, hex: Hex, hp: u8) -> u32 {
     g.next_mob += 1;
     let id = g.next_mob;
-    g.undead.push(Undead { id, hex, hp });
+    g.mobs.push(Mob {
+        id,
+        kind: MobKind::Undead,
+        hex,
+        hp,
+    });
     id
 }
 
@@ -3457,12 +3465,12 @@ fn untended_bodies_rise_where_no_grove_grows() {
     });
     let mut events = Vec::new();
     g.raise_dead(&mut events);
-    assert_eq!(g.undead().len(), 1, "a meadow body waits for its grove");
-    assert_eq!(g.undead()[0].hex, rock);
+    assert_eq!(g.mobs().len(), 1, "a meadow body waits for its grove");
+    assert_eq!(g.mobs()[0].hex, rock);
     // In the land of a dark Maya the dead rise sooner, anywhere.
     g.pantheon.stages[God::Maya.index()] = 2;
     g.raise_dead(&mut events);
-    assert!(g.undead_at(meadow).is_some());
+    assert!(g.mob_on(meadow).is_some());
 }
 
 #[test]
@@ -3475,14 +3483,14 @@ fn a_lone_undead_wears_the_militia_down_and_dawn_brings_a_man_back() {
     let mut events = Vec::new();
     g.mob_phase(&mut events);
     // Blows traded: it knocks a man down, the militia wound it.
-    assert_eq!(g.undead().len(), 1);
-    assert_eq!(g.undead()[0].hp, UNDEAD_HEALTH - 1);
+    assert_eq!(g.mobs().len(), 1);
+    assert_eq!(g.mobs()[0].hp, UNDEAD_HEALTH - 1);
     assert_eq!(g.militia(town), Some(MILITIA - 1));
     // Left alone it knocks the last man down; nobody strikes back.
     let mut events = Vec::new();
     g.mob_phase(&mut events);
     assert_eq!(g.militia(town), Some(0));
-    assert_eq!(g.undead().len(), 1);
+    assert_eq!(g.mobs().len(), 1);
     assert!(
         events
             .iter()
@@ -3526,15 +3534,15 @@ fn the_undead_walk_to_the_living_and_strike_them() {
     let id = undead_on(&mut g, Hex::new(0, 3), UNDEAD_HEALTH);
     let mut events = Vec::new();
     g.mob_phase(&mut events);
-    let at = g.undead().iter().find(|u| u.id == id).unwrap().hex;
+    let at = g.mobs().iter().find(|u| u.id == id).unwrap().hex;
     assert_eq!(at.unsigned_distance_to(Hex::new(0, 0)), 2);
-    g.undead.iter_mut().for_each(|u| u.hex = Hex::new(0, 1));
+    g.mobs.iter_mut().for_each(|u| u.hex = Hex::new(0, 1));
     let mut events = Vec::new();
     g.mob_phase(&mut events);
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, Event::UndeadStruck { target, .. } if *target == me))
+            .any(|e| matches!(e, Event::MobStruck { target, .. } if *target == me))
     );
 }
 
@@ -3549,16 +3557,16 @@ fn a_champion_lays_the_undead_to_rest() {
     g.apply(me, Intent::Move { to: hex }).unwrap();
     assert!(matches!(
         g.to_answer(me).map(|w| w.kind),
-        Some(WindowKind::UndeadBattle { attacker, id: i }) if attacker == me && i == id
+        Some(WindowKind::MobBattle { attacker, id: i }) if attacker == me && i == id
     ));
     let cards = burn_all(&mut g, me, "Искра");
     let events = g.apply(me, Intent::Burn { cards }).unwrap();
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, Event::UndeadFell { by, .. } if *by == me))
+            .any(|e| matches!(e, Event::MobFell { by, .. } if *by == me))
     );
-    assert!(g.undead().is_empty());
+    assert!(g.mobs().is_empty());
     assert_eq!(g.standing(me), 1);
 }
 
@@ -3620,6 +3628,7 @@ fn when_the_dead_rise() {
             champions: God::ALL.to_vec(),
         });
         let mut first = None;
+        let mut first_beast = None;
         let mut most = 0;
         for _ in 0..3000 {
             if g.winner().is_some() {
@@ -3628,10 +3637,21 @@ fn when_the_dead_rise() {
             let p = g.awaiting()[0];
             let intent = crate::bot::choose(&g, p);
             let events = g.apply(p, intent).unwrap();
-            if first.is_none() && events.iter().any(|e| matches!(e, Event::UndeadRose { .. })) {
+            if first.is_none()
+                && events
+                    .iter()
+                    .any(|e| matches!(e, Event::MobAppeared { mob } if mob.is_undead()))
+            {
                 first = Some(g.round());
             }
-            most = most.max(g.undead().len());
+            if first_beast.is_none()
+                && events
+                    .iter()
+                    .any(|e| matches!(e, Event::MobAppeared { mob } if mob.is_beast()))
+            {
+                first_beast = Some(g.round());
+            }
+            most = most.max(g.mobs().len());
         }
         let corpses = g
             .log()
@@ -3642,11 +3662,11 @@ fn when_the_dead_rise() {
         eprintln!(
             "seed {seed}: first rise {first:?}, rounds {}, bodies {corpses}, most at once {most}, risen {}, felled by champions {}, by militia {}, ruined {}, struck champions {}",
             g.round(),
-            count(|e| matches!(e, Event::UndeadRose { .. })),
-            count(|e| matches!(e, Event::UndeadFell { .. })),
+            count(|e| matches!(e, Event::MobAppeared { mob } if mob.is_undead())),
+            count(|e| matches!(e, Event::MobFell { .. })),
             count(|e| matches!(e, Event::MilitiaStruck { .. })),
             count(|e| matches!(e, Event::SettlementRuined { .. })),
-            count(|e| matches!(e, Event::UndeadStruck { .. })),
+            count(|e| matches!(e, Event::MobStruck { .. })),
         );
         eprintln!(
             "    militia hit by undead {}, rebuilt {}, swaps {}, militia fought {}",
@@ -3654,6 +3674,12 @@ fn when_the_dead_rise() {
             count(|e| matches!(e, Event::SettlementRebuilt { .. })),
             count(|e| matches!(e, Event::MilitiaSwapped { .. })),
             count(|e| matches!(e, Event::MilitiaAttacked { .. })),
+        );
+        eprintln!(
+            "    first beast {first_beast:?}, beasts {}, mauled {}, left {}",
+            count(|e| matches!(e, Event::MobAppeared { mob } if mob.is_beast())),
+            count(|e| matches!(e, Event::BeastMauled { .. })),
+            count(|e| matches!(e, Event::MobLeft { .. })),
         );
     }
 }
@@ -3774,4 +3800,124 @@ fn ruins_can_be_built_again() {
     assert_eq!(g.standing(me), REBUILD_STANDING);
     assert_eq!(g.move_points(me), 0);
     assert_eq!(g.champion(me).unwrap().spirit_points, 0);
+}
+
+// ---- Beasts of Bhava's forests (§20.4) ----
+
+fn beast_on(g: &mut Game, lair: Hex, hex: Hex) -> u32 {
+    g.next_mob += 1;
+    let id = g.next_mob;
+    g.mobs.push(Mob {
+        id,
+        kind: MobKind::Beast { lair },
+        hex,
+        hp: BEAST_HEALTH,
+    });
+    id
+}
+
+#[test]
+fn beasts_come_out_of_bhavas_woods_unless_he_is_light() {
+    let (mut g, _, _) = duel(3);
+    g.time = TimeOfDay::Night;
+    g.pantheon.stages[God::Bhava.index()] = 0;
+    let mut events = Vec::new();
+    g.beasts_at_night(&mut events);
+    assert!(g.mobs().is_empty(), "none in the light");
+    g.pantheon.stages[God::Bhava.index()] = 1;
+    g.beasts_at_night(&mut events);
+    let beast = g.mobs()[0];
+    let MobKind::Beast { lair } = beast.kind else {
+        panic!("a beast");
+    };
+    let tile = g.board.tile(lair).unwrap();
+    assert_eq!(tile.region, Some(God::Bhava));
+    assert!(matches!(tile.terrain, Terrain::Forest | Terrain::Grove));
+    // No more than his stage allows.
+    for _ in 0..10 {
+        g.beasts_at_night(&mut events);
+    }
+    assert!(g.mobs().len() <= g.beasts_allowed());
+}
+
+#[test]
+fn a_beast_keeps_to_its_land() {
+    let (mut g, me, _) = duel(3);
+    g.militia.clear();
+    g.pantheon.stages[God::Bhava.index()] = 1;
+    // Its lair two hexes off: the champion stands on its land.
+    let id = beast_on(&mut g, Hex::new(0, 2), Hex::new(0, 2));
+    let mut events = Vec::new();
+    g.beast_phase(&mut events);
+    assert_eq!(g.mobs()[0].hex.unsigned_distance_to(Hex::new(0, 0)), 1);
+    let mut events = Vec::new();
+    g.beast_phase(&mut events);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::MobStruck { id: i, target } if *i == id && *target == me))
+    );
+    // Off its land nobody is hunted: it goes home.
+    g.place(me, Hex::new(-3, 0));
+    let mut events = Vec::new();
+    g.beast_phase(&mut events);
+    assert_eq!(g.mobs()[0].hex, Hex::new(0, 2));
+}
+
+#[test]
+fn beasts_spare_bhavas_chosen_and_tear_the_dead_apart() {
+    let (mut g, me, _) = duel(3);
+    g.militia.clear();
+    g.pantheon.stages[God::Bhava.index()] = 1;
+    beast_on(&mut g, Hex::new(0, 1), Hex::new(0, 1));
+    g.favor[me.0 as usize][God::Bhava.index()] = CHOSEN;
+    let mut events = Vec::new();
+    g.beast_phase(&mut events);
+    assert!(!events.iter().any(|e| matches!(e, Event::MobStruck { .. })));
+    // An undead that wanders onto its land is torn apart.
+    undead_on(&mut g, Hex::new(1, 1), UNDEAD_HEALTH);
+    let mut events = Vec::new();
+    g.beast_phase(&mut events);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::BeastMauled { .. }))
+    );
+    assert_eq!(g.mobs().iter().filter(|m| m.is_undead()).count(), 0);
+}
+
+#[test]
+fn beasts_go_back_into_the_woods_when_bhava_turns_light() {
+    let (mut g, _, _) = duel(3);
+    beast_on(&mut g, Hex::new(0, 3), Hex::new(0, 3));
+    g.pantheon.stages[God::Bhava.index()] = 0;
+    let mut events = Vec::new();
+    g.beast_phase(&mut events);
+    assert!(g.mobs().is_empty());
+    assert!(events.iter().any(|e| matches!(e, Event::MobLeft { .. })));
+}
+
+#[test]
+fn a_champion_hunts_a_beast_down() {
+    let (mut g, me, _) = duel(3);
+    g.champ_mut(me).might = 7;
+    let hex = Hex::new(0, 1);
+    g.board.tile_mut(hex).unwrap().terrain = Terrain::Plains;
+    let id = beast_on(&mut g, hex, hex);
+    g.apply(me, Intent::Move { to: hex }).unwrap();
+    assert!(matches!(
+        g.to_answer(me).map(|w| w.kind),
+        Some(WindowKind::MobBattle { attacker, id: i }) if attacker == me && i == id
+    ));
+    // It throws its own three dice.
+    assert_eq!(g.mob_dice(id), BEAST_DICE);
+    let cards = burn_all(&mut g, me, "Искра");
+    let events = g.apply(me, Intent::Burn { cards }).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::MobFell { by, .. } if *by == me))
+    );
+    // Bhava's beasts leave the militia's view of the hunter alone.
+    assert_eq!(g.standing(me), 0);
 }

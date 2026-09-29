@@ -92,7 +92,7 @@ impl Game {
                 .filter(|&h| {
                     self.board.contains(h)
                         && self.champion_at(h).is_none()
-                        && self.undead_at(h).is_none()
+                        && self.mob_on(h).is_none()
                 })
                 .filter(|&h| h.unsigned_distance_to(goal) < here)
                 .min_by_key(|&h| (h.unsigned_distance_to(goal), h.x(), h.y()));
