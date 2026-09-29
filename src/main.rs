@@ -18,6 +18,7 @@ mod icon;
 mod icons;
 mod lighting;
 mod lobby;
+mod menu_stage;
 mod names;
 mod play;
 mod props;
@@ -48,10 +49,7 @@ fn main() {
                 // Which GPU backend and DX12 shader compiler; see `gpu.rs`.
                 .set(gpu::render_plugin())
                 .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "Necromy Table".into(),
-                        ..default()
-                    }),
+                    primary_window: Some(main_window()),
                     ..default()
                 }),
         )
@@ -94,7 +92,7 @@ fn main() {
             ring_ui::RingUiPlugin,
             audio::SoundPlugin,
         ))
-        .add_plugins(settings::SettingsPlugin)
+        .add_plugins((settings::SettingsPlugin, menu_stage::MenuStagePlugin))
         .add_plugins(AutoScreenshotPlugin)
         .add_systems(Startup, setup_scene)
         .run();
@@ -334,4 +332,15 @@ fn run_game(world: &mut World, mut begun: Local<bool>) {
         world.run_schedule(MatchBegins);
     }
     world.run_schedule(InGame);
+}
+
+/// The window opens maximized, screenshot runs too, so what they show is
+/// what a player sees; `settings.rs` may then make it fullscreen.
+fn main_window() -> Window {
+    let mut window = Window {
+        title: "Necromy Table".into(),
+        ..default()
+    };
+    window.set_maximized(true);
+    window
 }

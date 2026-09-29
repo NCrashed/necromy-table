@@ -573,6 +573,7 @@ fn rebuild(
                 ..default()
             },
             Frame::Plate,
+            crate::menu_stage::MenuPanel,
         ))
         .id();
     let mut rows = Vec::new();

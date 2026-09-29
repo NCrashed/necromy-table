@@ -172,9 +172,6 @@ fn spawn(mut commands: Commands, font: Res<UiFont>) {
 /// The window as the settings want it at start: maximized, or fullscreen.
 /// Screenshot runs keep the default size, so their frames stay comparable.
 fn first_window(settings: Res<Settings>, mut window: Single<&mut Window, With<PrimaryWindow>>) {
-    if std::env::var_os("NECROMY_SCREENSHOT").is_some() {
-        return;
-    }
     set_window(&settings, &mut window);
 }
 
