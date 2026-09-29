@@ -16,7 +16,7 @@ use super::style::StyleReason;
 use super::{Event, Game, PlayerId, RuleError};
 use crate::board::Terrain;
 use crate::cards::{CardId, CardMod};
-use crate::gods::God;
+use crate::gods::{Element, God};
 
 /// What a model made of a free-text wish (§7.1): the words, its grade and
 /// the god's answer. Carried in the intent, so a replay needs no model.
@@ -67,10 +67,18 @@ pub enum WishKind {
     Tribute,
     /// "I bet they will...": a wager on a rival's day, settled at dusk.
     Wager,
+    /// "Hallow the deck": cards of an element in the deck grow better.
+    Hallow,
+    /// "Rot the deck": cards of an element in the deck grow worse.
+    Rot,
+    /// "Hide a curse in the deck": whoever else draws it is bitten.
+    Plant,
+    /// "Show me what comes": the top of the deck.
+    Foresee,
 }
 
 impl WishKind {
-    pub const ALL: [WishKind; 16] = [
+    pub const ALL: [WishKind; 20] = [
         WishKind::Strength,
         WishKind::Weaken,
         WishKind::Land,
@@ -87,6 +95,10 @@ impl WishKind {
         WishKind::Swap,
         WishKind::Tribute,
         WishKind::Wager,
+        WishKind::Hallow,
+        WishKind::Rot,
+        WishKind::Plant,
+        WishKind::Foresee,
     ];
 
     /// Asks for the outcome itself instead of going through the world: always
@@ -156,6 +168,19 @@ pub enum Act {
         target: PlayerId,
         bet: Bet,
     },
+    /// Cards of `element` in the deck (the god's own if none): better.
+    Hallow {
+        element: Option<Element>,
+    },
+    /// Cards of `element` in the deck (the one the god quenches if none):
+    /// worse; whoever draws one finds out.
+    Rot {
+        element: Option<Element>,
+    },
+    /// A curse of the god hidden near the top of the deck.
+    Plant,
+    /// The asker sees the top cards of the deck.
+    Foresee,
 }
 
 impl Act {
@@ -177,6 +202,10 @@ impl Act {
             Act::Swap { .. } => WishKind::Swap,
             Act::Tribute => WishKind::Tribute,
             Act::Wager { .. } => WishKind::Wager,
+            Act::Hallow { .. } => WishKind::Hallow,
+            Act::Rot { .. } => WishKind::Rot,
+            Act::Plant => WishKind::Plant,
+            Act::Foresee => WishKind::Foresee,
         }
     }
 
@@ -197,7 +226,7 @@ impl Act {
     /// table are worth more.
     pub const fn cost(self) -> u8 {
         match self {
-            Act::Forge | Act::Swap { .. } | Act::Tribute => 2,
+            Act::Forge | Act::Swap { .. } | Act::Tribute | Act::Plant => 2,
             _ => 1,
         }
     }
@@ -220,6 +249,10 @@ impl Act {
             WishKind::Truce => Act::Truce { target: target? },
             WishKind::Swap => Act::Swap { target: target? },
             WishKind::Tribute => Act::Tribute,
+            WishKind::Hallow => Act::Hallow { element: None },
+            WishKind::Rot => Act::Rot { element: None },
+            WishKind::Plant => Act::Plant,
+            WishKind::Foresee => Act::Foresee,
             // A prepared wager bets on a fight, the likeliest thing to happen.
             WishKind::Wager => Act::Wager {
                 target: target?,
@@ -353,23 +386,23 @@ pub const fn taste_for(god: God, kind: WishKind) -> i8 {
     match (god, kind) {
         // Hunger loves strength, feasts of the dead and a gift that feeds;
         // quiet and truce bore it.
-        (God::Trishna, Strength | Dead | Forge | Tribute) => 1,
+        (God::Trishna, Strength | Dead | Forge | Tribute | Plant) => 1,
         (God::Trishna, Peace | Truce) => -1,
         // Order loves land, judgement, a contract and the registry of
         // secrets; the dead are paperwork, a swap is disorder.
-        (God::Ahamar, Land | Weaken | Truce | Secret | Wager) => 1,
+        (God::Ahamar, Land | Weaken | Truce | Secret | Wager | Foresee) => 1,
         (God::Ahamar, Dead | Swap) => -1,
         // Dissolution loves letting go, loosening a grip, seeing through,
         // one thing becoming another; not strength, not a new thing to hold.
-        (God::Maya, Peace | Weaken | Swap | Hand) => 1,
+        (God::Maya, Peace | Weaken | Swap | Hand | Rot) => 1,
         (God::Maya, Strength | Forge | Tribute) => -1,
         // Renunciation loves quiet, the dead at rest and the price a desire
         // exacts; not strength, not blessing what is held.
         (God::Zaga, Peace | Dead | Blight | Tribute) => 1,
-        (God::Zaga, Strength | Bless) => -1,
+        (God::Zaga, Strength | Bless | Hallow) => -1,
         // Growth loves the land, strength, what grows in the hand; not harm.
-        (God::Bhava, Land | Strength | Bless | Forge) => 1,
-        (God::Bhava, Weaken | Blight | Wager) => -1,
+        (God::Bhava, Land | Strength | Bless | Forge | Hallow) => 1,
+        (God::Bhava, Weaken | Blight | Wager | Rot) => -1,
         _ => 0,
     }
 }
@@ -714,6 +747,55 @@ impl Game {
                     god,
                 });
             }
+            Act::Hallow { element } => {
+                let element = element.unwrap_or(god.element());
+                let change = CardMod {
+                    cost: -1,
+                    power: boost,
+                    ..CardMod::default()
+                };
+                self.temper_deck(player, god, element, change, true, power, events);
+            }
+            Act::Rot { element } => {
+                let element = element.unwrap_or(god.element().quenches());
+                let change = CardMod {
+                    cost: 1,
+                    power: -boost,
+                    ..CardMod::default()
+                };
+                self.temper_deck(player, god, element, change, false, power, events);
+            }
+            Act::Plant => {
+                let template = crate::cards::def_named(forge_template(god))
+                    .expect("every god has a card to curse with");
+                let card = CardId(self.defs.len() as u32);
+                self.defs.push(template);
+                // A dead weight in hand even before it bites.
+                self.mods.insert(
+                    card,
+                    CardMod {
+                        cost: 3,
+                        power: -9,
+                        ..CardMod::default()
+                    },
+                );
+                self.planted.insert(card, (player, god));
+                // Somewhere among the top few, so nobody can count on it.
+                let top = self.deck.len();
+                let depth = self.rng.below(top.min(3) as u32 + 1) as usize;
+                self.deck.insert(top - depth, card);
+                events.push(Event::CursePlanted { player, god });
+            }
+            Act::Foresee => {
+                let cards = self
+                    .deck
+                    .iter()
+                    .rev()
+                    .take(FORESEE)
+                    .map(|&c| self.def_id(c))
+                    .collect();
+                events.push(Event::Foreseen { player, cards });
+            }
             Act::Tribute => {
                 // Every rival not already answering elsewhere owes it.
                 let owed: Vec<PlayerId> = self
@@ -1010,5 +1092,62 @@ impl Game {
     /// Wagers open today.
     pub fn wagers(&self) -> &[Wager] {
         &self.wagers
+    }
+}
+
+/// Cards a foreseeing wish shows from the top of the deck.
+pub const FORESEE: usize = 3;
+
+impl Game {
+    /// Up to `power + 1` cards of `element` in the deck, from the top, take
+    /// `change` (§7.3). Nobody sees it until one is drawn.
+    #[allow(clippy::too_many_arguments)]
+    fn temper_deck(
+        &mut self,
+        player: PlayerId,
+        god: God,
+        element: Element,
+        change: CardMod,
+        blessed: bool,
+        power: u8,
+        events: &mut Vec<Event>,
+    ) {
+        let cards: Vec<CardId> = self
+            .deck
+            .iter()
+            .rev()
+            .copied()
+            .filter(|&c| self.def(c).element == Some(element))
+            .take(power as usize + 1)
+            .collect();
+        for &card in &cards {
+            self.mods.entry(card).or_default().stack(&change);
+        }
+        events.push(Event::DeckChanged {
+            player,
+            god,
+            element,
+            count: cards.len() as u8,
+            blessed,
+        });
+    }
+
+    /// A planted curse is drawn: it bites anyone but whoever planted it,
+    /// then leaves the game.
+    pub(super) fn spring_curse(&mut self, player: PlayerId, card: CardId, events: &mut Vec<Event>) {
+        let Some((planter, god)) = self.planted.remove(&card) else {
+            return;
+        };
+        self.hands[player.0 as usize].retain(|&c| c != card);
+        let bit = player != planter;
+        events.push(Event::CurseDrawn {
+            player,
+            planter,
+            god,
+            bit,
+        });
+        if bit {
+            self.damage(player, 1, events);
+        }
     }
 }

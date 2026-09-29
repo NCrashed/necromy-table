@@ -966,7 +966,15 @@ impl Match {
             Event::CorpseDecayed { .. } => "Тело истлело.".into(),
             Event::GroveGrew { .. } => "Выросла роща.".into(),
             Event::CardDrawn { player, card, .. } if *player == me => {
-                format!("Ты берёшь «{}».", self.card_name(*card))
+                // A card a wish changed in the deck shows itself when drawn.
+                match self.game.card_mod(*card) {
+                    Some(m) => format!(
+                        "Ты берёшь «{}» — {}.",
+                        self.card_name(*card),
+                        names::card_mod(m).0.to_lowercase()
+                    ),
+                    None => format!("Ты берёшь «{}».", self.card_name(*card)),
+                }
             }
             Event::CardPlayed { player, card, .. } => {
                 format!("{} играет «{}».", self.name(*player), self.card_name(*card))
@@ -1216,6 +1224,55 @@ impl Match {
                 self.name(*other),
                 names::god_genitive(*god)
             ),
+            Event::DeckChanged {
+                player,
+                god,
+                element,
+                count,
+                blessed,
+            } => format!(
+                "{} {} в колоде карты стихии «{}» ({} шт.) по просьбе {}.",
+                names::god(*god),
+                if *blessed {
+                    "освящает"
+                } else {
+                    "отравляет"
+                },
+                names::element(*element),
+                count,
+                self.name(*player)
+            ),
+            Event::CursePlanted { player, god } => format!(
+                "{} прячет в колоде проклятие {}.",
+                self.name(*player),
+                names::god_genitive(*god)
+            ),
+            Event::Foreseen { player, cards } if *player == me => {
+                let names: Vec<String> = cards
+                    .iter()
+                    .map(|d| format!("«{}»", d.def().name))
+                    .collect();
+                format!("Сверху колоды: {}.", names.join(", "))
+            }
+            Event::Foreseen { player, .. } => {
+                format!("{} заглядывает в колоду.", self.name(*player))
+            }
+            Event::CurseDrawn {
+                player, god, bit, ..
+            } => {
+                if *bit {
+                    format!(
+                        "{} вытягивает проклятие {}: −1 здоровья.",
+                        self.name(*player),
+                        names::god_genitive(*god)
+                    )
+                } else {
+                    format!(
+                        "{} вытягивает своё же проклятие: оно рассеивается.",
+                        self.name(*player)
+                    )
+                }
+            }
             Event::TributeGiven { player, to, card } => {
                 if *to == me {
                     format!(

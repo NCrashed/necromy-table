@@ -6,7 +6,8 @@
 //! (the god's answer, a story line's voice) are colour.
 
 use necromy_rules::{
-    Act, Bet, Game, God, Line, LineKind, MAX_ACTS, PlayerId, Price, Said, TimeOfDay, Wish, WishKind,
+    Act, Bet, Element, Game, God, Line, LineKind, MAX_ACTS, PlayerId, Price, Said, TimeOfDay, Wish,
+    WishKind,
 };
 
 use crate::client::Message;
@@ -57,22 +58,22 @@ fn persona(god: God) -> &'static str {
 fn likes(god: God) -> &'static str {
     match god {
         God::Trishna => {
-            "Ты любишь просьбы о силе, о мёртвых (пир), о новом даре и о дани; тишина и мир тебя скучают."
+            "Ты любишь просьбы о силе, о мёртвых (пир), о новом даре, о дани и о проклятии в колоде; тишина и мир тебя скучают."
         }
         God::Ahamar => {
-            "Ты любишь просьбы о земле, о суде над соперником, о договоре мира, о чужих тайнах и о пари; \
+            "Ты любишь просьбы о земле, о суде над соперником, о договоре мира, о чужих тайнах, о пари и о том, что придёт из колоды; \
              мёртвые для тебя — бумаги, обмен местами — беспорядок."
         }
         God::Maya => {
-            "Ты любишь просьбы о тишине, о слабости соперника, об обмене местами и о взгляде \
-             в чужую руку; не любишь просьбы о силе, о новых вещах и о дани."
+            "Ты любишь просьбы о тишине, о слабости соперника, об обмене местами, о взгляде \
+             в чужую руку и об отравленной колоде; не любишь просьбы о силе, о новых вещах и о дани."
         }
         God::Zaga => {
             "Ты любишь просьбы о тишине, о покое мёртвых, о порче чужой руки и о дани; не любишь \
-             просьбы о силе и о благословении."
+             просьбы о силе, о благословении и об освящённой колоде."
         }
         God::Bhava => {
-            "Ты любишь просьбы о земле, о силе, о благословении и о новом даре; не любишь вред, порчу и пари."
+            "Ты любишь просьбы о земле, о силе, о благословении, о новом даре и об освящённой колоде; не любишь вред, порчу, пари и отравленную колоду."
         }
     }
 }
@@ -95,6 +96,10 @@ fn kind_id(kind: WishKind) -> &'static str {
         WishKind::Swap => "swap",
         WishKind::Tribute => "tribute",
         WishKind::Wager => "wager",
+        WishKind::Hallow => "hallow",
+        WishKind::Rot => "rot",
+        WishKind::Plant => "plant",
+        WishKind::Foresee => "foresee",
     }
 }
 
@@ -117,6 +122,10 @@ pub fn kind_phrase(kind: WishKind) -> &'static str {
         WishKind::Swap => "поменяй нас местами",
         WishKind::Tribute => "пусть мне заплатят дань",
         WishKind::Wager => "ставлю, что соперник это сделает",
+        WishKind::Hallow => "освяти колоду",
+        WishKind::Rot => "отрави колоду",
+        WishKind::Plant => "спрячь в колоде проклятие",
+        WishKind::Foresee => "покажи, что придёт из колоды",
     }
 }
 
@@ -212,7 +221,13 @@ pub fn wish(
          подать, пусть заплатят»\n\
          - wager: пари на то, что соперник до заката сделает bet: fight (вступит в бой), \
          claim (займёт поселение или храм), fall (падёт), hide (скроется); выиграл — \
-         Стиль, проиграл — долг; укажи target и bet\n\n\
+         Стиль, проиграл — долг; укажи target и bet\n\
+         - hallow: карты одной стихии в общей колоде становятся дешевле и сильнее; \
+         стихию укажи в element, если названа\n\
+         - rot: карты одной стихии в общей колоде становятся дороже и слабее, «отрави, \
+         испорти колоду»; стихию укажи в element, если названа\n\
+         - plant: спрятать в колоде проклятие, которое укусит того, кто его вытянет\n\
+         - foresee: увидеть три верхние карты колоды, «покажи, что придёт»\n\n\
          Оцени стиль желания от 0 до 3:\n\
          0 — грубо: желание прямо требует результата (победы, смерти всех, богатства, \
          очков), как бы красиво оно ни звучало. Такие всегда fortune или doom с оценкой 0.\n\
@@ -271,9 +286,10 @@ pub fn wish(
                         "kind": { "enum": WishKind::ALL.map(kind_id) },
                         "target": { "enum": targets },
                         "card": { "enum": cards.clone() },
-                        "bet": { "enum": ["none", "fight", "claim", "fall", "hide"] }
+                        "bet": { "enum": ["none", "fight", "claim", "fall", "hide"] },
+                        "element": { "enum": ["none", "wood", "fire", "earth", "metal", "water"] }
                     },
-                    "required": ["kind", "target", "card", "bet"]
+                    "required": ["kind", "target", "card", "bet", "element"]
                 }
             },
             "price": {
@@ -339,7 +355,18 @@ pub fn read_wish(
             Some("hide") => Bet::Hide,
             _ => Bet::Fight,
         };
+        // Hallowing and rotting may name the element of the deck'"'"'s cards.
+        let element = match item["element"].as_str() {
+            Some("wood") => Some(Element::Wood),
+            Some("fire") => Some(Element::Fire),
+            Some("earth") => Some(Element::Earth),
+            Some("metal") => Some(Element::Metal),
+            Some("water") => Some(Element::Water),
+            _ => None,
+        };
         acts.extend(match Act::of(kind, target) {
+            Some(Act::Hallow { .. }) => Some(Act::Hallow { element }),
+            Some(Act::Rot { .. }) => Some(Act::Rot { element }),
             Some(Act::Bless { .. }) => Some(Act::Bless { card: named_card }),
             Some(Act::Wager { target, .. }) => Some(Act::Wager { target, bet }),
             other => other,

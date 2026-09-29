@@ -51,6 +51,9 @@ impl Game {
         for &i in &hidden {
             v.mods.remove(&CardId(i as u32));
         }
+        // Where a curse hides is nobody's to see, the planter's neither.
+        v.planted
+            .retain(|c, _| hidden.binary_search(&(c.0 as usize)).is_err());
         v.rng.shuffle(&mut v.deck);
 
         // A hidden rival stands where they were last seen (§11.6).
@@ -96,6 +99,11 @@ impl Game {
                 player: *player,
                 card: *card,
                 def: view.def_id(*card),
+            },
+            // What a wish showed one player of the deck stays theirs.
+            Event::Foreseen { player, .. } if Some(*player) != viewer => Event::Foreseen {
+                player: *player,
+                cards: Vec::new(),
             },
             // What a wish showed one player of a rival's hand stays theirs.
             Event::HandSeen { player, about, .. } if Some(*player) != viewer => Event::HandSeen {

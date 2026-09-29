@@ -258,6 +258,10 @@ pub fn wish(kind: necromy_rules::WishKind) -> &'static str {
         WishKind::Swap => "Поменяй нас местами",
         WishKind::Tribute => "Пусть мне заплатят дань",
         WishKind::Wager => "Ставлю, что соперник вступит в бой",
+        WishKind::Hallow => "Освяти колоду",
+        WishKind::Rot => "Отрави колоду",
+        WishKind::Plant => "Спрячь в колоде проклятие",
+        WishKind::Foresee => "Покажи, что придёт из колоды",
     }
 }
 

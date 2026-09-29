@@ -2767,3 +2767,116 @@ fn a_wager_pays_if_it_happens_and_is_a_debt_if_not() {
     assert!(g.log().iter().any(|e| matches!(e, Event::WagerLost { .. })));
     assert!(g.curses(me).contains(&God::Ahamar));
 }
+
+#[test]
+fn a_hallowed_deck_hides_its_gifts_until_drawn() {
+    let (mut g, me, foe) = duel(3);
+    let wood = |g: &Game| {
+        g.deck
+            .iter()
+            .filter(|&&c| g.def(c).element == Some(Element::Wood))
+            .count()
+    };
+    assert!(wood(&g) > 0, "the deck holds wood");
+    let events = wish_now(&mut g, me, God::Bhava, Act::Hallow { element: None });
+    let count = events
+        .iter()
+        .find_map(|e| match e {
+            Event::DeckChanged {
+                element: Element::Wood,
+                count,
+                blessed: true,
+                ..
+            } => Some(*count as usize),
+            _ => None,
+        })
+        .expect("the deck changed");
+    assert!(count >= 1 && count <= wood(&g));
+    let changed: Vec<CardId> = g
+        .deck
+        .iter()
+        .copied()
+        .filter(|&c| g.card_mod(c).is_some())
+        .collect();
+    assert_eq!(changed.len(), count);
+    // Nobody sees which, the asker neither.
+    for p in [me, foe] {
+        let v = g.view_for(Some(p), 1);
+        assert!(changed.iter().all(|&c| v.card_mod(c).is_none()));
+    }
+    // Drawn, the gift shows in its holder's hand.
+    let card = changed[0];
+    g.deck.retain(|&c| c != card);
+    g.deck.push(card);
+    let mut ev = Vec::new();
+    g.draw(foe, 1, &mut ev);
+    assert!(g.view_for(Some(foe), 1).card_mod(card).is_some());
+}
+
+#[test]
+fn a_rotted_deck_takes_the_element_the_god_quenches() {
+    let (mut g, me, _) = duel(3);
+    let events = wish_now(&mut g, me, God::Bhava, Act::Rot { element: None });
+    // Wood quenches earth.
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::DeckChanged {
+            element: Element::Earth,
+            blessed: false,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn a_planted_curse_bites_whoever_else_draws_it_and_is_gone() {
+    let (mut g, me, foe) = duel(3);
+    let deck = g.deck.len();
+    wish_now(&mut g, me, God::Trishna, Act::Plant);
+    assert_eq!(g.deck.len(), deck + 1);
+    let (&curse, _) = g.planted.iter().next().expect("planted");
+    let depth = g.deck.len() - 1 - g.deck.iter().position(|&c| c == curse).unwrap();
+    assert!(depth <= 3, "near the top");
+    // Up to the top, then the foe draws it.
+    g.deck.retain(|&c| c != curse);
+    g.deck.push(curse);
+    let hp = g.champion(foe).unwrap().hp;
+    let mut ev = Vec::new();
+    g.draw(foe, 1, &mut ev);
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::CurseDrawn { bit: true, .. }))
+    );
+    assert_eq!(g.champion(foe).unwrap().hp, hp - 1);
+    assert!(!g.hand(foe).contains(&curse), "gone from the game");
+    assert!(!g.discard.contains(&curse));
+
+    // The planter draws their own: no bite.
+    let (mut g, me, _) = duel(3);
+    wish_now(&mut g, me, God::Trishna, Act::Plant);
+    let (&curse, _) = g.planted.iter().next().unwrap();
+    g.deck.retain(|&c| c != curse);
+    g.deck.push(curse);
+    let hp = g.champion(me).unwrap().hp;
+    let mut ev = Vec::new();
+    g.draw(me, 1, &mut ev);
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::CurseDrawn { bit: false, .. }))
+    );
+    assert_eq!(g.champion(me).unwrap().hp, hp);
+}
+
+#[test]
+fn foreseeing_shows_the_top_to_the_seer_only() {
+    let (mut g, me, foe) = duel(3);
+    let top: Vec<DefId> = g.deck.iter().rev().take(3).map(|&c| g.def_id(c)).collect();
+    let events = wish_now(&mut g, me, God::Ahamar, Act::Foresee);
+    let seen = events
+        .iter()
+        .find(|e| matches!(e, Event::Foreseen { .. }))
+        .unwrap();
+    assert!(matches!(seen, Event::Foreseen { cards, .. } if *cards == top));
+    let for_foe = Game::event_for(&g.view_for(Some(foe), 1), Some(foe), seen).unwrap();
+    assert!(matches!(for_foe, Event::Foreseen { cards, .. } if cards.is_empty()));
+}

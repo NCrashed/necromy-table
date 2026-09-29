@@ -418,6 +418,32 @@ pub enum Event {
         other: PlayerId,
         god: God,
     },
+    /// Cards of `element` in the deck were hallowed (or rotted): `count` of
+    /// them, which ones nobody knows until drawn.
+    DeckChanged {
+        player: PlayerId,
+        god: God,
+        element: Element,
+        count: u8,
+        blessed: bool,
+    },
+    /// A curse of `god` hides in the deck.
+    CursePlanted {
+        player: PlayerId,
+        god: God,
+    },
+    /// `player` sees the top of the deck, top first; others see it empty.
+    Foreseen {
+        player: PlayerId,
+        cards: Vec<DefId>,
+    },
+    /// `player` drew a planted curse; it `bit` unless they planted it.
+    CurseDrawn {
+        player: PlayerId,
+        planter: PlayerId,
+        god: God,
+        bit: bool,
+    },
     /// `player` gave `card` to `to` as tribute.
     TributeGiven {
         player: PlayerId,
@@ -792,6 +818,8 @@ pub struct Game {
     truces: Vec<wish::Truce>,
     /// Wagers a wish made, settled at the next dusk.
     wagers: Vec<wish::Wager>,
+    /// Curses a wish hid in the deck: who planted each, for which god.
+    planted: BTreeMap<CardId, (PlayerId, God)>,
     /// A scripted scene (a tutorial chapter, `scenario.rs`): the world holds
     /// still. No new bodies, stories or draws; dawn and the guard only if
     /// the scene lets them.
@@ -883,6 +911,7 @@ impl Game {
             known: Vec::new(),
             truces: Vec::new(),
             wagers: Vec::new(),
+            planted: BTreeMap::new(),
             scripted: None,
             log: Vec::new(),
         };
@@ -2302,6 +2331,8 @@ impl Game {
                 card,
                 def: self.def_id(card),
             });
+            // A curse a wish hid there (§7.3).
+            self.spring_curse(player, card, events);
         }
     }
 
@@ -2459,8 +2490,8 @@ pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
 pub use victory::{Check, CheckKind, Condition, OPEN_COUNT, REFUSAL_THREAT, SECRET_FROM_ROUND};
 pub use wish::{
-    Act, Bet, MAX_ACTS, Price, Said, TRIBUTE_THREAT, Truce, WAGER_STAKE, Wager, Wish, WishKind,
-    forge_template, god_terrain, likes_a_stake, taste_for,
+    Act, Bet, FORESEE, MAX_ACTS, Price, Said, TRIBUTE_THREAT, Truce, WAGER_STAKE, Wager, Wish,
+    WishKind, forge_template, god_terrain, likes_a_stake, taste_for,
 };
 pub use world::{Pantheon, STAGE_THRESHOLD, STAGES, TRISHNA_DRIFT};
 
