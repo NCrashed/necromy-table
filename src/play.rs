@@ -131,6 +131,9 @@ pub struct Match {
     pub offerings: Vec<(Option<PlayerId>, God, u8)>,
     /// Stages that shifted at the last dusk, for its scene: god, from, to.
     pub dusk_news: Vec<(God, u8, u8)>,
+    /// Mechanics that came into the world, for the same scene (§21.4): the
+    /// mechanic, the god, and who asked, named.
+    pub world_news: Vec<(necromy_rules::Feature, God, Option<String>)>,
     /// Each god's stage as last told, to say where a shift came from.
     stages_seen: [u8; 5],
     /// Stage shifts told so far (the `=dusk` screenshot waits for one).
@@ -615,6 +618,7 @@ impl Match {
             incoming_serial: 0,
             offerings: Vec::new(),
             dusk_news: Vec::new(),
+            world_news: Vec::new(),
             heard: Vec::new(),
             effects: Vec::new(),
             drafting: Default::default(),
@@ -860,11 +864,34 @@ impl Match {
         let mut wished: Vec<WishReply> = Vec::new();
         // Outcome of a card aimed at the human, gathered from this batch.
         let mut hit: Option<IncomingResult> = None;
+        // What a wish did follows it, up to the first event of something else
+        // (the next wish, the gods shifting, the night).
+        let mut collecting = false;
         for event in events {
-            if let Some(w) = wished.last_mut()
+            if matches!(
+                event,
+                Event::WishGranted { .. }
+                    | Event::WishRefused { .. }
+                    | Event::WishLost { .. }
+                    | Event::StageChanged { .. }
+                    | Event::RoundStarted { .. }
+                    | Event::LineTold { .. }
+                    | Event::LineDone { .. }
+                    | Event::LineFailed { .. }
+                    | Event::WorldStirred { .. }
+                    | Event::TrialSet { .. }
+                    | Event::TrialFaded { .. }
+            ) {
+                collecting = false;
+            }
+            if collecting
+                && let Some(w) = wished.last_mut()
                 && let Some(line) = self.describe(event)
             {
                 w.lines.push(line);
+            }
+            if matches!(event, Event::WishGranted { .. }) {
+                collecting = true;
             }
             match event {
                 Event::WishGranted {
@@ -984,6 +1011,14 @@ impl Match {
                     let from = std::mem::replace(seen, *stage);
                     self.dusk_news.push((*god, from, *stage));
                     self.stage_shifts += 1;
+                }
+                Event::WorldGrew {
+                    feature,
+                    god,
+                    player,
+                } => {
+                    let who = player.map(|p| self.name_genitive(p));
+                    self.world_news.push((*feature, *god, who));
                 }
                 _ => {}
             }
@@ -1445,6 +1480,19 @@ impl Match {
         }
     }
 
+    /// "по желанию Тришны": the seat's name in the genitive.
+    pub fn name_genitive(&self, player: PlayerId) -> String {
+        let god = self
+            .game
+            .champion(player)
+            .map_or("?", |c| names::god_genitive(c.god));
+        if player == self.human {
+            format!("{god} (твоему)")
+        } else {
+            god.to_string()
+        }
+    }
+
     /// "натыкается на Тришну": the seat's name in the accusative.
     pub fn name_accusative(&self, player: PlayerId) -> String {
         let god = self
@@ -1737,6 +1785,26 @@ impl Match {
             Event::LandRaised { terrain, .. } => format!(
                 "Из мглы поднимается земля: {}.",
                 names::terrain(*terrain).0.to_lowercase()
+            ),
+            Event::WorldGrew {
+                feature,
+                god,
+                player,
+            } => {
+                let (name, what) = names::feature(*feature);
+                match player {
+                    Some(p) => format!(
+                        "В мир приходит новое — {name}: {what}. Принёс {} по желанию {}.",
+                        names::god(*god),
+                        self.name_genitive(*p)
+                    ),
+                    None => format!("В мир приходит новое — {name}: {what}."),
+                }
+            }
+            Event::AwakeningDeferred { god, feature, .. } => format!(
+                "{} откладывает до следующего заката: {}. Нового — не больше одного за закат.",
+                names::god(*god),
+                names::feature(*feature).0.to_lowercase()
             ),
             Event::WishGranted {
                 player,

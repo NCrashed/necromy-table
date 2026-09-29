@@ -6,8 +6,8 @@
 //! (the god's answer, a story line's voice) are colour.
 
 use necromy_rules::{
-    Act, Bet, Element, Game, God, Line, LineKind, MAX_ACTS, PlayerId, Price, Said, TimeOfDay, Wish,
-    WishKind,
+    Act, Bet, Element, Feature, Game, God, Line, LineKind, MAX_ACTS, PlayerId, Price, Said,
+    Terrain, TimeOfDay, Wish, WishKind,
 };
 
 use crate::client::Message;
@@ -100,6 +100,12 @@ fn kind_id(kind: WishKind) -> &'static str {
         WishKind::Rot => "rot",
         WishKind::Plant => "plant",
         WishKind::Foresee => "foresee",
+        WishKind::Rise => "rise",
+        WishKind::Veil => "veil",
+        WishKind::Unveil => "unveil",
+        WishKind::Settle => "settle",
+        WishKind::Stones => "stones",
+        WishKind::Awaken => "awaken",
     }
 }
 
@@ -126,6 +132,48 @@ pub fn kind_phrase(kind: WishKind) -> &'static str {
         WishKind::Rot => "отрави колоду",
         WishKind::Plant => "спрячь в колоде проклятие",
         WishKind::Foresee => "покажи, что придёт из колоды",
+        WishKind::Rise => "пусть земля растёт",
+        WishKind::Veil => "пусть мгла возьмёт эту землю",
+        WishKind::Unveil => "развей мглу",
+        WishKind::Settle => "пусть здесь поселятся люди",
+        WishKind::Stones => "подними камни силы",
+        WishKind::Awaken => "принеси в мир новое",
+    }
+}
+
+/// The model's word for a mechanic of the world (§21.2).
+pub fn feature_id(f: Feature) -> &'static str {
+    match f {
+        Feature::Bodies => "bodies",
+        Feature::Groves => "groves",
+        Feature::Settlements => "settlements",
+        Feature::Militia => "militia",
+        Feature::Undead => "undead",
+        Feature::Ruins => "ruins",
+        Feature::Poison => "poison",
+        Feature::Trials => "trials",
+        Feature::Loot => "loot",
+        Feature::Guard => "guard",
+        Feature::Stealth => "stealth",
+        Feature::Beasts => "beasts",
+    }
+}
+
+/// What the mechanic is, for the model: a few Russian words.
+fn feature_words(f: Feature) -> &'static str {
+    match f {
+        Feature::Bodies => "тела на земле",
+        Feature::Groves => "рощи из нетронутых тел",
+        Feature::Settlements => "поселения",
+        Feature::Militia => "ополчение поселений",
+        Feature::Undead => "неупокоенные мертвецы",
+        Feature::Ruins => "руины разорённых поселений",
+        Feature::Poison => "яд",
+        Feature::Trials => "испытания на клетках",
+        Feature::Loot => "добыча и предметы",
+        Feature::Guard => "королевская гвардия",
+        Feature::Stealth => "умение скрываться",
+        Feature::Beasts => "звери Бхавы",
     }
 }
 
@@ -229,7 +277,17 @@ pub fn wish(
          - rot: карты одной стихии в общей колоде становятся дороже и слабее, «отрави, \
          испорти колоду»; стихию укажи в element, если названа\n\
          - plant: спрятать в колоде проклятие, которое укусит того, кто его вытянет\n\
-         - foresee: увидеть три верхние карты колоды, «покажи, что придёт»\n\n\
+         - foresee: увидеть три верхние карты колоды, «покажи, что придёт»\n\
+         - rise: на краю края бога поднимается новая земля, «пусть земля растёт, \
+         вырастет лес, поднимутся горы»; вид земли укажи в terrain (plains, forest, \
+         mountain, swamp), если назван\n\
+         - veil: земля вокруг соперника (target) или вокруг просящего (target none) \
+         уходит в мглу, «пусть туман поглотит, пусть земля исчезнет»\n\
+         - unveil: мгла рядом с просящим рассеивается, земля возвращается\n\
+         - settle: рядом с просящим появляется поселение, «пусть здесь поселятся люди»\n\
+         - stones: рядом с просящим встают камни силы\n\
+         - awaken: в мир приходит то, чего в нём ещё нет; что именно, укажи в feature \
+         из списка того, что можно принести сейчас\n\n\
          Оцени стиль желания от 0 до 3:\n\
          0 — грубо: желание прямо требует результата (победы, смерти всех, богатства, \
          очков), как бы красиво оно ни звучало. Такие всегда fortune или doom с оценкой 0.\n\
@@ -259,8 +317,19 @@ pub fn wish(
         .iter()
         .map(|&c| game.def(c).name)
         .collect();
+    // What could come into the world now (§21.2): the rules allow nothing else.
+    let awakenable = game.awakenable(god);
+    let new_things = if awakenable.is_empty() {
+        "Нового в мир сейчас принести нельзя.".to_string()
+    } else {
+        let named: Vec<String> = awakenable
+            .iter()
+            .map(|&f| format!("{} ({})", feature_words(f), feature_id(f)))
+            .collect();
+        format!("В мир сейчас можно принести: {}.", named.join(", "))
+    };
     let user = format!(
-        "{}\nТвоя стадия сейчас: {} из 3.\nКарты в руке просящего: {}.\n\nЖелание чемпиона {}: «{}»",
+        "{}\nТвоя стадия сейчас: {} из 3.\nКарты в руке просящего: {}.\n{new_things}\n\nЖелание чемпиона {}: «{}»",
         situation(game, player),
         game.stage(god) + 1,
         if hand.is_empty() {
@@ -271,6 +340,11 @@ pub fn wish(
         champion_name(game, player),
         text.trim()
     );
+    let mut features: Vec<serde_json::Value> = awakenable
+        .iter()
+        .map(|&f| serde_json::json!(feature_id(f)))
+        .collect();
+    features.push(serde_json::json!("none"));
     let mut targets: Vec<serde_json::Value> = rivals.iter().map(|r| serde_json::json!(r)).collect();
     targets.push(serde_json::json!("none"));
     let mut cards: Vec<serde_json::Value> = hand.iter().map(|n| serde_json::json!(n)).collect();
@@ -289,9 +363,11 @@ pub fn wish(
                         "target": { "enum": targets },
                         "card": { "enum": cards.clone() },
                         "bet": { "enum": ["none", "fight", "claim", "fall", "hide"] },
-                        "element": { "enum": ["none", "wood", "fire", "earth", "metal", "water"] }
+                        "element": { "enum": ["none", "wood", "fire", "earth", "metal", "water"] },
+                        "terrain": { "enum": ["none", "plains", "forest", "mountain", "swamp"] },
+                        "feature": { "enum": features }
                     },
-                    "required": ["kind", "target", "card", "bet", "element"]
+                    "required": ["kind", "target", "card", "bet", "element", "terrain", "feature"]
                 }
             },
             "price": {
@@ -368,7 +444,22 @@ pub fn read_wish(
             Some("water") => Some(Element::Water),
             _ => None,
         };
+        // Land of a kind, a mechanic by name, for the creation wishes (§21.9).
+        let terrain = match item["terrain"].as_str() {
+            Some("plains") => Some(Terrain::Plains),
+            Some("forest") => Some(Terrain::Forest),
+            Some("mountain") => Some(Terrain::Mountain),
+            Some("swamp") => Some(Terrain::Swamp),
+            _ => None,
+        };
+        let feature = Feature::ALL
+            .into_iter()
+            .find(|&f| item["feature"].as_str() == Some(feature_id(f)));
         acts.extend(match Act::of(kind, target) {
+            Some(Act::Rise { .. }) => Some(Act::Rise { terrain }),
+            Some(Act::Awaken { .. }) => Some(Act::Awaken { feature }),
+            // The mist goes round the asker unless a rival is named.
+            Some(Act::Veil { .. }) => Some(Act::Veil { target: named }),
             Some(Act::Hallow { .. }) => Some(Act::Hallow { element }),
             Some(Act::Rot { .. }) => Some(Act::Rot { element }),
             Some(Act::Bless { .. }) => Some(Act::Bless { card: named_card }),
@@ -574,6 +665,48 @@ mod tests {
         assert_eq!(wish.price, Some(Price::Card(g.hand(PlayerId(1))[0])));
         assert_eq!(said.grade, 3);
         assert_eq!(said.text, format!("отдаю «{card}»"));
+    }
+
+    #[test]
+    fn creation_wishes_read_their_land_and_their_new_thing() {
+        let g = game();
+        let reply = r#"{"acts":[{"kind":"rise","target":"none","terrain":"forest"},
+                {"kind":"awaken","target":"none","feature":"loot"}],
+                "price":{"kind":"none","amount":0,"card":"none"},
+                "grade":2,"speech":"","reason":""}"#;
+        let (wish, _) = read_wish(&g, PlayerId(1), "пусть лес растёт", reply).unwrap();
+        assert_eq!(
+            wish.acts,
+            [
+                Act::Rise {
+                    terrain: Some(Terrain::Forest)
+                },
+                Act::Awaken {
+                    feature: Some(Feature::Loot)
+                }
+            ]
+        );
+        // The mist goes round the asker when no rival is named.
+        let reply = r#"{"acts":[{"kind":"veil","target":"none"}],
+                "price":{"kind":"none","amount":0,"card":"none"},"grade":1,"speech":"","reason":""}"#;
+        let (wish, _) = read_wish(&g, PlayerId(1), "скрой меня мглой", reply).unwrap();
+        assert_eq!(wish.acts, [Act::Veil { target: None }]);
+    }
+
+    #[test]
+    fn the_model_is_offered_only_what_can_come_into_the_world() {
+        let g = game();
+        let (messages, schema) = wish(&g, PlayerId(1), God::Trishna, "принеси новое");
+        let features = schema["properties"]["acts"]["items"]["properties"]["feature"]["enum"]
+            .as_array()
+            .unwrap();
+        // A full world has everything already.
+        assert_eq!(features, &[serde_json::json!("none")]);
+        assert!(
+            messages[1]
+                .content
+                .contains("Нового в мир сейчас принести нельзя")
+        );
     }
 
     #[test]

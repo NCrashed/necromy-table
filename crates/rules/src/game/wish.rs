@@ -78,10 +78,23 @@ pub enum WishKind {
     Plant,
     /// "Show me what comes": the top of the deck.
     Foresee,
+    /// "Let the land grow": new land at the rim of the god's region (§21.9).
+    Rise,
+    /// "Let the mist take it": land around a rival (or the asker) goes into
+    /// the mist.
+    Veil,
+    /// "Lift the mist": mist near the asker gives the land back.
+    Unveil,
+    /// "Let people settle here": a settlement near the asker.
+    Settle,
+    /// "Raise the stones": a ring of standing stones near the asker.
+    Stones,
+    /// "Bring something new into the world": a mechanic the world lacks.
+    Awaken,
 }
 
 impl WishKind {
-    pub const ALL: [WishKind; 20] = [
+    pub const ALL: [WishKind; 26] = [
         WishKind::Strength,
         WishKind::Weaken,
         WishKind::Land,
@@ -102,6 +115,12 @@ impl WishKind {
         WishKind::Rot,
         WishKind::Plant,
         WishKind::Foresee,
+        WishKind::Rise,
+        WishKind::Veil,
+        WishKind::Unveil,
+        WishKind::Settle,
+        WishKind::Stones,
+        WishKind::Awaken,
     ];
 
     /// Asks for the outcome itself instead of going through the world: always
@@ -184,6 +203,26 @@ pub enum Act {
     Plant,
     /// The asker sees the top cards of the deck.
     Foresee,
+    /// New land at the rim of the god's region, nearest the asker: the kind
+    /// named if the god makes it, else the god's own (§21.9).
+    Rise {
+        terrain: Option<Terrain>,
+    },
+    /// Land around the rival (or the asker) goes into the mist.
+    Veil {
+        target: Option<PlayerId>,
+    },
+    /// The mist nearest the asker lifts.
+    Unveil,
+    /// A settlement on free land near the asker.
+    Settle,
+    /// Standing stones on free land near the asker.
+    Stones,
+    /// A mechanic the world lacks, the one named or else one of the god's
+    /// own (§21.2); its first thing appears near the asker.
+    Awaken {
+        feature: Option<crate::features::Feature>,
+    },
 }
 
 impl Act {
@@ -209,6 +248,12 @@ impl Act {
             Act::Rot { .. } => WishKind::Rot,
             Act::Plant => WishKind::Plant,
             Act::Foresee => WishKind::Foresee,
+            Act::Rise { .. } => WishKind::Rise,
+            Act::Veil { .. } => WishKind::Veil,
+            Act::Unveil => WishKind::Unveil,
+            Act::Settle => WishKind::Settle,
+            Act::Stones => WishKind::Stones,
+            Act::Awaken { .. } => WishKind::Awaken,
         }
     }
 
@@ -221,17 +266,34 @@ impl Act {
             | Act::Truce { target }
             | Act::Swap { target }
             | Act::Wager { target, .. } => Some(target),
+            Act::Veil { target } => target,
             _ => None,
         }
     }
 
     /// Budget the act takes (§7.3): a new card and a leap across the
-    /// table are worth more.
+    /// table are worth more, a new rule of the world most (§21.9).
+    /// `Game::act_cost` knows the world: a thing it has no rule for yet
+    /// brings the rule in, at an awakening's price.
     pub const fn cost(self) -> u8 {
         match self {
-            Act::Forge | Act::Swap { .. } | Act::Tribute | Act::Plant => 2,
+            Act::Awaken { .. } => AWAKEN_COST,
+            Act::Forge | Act::Swap { .. } | Act::Tribute | Act::Plant | Act::Settle => 2,
             _ => 1,
         }
+    }
+
+    /// It makes the world: land, mist, things on it, a new mechanic.
+    pub const fn creates(self) -> bool {
+        matches!(
+            self,
+            Act::Rise { .. }
+                | Act::Veil { .. }
+                | Act::Unveil
+                | Act::Settle
+                | Act::Stones
+                | Act::Awaken { .. }
+        )
     }
 
     /// The act of a prepared `kind`, aimed at `target` if it needs one.
@@ -256,6 +318,12 @@ impl Act {
             WishKind::Rot => Act::Rot { element: None },
             WishKind::Plant => Act::Plant,
             WishKind::Foresee => Act::Foresee,
+            WishKind::Rise => Act::Rise { terrain: None },
+            WishKind::Veil => Act::Veil { target },
+            WishKind::Unveil => Act::Unveil,
+            WishKind::Settle => Act::Settle,
+            WishKind::Stones => Act::Stones,
+            WishKind::Awaken => Act::Awaken { feature: None },
             // A prepared wager bets on a fight, the likeliest thing to happen.
             WishKind::Wager => Act::Wager {
                 target: target?,
@@ -348,6 +416,10 @@ impl Price {
     }
 }
 
+/// Budget a new mechanic of the world takes (§21.9): a grade of 3, or a
+/// price, or the Crown's weight.
+pub const AWAKEN_COST: u8 = 3;
+
 /// Acts a wish may ask for at most.
 pub const MAX_ACTS: usize = 2;
 
@@ -389,23 +461,23 @@ pub const fn taste_for(god: God, kind: WishKind) -> i8 {
     match (god, kind) {
         // Hunger loves strength, feasts of the dead and a gift that feeds;
         // quiet and truce bore it.
-        (God::Trishna, Strength | Dead | Forge | Tribute | Plant) => 1,
-        (God::Trishna, Peace | Truce) => -1,
+        (God::Trishna, Strength | Dead | Forge | Tribute | Plant | Settle) => 1,
+        (God::Trishna, Peace | Truce | Veil) => -1,
         // Order loves land, judgement, a contract and the registry of
         // secrets; the dead are paperwork, a swap is disorder.
-        (God::Ahamar, Land | Weaken | Truce | Secret | Wager | Foresee) => 1,
-        (God::Ahamar, Dead | Swap) => -1,
+        (God::Ahamar, Land | Weaken | Truce | Secret | Wager | Foresee | Settle | Stones) => 1,
+        (God::Ahamar, Dead | Swap | Veil) => -1,
         // Dissolution loves letting go, loosening a grip, seeing through,
         // one thing becoming another; not strength, not a new thing to hold.
-        (God::Maya, Peace | Weaken | Swap | Hand | Rot) => 1,
-        (God::Maya, Strength | Forge | Tribute) => -1,
+        (God::Maya, Peace | Weaken | Swap | Hand | Rot | Veil | Unveil) => 1,
+        (God::Maya, Strength | Forge | Tribute | Settle) => -1,
         // Renunciation loves quiet, the dead at rest and the price a desire
         // exacts; not strength, not blessing what is held.
-        (God::Zaga, Peace | Dead | Blight | Tribute) => 1,
-        (God::Zaga, Strength | Bless | Hallow) => -1,
+        (God::Zaga, Peace | Dead | Blight | Tribute | Stones) => 1,
+        (God::Zaga, Strength | Bless | Hallow | Rise) => -1,
         // Growth loves the land, strength, what grows in the hand; not harm.
-        (God::Bhava, Land | Strength | Bless | Forge | Hallow) => 1,
-        (God::Bhava, Weaken | Blight | Wager | Rot) => -1,
+        (God::Bhava, Land | Strength | Bless | Forge | Hallow | Rise) => 1,
+        (God::Bhava, Weaken | Blight | Wager | Rot | Veil) => -1,
         _ => 0,
     }
 }
@@ -524,7 +596,14 @@ impl Game {
         } else {
             let voice = u8::from(self.patronage(player, god) >= super::Patronage::Voice);
             let dark = u8::from(self.stage(god) == 2);
-            (grade + voice).min(3).saturating_sub(dark)
+            // Another god's domain the god makes through its own, grudgingly
+            // (§21.2).
+            let foreign = u8::from(
+                wish.acts
+                    .iter()
+                    .any(|a| matches!(a, Act::Awaken { feature: Some(f) } if f.domain() != god)),
+            );
+            (grade + voice).min(3).saturating_sub(dark + foreign)
         };
 
         // The price is given first: the god takes it whatever it grants.
@@ -541,7 +620,7 @@ impl Game {
             .iter()
             .copied()
             .take_while(|a| {
-                spent += a.cost();
+                spent += self.act_cost(*a);
                 spent <= budget
             })
             .collect();
@@ -566,6 +645,7 @@ impl Game {
         self.offer(Some(player), god, 1, events);
 
         let power = (grade + 1 + u8::from(wish.price.is_some())).min(4);
+        let made = granted.iter().any(|a| a.creates());
         for act in granted {
             self.grant_act(player, god, act, power, forged.as_ref(), events);
         }
@@ -578,9 +658,15 @@ impl Game {
             (_, true, 0) => 2,
             _ => 1,
         };
+        // A wish that made the world gets the god's twist on making (§21.9).
         for _ in 0..twists {
-            self.twist(player, god, events);
+            if made {
+                self.creation_twist(player, god, events);
+            } else {
+                self.twist(player, god, events);
+            }
         }
+        self.raised.clear();
 
         // The grade becomes Style; a wish without style also carries a curse.
         // Kept small: a wish is power already, and Style keeps the Crown.
@@ -591,6 +677,8 @@ impl Game {
         if grade == 0 {
             self.curses[player.0 as usize].push(god);
             events.push(Event::CurseLaid { player, god });
+            // And the god makes what it likes near them (§21.3).
+            self.god_creates(player, god, events);
         }
     }
 
@@ -638,26 +726,17 @@ impl Game {
                 self.damage(target, power.saturating_sub(1).max(1), events);
                 self.root(target, events);
             }
-            Act::Land => {
-                let terrain = god_terrain(god);
-                let spots: Vec<Hex> = me
-                    .all_neighbors()
-                    .into_iter()
-                    .chain(std::iter::once(me))
-                    .filter(|&h| {
-                        self.board.tile(h).is_some_and(|t| {
-                            t.terrain.can_grow_grove() || t.terrain == Terrain::Mountain
-                        }) && !self.mob_at(h)
-                    })
-                    .take(power as usize)
-                    .collect();
-                for hex in spots {
-                    if let Some(tile) = self.board.tile_mut(hex) {
-                        tile.terrain = terrain;
-                    }
-                    events.push(Event::TerrainChanged { hex, terrain });
-                }
+            Act::Land => self.grant_land(god, me, usize::from(power), events),
+            // No bodies in the world yet: asking for the dead brings them in.
+            Act::Dead if !self.has(super::Feature::Bodies) => {
+                self.awaken(Some(player), god, super::Feature::Bodies, me, events);
             }
+            Act::Rise { .. }
+            | Act::Veil { .. }
+            | Act::Unveil
+            | Act::Settle
+            | Act::Stones
+            | Act::Awaken { .. } => self.create(player, god, act, power, events),
             Act::Dead => {
                 let free: Vec<Hex> = (1..=2)
                     .flat_map(|r| me.ring(r).collect::<Vec<_>>())

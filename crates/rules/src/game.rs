@@ -671,6 +671,19 @@ pub enum Event {
         hex: Hex,
         terrain: Terrain,
     },
+    /// A new mechanic came into the world, brought by `god` for `player`
+    /// (`None`: the world itself, §21.3).
+    WorldGrew {
+        feature: Feature,
+        god: God,
+        player: Option<PlayerId>,
+    },
+    /// One mechanic a dusk: `god` sets `player`'s aside for the next.
+    AwakeningDeferred {
+        player: PlayerId,
+        god: God,
+        feature: Feature,
+    },
     /// Maya took a card from the hand.
     CardDissolved {
         player: PlayerId,
@@ -1098,6 +1111,14 @@ pub struct Game {
     scripted: Option<scenario::SceneWorld>,
     /// The mechanics this world has (§21.2).
     world: World,
+    /// The round a mechanic last came in: one a dusk (§21.4).
+    awakened: Option<u32>,
+    /// Mechanics a god set aside for the next dusk: who asked, the god.
+    deferred: Vec<(PlayerId, God, Feature)>,
+    /// Land in Maya's fog until dusk: who may see it (§21.9).
+    fog: BTreeMap<(i32, i32), PlayerId>,
+    /// Land the wish being granted raised, for its god's twist.
+    raised: Vec<Hex>,
     log: Vec<Event>,
 }
 
@@ -1210,6 +1231,10 @@ impl Game {
             planted: BTreeMap::new(),
             scripted: None,
             world,
+            awakened: None,
+            deferred: Vec::new(),
+            fog: BTreeMap::new(),
+            raised: Vec::new(),
             log: Vec::new(),
         };
 

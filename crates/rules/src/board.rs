@@ -286,7 +286,6 @@ impl Board {
     }
 
     /// New land on `hex`, which must be off the board and next to it.
-    #[cfg_attr(not(test), expect(dead_code, reason = "creation wishes come next"))]
     pub(crate) fn raise(&mut self, hex: Hex, terrain: Terrain) -> bool {
         let touches = hex.all_neighbors().iter().any(|&n| self.tile(n).is_some());
         if self.tile(hex).is_some() || !touches {
@@ -313,7 +312,6 @@ impl Board {
     }
 
     /// The land on `hex` goes into the mist; what lay there is remembered.
-    #[cfg_attr(not(test), expect(dead_code, reason = "creation wishes come next"))]
     pub(crate) fn veil(&mut self, hex: Hex) -> bool {
         if !self.can_veil(hex) {
             return false;
@@ -326,7 +324,6 @@ impl Board {
     }
 
     /// The mist on `hex` lifts: the land comes back as it was.
-    #[cfg_attr(not(test), expect(dead_code, reason = "creation wishes come next"))]
     pub(crate) fn unveil(&mut self, hex: Hex) -> Option<Terrain> {
         let tile = self.tiles.get_mut(&key(hex))?;
         if tile.terrain.is_land() {

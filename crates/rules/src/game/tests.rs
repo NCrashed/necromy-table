@@ -4231,3 +4231,281 @@ fn raised_land_can_be_walked_at_once() {
     g.apply(me, Intent::Move { to: beyond }).unwrap();
     assert_eq!(g.champion(me).unwrap().hex, beyond);
 }
+
+/// `g`'s world without `lacking`.
+fn without(g: &mut Game, lacking: &[Feature]) {
+    g.world = World::of(Feature::ALL.into_iter().filter(|f| !lacking.contains(f)));
+}
+
+fn grew(events: &[Event]) -> Vec<Feature> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Event::WorldGrew { feature, .. } => Some(*feature),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_wish_raises_land_at_the_rim_of_the_gods_region() {
+    let (mut g, me, _) = duel(3);
+    let extent = g.board().extent();
+    let events = g
+        .wishes(
+            me,
+            Intent::Wish {
+                god: God::Bhava,
+                wish: Wish::one(Act::Rise { terrain: None }),
+                said: None,
+            },
+        )
+        .unwrap();
+    let raised: Vec<Hex> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::LandRaised { hex, .. } => Some(*hex),
+            _ => None,
+        })
+        .collect();
+    // Bhava loves growth: grade 3, power 4, five new hexes.
+    assert_eq!(raised.len(), 5);
+    for hex in raised {
+        let tile = g.board().tile(hex).unwrap();
+        assert_eq!(tile.region, Some(God::Bhava));
+        assert!(tile.terrain.is_land());
+    }
+    assert!(g.board().extent() > extent);
+}
+
+#[test]
+fn asking_for_the_dead_where_there_are_none_brings_bodies_in() {
+    let (mut g, me, _) = duel(3);
+    without(&mut g, &[Feature::Bodies, Feature::Groves, Feature::Undead]);
+    for (h, _) in g.board().corpses().collect::<Vec<_>>() {
+        g.board.tile_mut(h).unwrap().corpse = None;
+    }
+    // Trishna loves a feast of the dead: 3, enough for a new rule.
+    assert_eq!(g.act_cost(Act::Dead), crate::game::wish::AWAKEN_COST);
+    let events = g
+        .wishes(
+            me,
+            Intent::Wish {
+                god: God::Trishna,
+                wish: Wish::one(Act::Dead),
+                said: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(grew(&events), vec![Feature::Bodies]);
+    assert!(g.has(Feature::Bodies));
+    assert!(g.board().corpses().count() > 0);
+    // Now bodies are a thing of this world: the next asking is cheap.
+    assert_eq!(g.act_cost(Act::Dead), 1);
+}
+
+#[test]
+fn a_mechanic_comes_in_only_on_what_it_stands_on() {
+    let (mut g, _, _) = duel(3);
+    without(
+        &mut g,
+        &[Feature::Settlements, Feature::Militia, Feature::Ruins],
+    );
+    assert!(!g.can_awaken(Feature::Militia), "no settlements yet");
+    assert!(!g.can_awaken(Feature::Ruins));
+    assert!(g.can_awaken(Feature::Settlements));
+    g.world.add(Feature::Settlements);
+    assert!(g.can_awaken(Feature::Militia));
+    assert!(!g.can_awaken(Feature::Settlements), "already there");
+}
+
+#[test]
+fn one_mechanic_a_dusk_and_the_next_waits_for_the_next() {
+    let (mut g, me, foe) = duel(3);
+    without(
+        &mut g,
+        &[Feature::Settlements, Feature::Militia, Feature::Loot],
+    );
+    let mut ev = Vec::new();
+    let at = g.champion(me).unwrap().hex;
+    assert!(g.awaken(Some(me), God::Trishna, Feature::Settlements, at, &mut ev));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::TerrainChanged {
+            terrain: Terrain::Settlement,
+            ..
+        }
+    )));
+    // Its first thing appears near whoever brought it.
+    let settled = g
+        .board()
+        .land()
+        .filter(|(_, t)| t.terrain == Terrain::Settlement)
+        .map(|(h, _)| h)
+        .min_by_key(|h| h.unsigned_distance_to(at))
+        .unwrap();
+    assert!(settled.unsigned_distance_to(at) <= 3);
+    // A second the same dusk is set aside.
+    let mut ev = Vec::new();
+    assert!(!g.awaken(Some(foe), God::Ahamar, Feature::Militia, at, &mut ev));
+    assert!(matches!(
+        ev.as_slice(),
+        [Event::AwakeningDeferred {
+            feature: Feature::Militia,
+            ..
+        }]
+    ));
+    assert!(!g.has(Feature::Militia));
+    // The next dusk it comes in, before any wish.
+    g.round += 2;
+    let mut ev = Vec::new();
+    g.begin_dusk(&mut ev);
+    assert_eq!(grew(&ev), vec![Feature::Militia]);
+    assert!(g.militia(settled).is_some(), "the new settlement's militia");
+}
+
+#[test]
+fn mayas_new_land_hides_in_her_fog_until_dusk() {
+    let (mut g, me, foe) = duel(3);
+    g.pantheon.stages[God::Maya.index()] = 1;
+    let events = g
+        .wishes(
+            me,
+            Intent::Wish {
+                god: God::Maya,
+                wish: Wish::one(Act::Rise { terrain: None }),
+                said: None,
+            },
+        )
+        .unwrap();
+    let hex = events
+        .iter()
+        .find_map(|e| match e {
+            Event::LandRaised { hex, .. } => Some(*hex),
+            _ => None,
+        })
+        .unwrap();
+    let mine = g.view_for(Some(me), 1);
+    let theirs = g.view_for(Some(foe), 1);
+    assert!(mine.board().tile(hex).unwrap().terrain.is_land());
+    assert_eq!(theirs.board().tile(hex).unwrap().terrain, Terrain::Mist);
+    let raised = events
+        .iter()
+        .find(|e| matches!(e, Event::LandRaised { .. }))
+        .unwrap();
+    assert!(Game::event_for(&theirs, Some(foe), raised).is_none());
+    // Dusk lifts the fog.
+    let mut ev = Vec::new();
+    g.begin_dusk(&mut ev);
+    let theirs = g.view_for(Some(foe), 1);
+    assert!(theirs.board().tile(hex).unwrap().terrain.is_land());
+}
+
+#[test]
+fn a_wish_without_style_lets_the_god_make_what_it_likes() {
+    let (mut g, me, _) = duel(3);
+    // A swamp near, so poison can come in.
+    let at = g.champion(me).unwrap().hex;
+    g.board.tile_mut(at + Hex::new(1, 0)).unwrap().terrain = Terrain::Swamp;
+    without(&mut g, &[Feature::Poison]);
+    let events = g
+        .wishes(
+            me,
+            Intent::Wish {
+                god: God::Zaga,
+                wish: wish_of(WishKind::Fortune, None),
+                said: None,
+            },
+        )
+        .unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::WishGranted { grade: 0, .. }))
+    );
+    assert_eq!(grew(&events), vec![Feature::Poison]);
+}
+
+#[test]
+fn awakening_another_gods_domain_is_graded_lower() {
+    let (mut g, me, _) = duel(3);
+    without(
+        &mut g,
+        &[Feature::Settlements, Feature::Militia, Feature::Ruins],
+    );
+    let grade = |events: &[Event]| {
+        events.iter().find_map(|e| match e {
+            Event::WishGranted { grade, .. } => Some(*grade),
+            _ => None,
+        })
+    };
+    // Settlements are Trishna's; asked of Zaga, one less.
+    let mut zaga = g.clone();
+    let foreign = zaga
+        .wishes(
+            me,
+            Intent::Wish {
+                god: God::Zaga,
+                wish: Wish::one(Act::Awaken {
+                    feature: Some(Feature::Settlements),
+                }),
+                said: None,
+            },
+        )
+        .unwrap();
+    let own = g
+        .wishes(
+            me,
+            Intent::Wish {
+                god: God::Trishna,
+                wish: Wish::one(Act::Awaken {
+                    feature: Some(Feature::Settlements),
+                }),
+                said: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(grade(&foreign).unwrap() + 1, grade(&own).unwrap());
+}
+
+/// Tuning aid, not a check: what the gods make of the world in bot games.
+/// `cargo test -p necromy-rules creation_in_bot_games -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn creation_in_bot_games() {
+    let (mut raised, mut veiled, mut grown, mut deferred) = (0, 0, 0, 0);
+    for seed in 0..30 {
+        let (mut g, _) = Game::new(Setup {
+            seed,
+            champions: God::ALL.to_vec(),
+            mode: Default::default(),
+        });
+        for _ in 0..3000 {
+            if g.winner().is_some() {
+                break;
+            }
+            let p = g.awaiting()[0];
+            let intent = crate::bot::choose(&g, p);
+            g.apply(p, intent).unwrap();
+        }
+        for e in g.log() {
+            match e {
+                Event::LandRaised { .. } => raised += 1,
+                Event::TerrainChanged {
+                    terrain: Terrain::Mist,
+                    ..
+                } => veiled += 1,
+                Event::WorldGrew { .. } => grown += 1,
+                Event::AwakeningDeferred { .. } => deferred += 1,
+                _ => {}
+            }
+        }
+        println!(
+            "seed {seed}: round {}, extent {}, land {}",
+            g.round(),
+            g.board().extent(),
+            g.board().land().count()
+        );
+    }
+    println!("raised {raised}, veiled {veiled}, grown {grown}, deferred {deferred}");
+}

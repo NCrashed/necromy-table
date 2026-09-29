@@ -72,6 +72,15 @@ impl Game {
             }
         }
         v.known.retain(|&(who, _)| mine(who));
+        // Land in Maya's fog is mist to all but the one it rose for (§21.9).
+        for (&(x, y), &owner) in &self.fog {
+            if viewer != Some(owner)
+                && let Some(tile) = v.board.tile_mut(hexx::Hex::new(x, y))
+            {
+                tile.terrain = crate::board::Terrain::Mist;
+            }
+        }
+        v.fog.retain(|_, owner| viewer == Some(*owner));
         // Rivals' sealed wishes: that they wished, not what (§21.4).
         for (i, seal) in v.seals.iter_mut().enumerate() {
             if !mine(PlayerId(i as u8)) && matches!(seal, super::Seal::Wish(Some(_))) {
@@ -111,6 +120,12 @@ impl Game {
     pub fn event_for(view: &Game, viewer: Option<PlayerId>, event: &Event) -> Option<Event> {
         let unseen = |p: PlayerId| Some(p) != viewer && view.is_hidden(p);
         Some(match event {
+            // Land risen in the fog is not there for this viewer yet.
+            Event::LandRaised { hex, .. }
+                if view.board().tile(*hex).is_some_and(|t| !t.terrain.is_land()) =>
+            {
+                return None;
+            }
             Event::CardDrawn { player, card, .. } if Some(*player) != viewer => Event::CardDrawn {
                 player: *player,
                 card: *card,

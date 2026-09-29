@@ -12,6 +12,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+use crate::board::Terrain;
 use crate::gods::God;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -58,6 +59,23 @@ impl Feature {
         Feature::Beasts,
     ];
 
+    /// What the world must have before this can come in (§21.2): all of
+    /// them.
+    pub const fn requires(self) -> &'static [Need] {
+        use Need::*;
+        match self {
+            Feature::Bodies | Feature::Settlements | Feature::Guard => &[],
+            Feature::Groves | Feature::Undead => &[Has(Feature::Bodies)],
+            Feature::Militia => &[Has(Feature::Settlements)],
+            Feature::Ruins => &[Has(Feature::Settlements), Has(Feature::Undead)],
+            Feature::Poison => &[Land(&[Terrain::Swamp])],
+            Feature::Trials => &[Land(&[Terrain::Stones])],
+            Feature::Loot => &[AnyOf(&[Feature::Trials, Feature::Guard])],
+            Feature::Stealth => &[Land(&[Terrain::Forest, Terrain::Swamp, Terrain::Grove])],
+            Feature::Beasts => &[Land(&[Terrain::Forest])],
+        }
+    }
+
     /// The god whose domain it is: the one who brings it in most readily
     /// (§21.2).
     pub const fn domain(self) -> God {
@@ -69,6 +87,16 @@ impl Feature {
             Feature::Undead | Feature::Ruins | Feature::Stealth => God::Maya,
         }
     }
+}
+
+/// One thing a mechanic needs before it can come into the world.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Need {
+    Has(Feature),
+    /// At least one of these.
+    AnyOf(&'static [Feature]),
+    /// Land of one of these kinds somewhere on the board.
+    Land(&'static [Terrain]),
 }
 
 /// How a match's world begins (§21).

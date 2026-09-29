@@ -106,6 +106,9 @@ impl Game {
             return;
         }
         self.crown(events);
+        // Maya's fog lifts; what a god set aside last dusk comes in first.
+        self.fog.clear();
+        self.awaken_deferred(events);
         self.dusk = Some(DuskStep::Sealing);
         for p in self.wishing() {
             events.push(Event::WishDue { player: p });

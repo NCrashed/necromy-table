@@ -55,6 +55,8 @@ struct Offering {
 #[derive(Resource, Default, PartialEq)]
 struct DuskScene {
     shifts: Vec<(God, u8, u8)>,
+    /// Mechanics come into the world (§21.4): what, by which god, for whom.
+    grown: Vec<(necromy_rules::Feature, God, Option<String>)>,
     since: f32,
     /// The human has been free to act since the scene opened: once they
     /// end that turn, the scene has been read (or ignored) and goes.
@@ -218,12 +220,15 @@ fn fly(
 }
 
 fn take_dusk_news(time: Res<Time>, mut game: ResMut<Match>, mut scene: ResMut<DuskScene>) {
-    if game.dusk_news.is_empty() {
+    if game.dusk_news.is_empty() && game.world_news.is_empty() {
         return;
     }
-    let shifts = std::mem::take(&mut game.bypass_change_detection().dusk_news);
+    let m = game.bypass_change_detection();
+    let shifts = std::mem::take(&mut m.dusk_news);
+    let grown = std::mem::take(&mut m.world_news);
     *scene = DuskScene {
         shifts,
+        grown,
         since: time.elapsed_secs(),
         acted: false,
     };
@@ -238,7 +243,7 @@ fn rebuild_dusk(
 ) {
     let (panel, mut visibility) = panel.into_inner();
     commands.entity(panel).despawn_related::<Children>();
-    if scene.shifts.is_empty() {
+    if scene.shifts.is_empty() && scene.grown.is_empty() {
         visibility.set_if_neq(Visibility::Hidden);
         return;
     }
@@ -256,7 +261,12 @@ fn rebuild_dusk(
             Accent(Color::srgb(0.85, 0.55, 0.35)),
         ))
         .id();
-    let title = stats::label(&mut commands, &font, "Закат: боги меняются", 17.0, true);
+    let heading = if scene.shifts.is_empty() {
+        "Закат: в мире новое"
+    } else {
+        "Закат: боги меняются"
+    };
+    let title = stats::label(&mut commands, &font, heading, 17.0, true);
     commands.entity(frame).add_child(title);
     for &(god, from, to) in &scene.shifts {
         let entry = commands
@@ -307,6 +317,48 @@ fn rebuild_dusk(
         commands.entity(entry).add_children(&[head, law]);
         commands.entity(frame).add_child(entry);
     }
+    for (feature, god, who) in &scene.grown {
+        let (name, what) = names::feature(*feature);
+        let head = stats::row(&mut commands);
+        let icon = stats::icon_node(&mut commands, art.gods[god.index()].clone(), 24.0, true);
+        let title = commands
+            .spawn((
+                Text::new(format!("Новое в мире: {name}")),
+                font.bold(14.0),
+                TextColor(god_color(*god).lighter(0.2)),
+            ))
+            .id();
+        commands.entity(head).add_children(&[icon, title]);
+        let by = match who {
+            Some(who) => format!(
+                "{}: {what}. Принёс {} по желанию {who}.",
+                capitalized(what),
+                names::god(*god)
+            ),
+            None => format!("{}.", capitalized(what)),
+        };
+        let text = commands
+            .spawn((
+                Text::new(by),
+                font.text(12.0),
+                TextColor(INK),
+                Node {
+                    width: px(460.0),
+                    margin: UiRect::left(px(30.0)),
+                    ..default()
+                },
+            ))
+            .id();
+        let entry = commands
+            .spawn(Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: px(2.0),
+                ..default()
+            })
+            .add_children(&[head, text])
+            .id();
+        commands.entity(frame).add_child(entry);
+    }
     let label = stats::label(&mut commands, &font, "Понятно", 13.0, true);
     let ok = commands
         .spawn((
@@ -331,7 +383,7 @@ fn close_dusk(
     ok: Query<&Interaction, (Changed<Interaction>, With<CloseDusk>)>,
     mut scene: ResMut<DuskScene>,
 ) {
-    if scene.shifts.is_empty() {
+    if scene.shifts.is_empty() && scene.grown.is_empty() {
         return;
     }
     let done = *game.game.phase(game.human) == Phase::Done;
@@ -342,4 +394,13 @@ fn close_dusk(
     if clicked || (done && scene.acted) || time.elapsed_secs() - scene.since > DUSK_SECS {
         *scene = DuskScene::default();
     }
+}
+
+/// The first letter up.
+fn capitalized(text: &str) -> String {
+    let mut chars = text.chars();
+    chars
+        .next()
+        .map(|c| c.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
 }

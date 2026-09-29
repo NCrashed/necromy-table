@@ -265,6 +265,53 @@ pub fn wish(kind: necromy_rules::WishKind) -> &'static str {
         WishKind::Rot => "Отрави колоду",
         WishKind::Plant => "Спрячь в колоде проклятие",
         WishKind::Foresee => "Покажи, что придёт из колоды",
+        WishKind::Rise => "Пусть земля растёт",
+        WishKind::Veil => "Пусть мгла возьмёт эту землю",
+        WishKind::Unveil => "Развей мглу",
+        WishKind::Settle => "Пусть здесь поселятся люди",
+        WishKind::Stones => "Подними камни силы",
+        WishKind::Awaken => "Принеси в мир новое",
+    }
+}
+
+/// A mechanic of the world (§21.2): its name and what it brings, as the
+/// table tells it when it comes in.
+pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {
+    use necromy_rules::Feature;
+    match f {
+        Feature::Bodies => (
+            "Тела",
+            "павшие и ночь оставляют тела; карты тел играют на них",
+        ),
+        Feature::Groves => ("Рощи", "нетронутое тело прорастает рощей"),
+        Feature::Settlements => ("Поселения", "их занимают, и на рассвете они дают Стиль"),
+        Feature::Militia => (
+            "Ополчение",
+            "у поселений свои отряды: друзей пропускают, прочих бьют",
+        ),
+        Feature::Undead => (
+            "Неупокоенные",
+            "тело, о котором никто не позаботился, встаёт мертвецом",
+        ),
+        Feature::Ruins => (
+            "Руины",
+            "поселение без ополчения мертвецы разоряют; руины можно отстроить",
+        ),
+        Feature::Poison => (
+            "Яд",
+            "яд стихии кусает каждый ход и лечится гасящей стихией",
+        ),
+        Feature::Trials => (
+            "Испытания",
+            "боги ставят на клетках испытания с наградой и ценой",
+        ),
+        Feature::Loot => ("Добыча", "предметы: оружие, облачение, реликвии"),
+        Feature::Guard => (
+            "Гвардия",
+            "королевская гвардия выходит против самого шумного",
+        ),
+        Feature::Stealth => ("Скрытность", "в лесу и болоте ночью можно скрыться"),
+        Feature::Beasts => ("Звери", "ночью из лесов Бхавы выходят звери"),
     }
 }
 
