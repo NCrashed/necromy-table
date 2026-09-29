@@ -35,7 +35,7 @@ impl Game {
         if me.hex.unsigned_distance_to(to) != 1 {
             return Err(RuleError::NotAdjacent);
         }
-        if self.occupant(to).is_none_or(|p| p == player) {
+        if !self.guard_at(to) && self.occupant(to).is_none_or(|p| p == player) {
             return Err(RuleError::InvalidTarget);
         }
         let cost = self.terrain_cost(player, tile.terrain);
@@ -79,6 +79,9 @@ impl Game {
     /// in one: the most cards they may burn.
     pub fn battle_dice(&self, player: PlayerId) -> Option<u8> {
         self.windows.iter().find_map(|w| match w.kind {
+            WindowKind::GuardBattle { attacker } if attacker == player => {
+                Some(self.dice_for(player, false))
+            }
             WindowKind::Trial { player: p, .. } if p == player => {
                 Some(self.champions[player.0 as usize].might + self.item_trial_dice(player))
             }
@@ -199,7 +202,7 @@ impl Game {
 
     /// Burned faces first, then physical throws for the remaining dice. Each
     /// Element face adds one more die, up to `MAX_EXPLOSIONS` times.
-    fn throw_side(
+    pub(super) fn throw_side(
         &mut self,
         player: PlayerId,
         defending: bool,

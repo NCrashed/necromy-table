@@ -4,7 +4,7 @@
 //! show ends.
 
 use bevy::prelude::*;
-use necromy_rules::{Face, GUARD_DICE, Intent, PlayerId, TimeOfDay, WindowKind};
+use necromy_rules::{Face, GUARD_DICE, GUARD_HEALTH, Intent, PlayerId, TimeOfDay, WindowKind};
 
 use crate::dice::{DiceShow, Revealed, TRAY_TEXTURE, TrayTextures};
 use crate::fight::{self, STAGE_W, Wounds};
@@ -98,8 +98,8 @@ fn rebuild(
     visibility.set_if_neq(Visibility::Inherited);
 
     let sides = [
-        battle.attacker.map_or(Side::Guard, Side::Champion),
-        Side::Champion(battle.defender),
+        battle.sides[0].map_or(Side::Guard, Side::Champion),
+        battle.sides[1].map_or(Side::Guard, Side::Champion),
     ];
     let landed = battle.scores.is_some() && dice.landed();
 
@@ -195,7 +195,11 @@ fn side_column(
         Side::Guard => (
             art.guard.clone(),
             "Королевская гвардия".to_string(),
-            GUARD_DICE,
+            // Against whom: Zaga's Sentence adds a die, but not for her Chosen.
+            m.battle
+                .as_ref()
+                .and_then(|b| b.sides.iter().flatten().next().copied())
+                .map_or(GUARD_DICE, |foe| g.guard_dice(foe)),
         ),
     };
     let header = stats::row(commands);
@@ -248,6 +252,19 @@ fn side_column(
             let w = stats::icon_node(commands, art.wards[ward.index()].clone(), 24.0, true);
             commands.entity(numbers).add_child(w);
         }
+    }
+    // The guard's wounds carry over from fight to fight (§20.4).
+    if let Side::Guard = side {
+        let heart = stats::icon_node(commands, art.icon(StatIcon::Health), 24.0, true);
+        let hp_now = hp_shown.unwrap_or_else(|| m.shown_guard().map_or(0, |g| g.hp));
+        let hp = stats::bar(commands, hp_now, GUARD_HEALTH, HEALTH, None, 10.0, 14.0);
+        let text = if fell {
+            format!("{hp_now}/{GUARD_HEALTH} — пала!")
+        } else {
+            format!("{hp_now}/{GUARD_HEALTH}")
+        };
+        let hp_text = stats::label(commands, font, &text, 13.0, fell);
+        commands.entity(numbers).add_children(&[heart, hp, hp_text]);
     }
     let sword = stats::icon_node(commands, art.icon(StatIcon::Might), 24.0, true);
     let dice_text = stats::label(commands, font, &format!("кубиков: {dice}"), 13.0, true);
@@ -385,11 +402,16 @@ fn centre_column(
     let vs = stats::label(commands, font, "против", 16.0, true);
     commands.entity(column).add_children(&[stage, vs]);
 
-    let burning = g
-        .windows()
-        .iter()
-        .any(|w| matches!(w.kind, WindowKind::Battle { .. }));
-    let my_choice = matches!(m.human_window(), Some(WindowKind::Battle { .. }));
+    let burning = g.windows().iter().any(|w| {
+        matches!(
+            w.kind,
+            WindowKind::Battle { .. } | WindowKind::GuardBattle { .. }
+        )
+    });
+    let my_choice = matches!(
+        m.human_window(),
+        Some(WindowKind::Battle { .. } | WindowKind::GuardBattle { .. })
+    );
     let phase = if my_choice {
         let max = g.battle_dice(m.human).unwrap_or(0);
         format!(

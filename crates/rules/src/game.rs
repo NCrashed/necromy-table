@@ -175,6 +175,9 @@ pub enum WindowKind {
     /// A wish demands tribute for `asker` (§7.3): each rival gives a card
     /// (a play of it) or takes Threat (a pass).
     Tribute { asker: PlayerId },
+    /// A champion attacks the royal guard: they pick cards to burn, the
+    /// guard burns none (§20.4).
+    GuardBattle { attacker: PlayerId },
     /// Before a trial's throw: its challenger picks cards to burn (§20.2).
     Trial { player: PlayerId, hex: Hex },
 }
@@ -367,6 +370,20 @@ pub enum Event {
         target: PlayerId,
         guard_score: Score,
         target_score: Score,
+    },
+    /// `attacker` stepped onto the royal guard; the Battle choice follows.
+    GuardAttacked {
+        attacker: PlayerId,
+    },
+    /// The guard took `amount`; `hp` left.
+    GuardHurt {
+        amount: u8,
+        hp: u8,
+    },
+    /// The guard fell to `by` and leaves the board.
+    GuardFell {
+        hex: Hex,
+        by: PlayerId,
     },
     /// Dawn: the Dominant owes a wish before play goes on.
     WishDue {
@@ -1307,7 +1324,9 @@ impl Game {
                 let fits = match self.windows[i].kind {
                     WindowKind::Target { .. } => def.timing == Timing::Response,
                     // Cards go into a battle only as burned faces.
-                    WindowKind::Battle { .. } | WindowKind::Trial { .. } => false,
+                    WindowKind::Battle { .. }
+                    | WindowKind::GuardBattle { .. }
+                    | WindowKind::Trial { .. } => false,
                     WindowKind::Enter { .. } => def.timing == Timing::Instant,
                     // Tribute: any card of the hand may be given, free.
                     WindowKind::Tribute { .. } => return Ok(()),
@@ -1523,7 +1542,7 @@ impl Game {
     fn check_own(&self, player: PlayerId, intent: &Intent) -> Result<(), RuleError> {
         match *intent {
             Intent::Move { to } => {
-                if self.occupant(to).is_some_and(|d| d != player) {
+                if self.occupant(to).is_some_and(|d| d != player) || self.guard_at(to) {
                     self.attack_cost(player, to).map(|_| ())
                 } else {
                     let cost = self.step_cost(player, to)?;
@@ -1547,7 +1566,10 @@ impl Game {
     fn touched(&self, player: PlayerId, intent: &Intent) -> Vec<(PlayerId, bool)> {
         match *intent {
             Intent::Move { to } => {
-                if let Some(d) = self.occupant(to).filter(|&d| d != player) {
+                if self.guard_at(to) {
+                    // The guard is nobody's turn: it answers at once.
+                    Vec::new()
+                } else if let Some(d) = self.occupant(to).filter(|&d| d != player) {
                     vec![(d, false)]
                 } else if let Some(h) = self.hidden_at(to).filter(|&h| h != player) {
                     vec![(h, true)]
@@ -1655,6 +1677,11 @@ impl Game {
         to: Hex,
         events: &mut Vec<Event>,
     ) -> Result<(), RuleError> {
+        if self.guard_at(to) {
+            let cost = self.attack_cost(player, to)?;
+            self.start_guard_battle(player, cost, events);
+            return Ok(());
+        }
         if let Some(defender) = self.occupant(to)
             && defender != player
         {
@@ -1824,7 +1851,7 @@ impl Game {
         let tribute = matches!(self.windows[i].kind, WindowKind::Tribute { .. });
         let battle = matches!(
             self.windows[i].kind,
-            WindowKind::Battle { .. } | WindowKind::Trial { .. }
+            WindowKind::Battle { .. } | WindowKind::GuardBattle { .. } | WindowKind::Trial { .. }
         );
         let choice = match intent {
             Intent::Pass => Choice::Pass,
@@ -1949,6 +1976,16 @@ impl Game {
             // A battle ends the movement of whoever brought it about.
             if self.is_active(window.actor) {
                 self.turns[window.actor.0 as usize].move_points = 0;
+            }
+        }
+        if let WindowKind::GuardBattle { attacker } = window.kind {
+            let burned = match window.choices.get(&attacker) {
+                Some(Choice::Burn(cards)) => cards.clone(),
+                _ => Vec::new(),
+            };
+            self.resolve_guard_battle(attacker, burned, events);
+            if self.is_active(attacker) {
+                self.turns[attacker.0 as usize].move_points = 0;
             }
         }
         if let WindowKind::Trial { player, hex } = window.kind {
@@ -2611,7 +2648,7 @@ mod wish;
 mod world;
 pub use battle::Score;
 pub use gear::{Gain, SACRIFICE};
-pub use guard::{GUARD_DICE, GUARD_RELIEF, GUARD_STEPS, Guard};
+pub use guard::{GUARD_DICE, GUARD_HEALTH, GUARD_RELIEF, GUARD_STEPS, Guard};
 pub use laws::{BURDEN_FREE, CHOSEN, CRACK_REACH, Law, Patronage, SENTENCE_THRESHOLD, SIGN, VOICE};
 pub use poison::{Cure, Poison};
 pub use scenario::{Scenario, SceneSeat, SceneWorld};

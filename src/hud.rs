@@ -518,7 +518,11 @@ fn tooltip(
         lines.push(format!("здесь: {}", game.name(p)));
     }
     if g.guard().is_some_and(|guard| guard.hex == hex) {
-        lines.push("здесь королевская гвардия".into());
+        let hp = g.guard().map_or(0, |guard| guard.hp);
+        lines.push(format!(
+            "здесь королевская гвардия: {hp}/{} здоровья",
+            necromy_rules::GUARD_HEALTH
+        ));
     }
     if game.is_human_turn() {
         if g.attackable(game.human).contains(&hex) {

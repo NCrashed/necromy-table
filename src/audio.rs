@@ -893,6 +893,15 @@ fn hear_events(
                     (Sound::new("battle-start"), by(*defender))
                 }
             }
+            Event::GuardAttacked { attacker } => {
+                if *attacker == human {
+                    in_battle = true;
+                    (Sound::new("battle-start"), Heard::Always)
+                } else {
+                    (Sound::new("battle-start"), by(*attacker))
+                }
+            }
+            Event::GuardFell { by: who, .. } => (Sound::new("fall"), by(*who)),
             Event::GuardStruck { target } => {
                 if *target == human {
                     in_battle = true;

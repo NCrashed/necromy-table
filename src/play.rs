@@ -109,6 +109,8 @@ pub struct Match {
     /// where the body lies, where they wake. Until then the token stands and
     /// the board shows no body there.
     pub held_falls: Vec<(PlayerId, Hex, Hex)>,
+    /// A guard felled in the fight on screen stands until its panel closes.
+    pub held_guard: Option<necromy_rules::Guard>,
     /// The last card that hit the human and what it did, shown for a moment
     /// after its Target window closed.
     pub incoming_result: Option<IncomingResult>,
@@ -204,9 +206,9 @@ pub struct TrialInfo {
 
 /// What the battle panel shows about the current fight.
 pub struct BattleInfo {
-    /// `None` for the royal guard.
-    pub attacker: Option<PlayerId>,
-    pub defender: PlayerId,
+    /// Attacker, then defender; `None` is the royal guard, on either side:
+    /// it strikes the loud, and the loud may strike it (§20.4).
+    pub sides: [Option<PlayerId>; 2],
     /// Faces from burned cards: attacker, defender.
     pub burned: [Vec<necromy_rules::Face>; 2],
     /// Attacker and defender scores once the battle resolved.
@@ -218,10 +220,9 @@ pub struct BattleInfo {
 }
 
 impl BattleInfo {
-    fn new(attacker: Option<PlayerId>, defender: PlayerId) -> Self {
+    fn new(sides: [Option<PlayerId>; 2]) -> Self {
         BattleInfo {
-            attacker,
-            defender,
+            sides,
             burned: [Vec::new(), Vec::new()],
             scores: None,
             hp: [None, None],
@@ -231,17 +232,16 @@ impl BattleInfo {
 
     /// 0 for the attacker, 1 for the defender, `None` for bystanders.
     fn side_of(&self, player: PlayerId) -> Option<usize> {
-        if player == self.defender {
-            Some(1)
-        } else if Some(player) == self.attacker {
-            Some(0)
-        } else {
-            None
-        }
+        self.sides.iter().position(|s| *s == Some(player))
+    }
+
+    /// The guard's side, if it fights here.
+    pub fn guard_side(&self) -> Option<usize> {
+        self.sides.iter().position(Option::is_none)
     }
 
     fn side(&self, player: PlayerId) -> usize {
-        usize::from(player == self.defender)
+        self.side_of(player).unwrap_or(0)
     }
 }
 
@@ -550,6 +550,7 @@ impl Match {
             watching: false,
             show_serial: 0,
             held_falls: Vec::new(),
+            held_guard: None,
             incoming_result: None,
             incoming_serial: 0,
             offerings: Vec::new(),
@@ -857,6 +858,16 @@ impl Match {
                 }
                 // Seen again: the token goes where they really are.
                 Event::Revealed { player, hex, .. } => self.steps.push((*player, *hex)),
+                // A guard felled on screen stands until its dice are down.
+                Event::GuardFell { hex, by } => {
+                    if self.in_show_on_screen(*by) {
+                        self.held_guard = Some(necromy_rules::Guard {
+                            hex: *hex,
+                            target: *by,
+                            hp: 0,
+                        });
+                    }
+                }
                 // A fall in the fight on screen waits for its dice.
                 Event::ChampionFell {
                     player,
@@ -918,6 +929,7 @@ impl Match {
                 Some((ShowKind::Battle, vec![*attacker, *defender]))
             }
             Event::GuardStruck { target } => Some((ShowKind::Guard, vec![*target])),
+            Event::GuardAttacked { attacker } => Some((ShowKind::Guard, vec![*attacker])),
             Event::TrialBegun { player, .. } => Some((ShowKind::Trial, vec![*player])),
             _ => None,
         };
@@ -967,6 +979,7 @@ impl Match {
             Event::Damaged { player, .. } | Event::ChampionFell { player, .. } => {
                 (Some(*player), false, false, true)
             }
+            Event::GuardHurt { .. } | Event::GuardFell { .. } => (None, true, false, true),
             _ => return,
         };
         let Some(show) = self.shows.iter_mut().rev().find(|s| {
@@ -1016,6 +1029,12 @@ impl Match {
         }
     }
 
+    /// The guard as the board shows it: a felled one stands until the
+    /// dice of its fall are down.
+    pub fn shown_guard(&self) -> Option<necromy_rules::Guard> {
+        self.game.guard().or(self.held_guard)
+    }
+
     /// `player` fights in the show on the panels now.
     fn in_show_on_screen(&self, player: PlayerId) -> bool {
         self.on_screen
@@ -1061,10 +1080,29 @@ impl Match {
                 }
             }
             Event::BattleStarted { attacker, defender } => {
-                self.battle = Some(BattleInfo::new(Some(*attacker), *defender));
+                self.battle = Some(BattleInfo::new([Some(*attacker), Some(*defender)]));
             }
             Event::GuardStruck { target } => {
-                self.battle = Some(BattleInfo::new(None, *target));
+                self.battle = Some(BattleInfo::new([None, Some(*target)]));
+            }
+            Event::GuardAttacked { attacker } => {
+                self.battle = Some(BattleInfo::new([Some(*attacker), None]));
+            }
+            // The guard's wounds, as a side's health on the panel.
+            Event::GuardHurt { amount, hp } => {
+                if let Some(b) = self.battle.as_mut()
+                    && let Some(side) = b.guard_side()
+                {
+                    let before = b.hp[side].map_or(hp + amount, |(before, _)| before);
+                    b.hp[side] = Some((before, *hp));
+                }
+            }
+            Event::GuardFell { .. } => {
+                if let Some(b) = self.battle.as_mut()
+                    && let Some(side) = b.guard_side()
+                {
+                    b.fell[side] = true;
+                }
             }
             Event::Burned { player, faces, .. } => {
                 if let Some(t) = self.trial.as_mut().filter(|t| t.player == *player) {
@@ -1089,8 +1127,13 @@ impl Match {
                 target_score,
                 ..
             } => {
+                // In the order of the panel's sides: attacker first.
                 if let Some(b) = self.battle.as_mut() {
-                    b.scores = Some((*guard_score, *target_score));
+                    b.scores = Some(if b.guard_side() == Some(0) {
+                        (*guard_score, *target_score)
+                    } else {
+                        (*target_score, *guard_score)
+                    });
                 }
             }
             // Blows of the battle on screen: remember health before and after.
@@ -1108,9 +1151,10 @@ impl Match {
                 count,
                 faces,
             } => {
-                let defender = self.battle.as_ref().map(|b| b.defender);
-                let side =
-                    usize::from(matches!(fighter, Fighter::Champion(p) if Some(*p) == defender));
+                let side = self.battle.as_ref().map_or(0, |b| match fighter {
+                    Fighter::Champion(p) => b.side(*p),
+                    Fighter::Guard => b.guard_side().unwrap_or(0),
+                });
                 self.throws.push(ThrowView {
                     side,
                     seed: *seed,
@@ -1136,6 +1180,7 @@ impl Match {
         for (player, _, respawn) in std::mem::take(&mut self.held_falls) {
             self.steps.push((player, respawn));
         }
+        self.held_guard = None;
         self.battle = None;
         self.trial = None;
         self.on_screen = None;
@@ -1718,6 +1763,16 @@ impl Match {
             }
             Event::GuardLeft { .. } => "Гвардия уходит: на столе тихо.".into(),
             Event::GuardStruck { target } => format!("Гвардия бьёт {}!", self.name(*target)),
+            Event::GuardAttacked { attacker } => {
+                format!("{} нападает на королевскую гвардию!", self.name(*attacker))
+            }
+            Event::GuardHurt { amount, hp } => {
+                format!("Гвардия: −{amount} ({hp}/{}).", necromy_rules::GUARD_HEALTH)
+            }
+            Event::GuardFell { by, .. } => format!(
+                "{} повергает королевскую гвардию: она уходит со стола.",
+                self.name(*by)
+            ),
             Event::GuardResolved {
                 target,
                 guard_score: gs,
@@ -1805,6 +1860,9 @@ pub fn window_name(m: &Match, kind: WindowKind) -> String {
         }
         WindowKind::Tribute { asker } => format!("дань для {}", m.name(asker)),
         WindowKind::Trial { player, .. } => format!("{} на испытании", m.name(player)),
+        WindowKind::GuardBattle { attacker } => {
+            format!("бой: {} против гвардии", m.name(attacker))
+        }
     }
 }
 

@@ -537,8 +537,14 @@ fn stat_sheet(
         rows.push(r);
     }
 
-    // Worn items (§20.3).
-    rows.push(crate::gear_ui::gear_row(commands, art, font, m, player));
+    // Worn items (§20.3): slots with a tooltip on the human's own sheet;
+    // a popup vanishes when the mouse leaves its portrait, so there each
+    // item is written out.
+    if mine {
+        rows.push(crate::gear_ui::gear_row(commands, art, font, m, player));
+    } else {
+        rows.extend(crate::gear_ui::gear_lines(commands, art, font, m, player));
+    }
 
     // Character: what earns and costs Style at dusk (§6.2).
     if let Some(ch) = g.character(player) {
@@ -941,7 +947,30 @@ fn guard_sheet(commands: &mut Commands, art: &StatArt, font: &UiFont, m: &Match)
     commands
         .entity(numbers)
         .add_children(&[sword, dice, boot, steps]);
-    let mut rows = vec![header, numbers];
+    // Its wounds carry over from fight to fight (§20.4).
+    let health = row(commands);
+    let heart = icon_node(commands, art.icon(StatIcon::Health), 24.0, true);
+    let hp_now = m.shown_guard().map_or(0, |g| g.hp);
+    let hp_bar = bar(
+        commands,
+        hp_now,
+        necromy_rules::GUARD_HEALTH,
+        HEALTH,
+        None,
+        10.0,
+        14.0,
+    );
+    let hp_text = label(
+        commands,
+        font,
+        &format!("{hp_now}/{}", necromy_rules::GUARD_HEALTH),
+        14.0,
+        true,
+    );
+    commands
+        .entity(health)
+        .add_children(&[heart, hp_bar, hp_text]);
+    let mut rows = vec![header, health, numbers];
 
     // Whom it will walk to next world phase: the loudest champion now, not
     // necessarily the one it came for. Nobody loud enough: it leaves.

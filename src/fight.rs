@@ -429,11 +429,7 @@ fn pose(
     let blows = blows(battle);
     for (fighter, mut image, mut transform) in &mut fighters {
         let side = fighter.0;
-        let who = if side == 0 {
-            battle.attacker
-        } else {
-            Some(battle.defender)
-        };
+        let who = battle.sides[side];
         let god = who
             .and_then(|p: PlayerId| game.game.champion(p))
             .map(|c| c.god);

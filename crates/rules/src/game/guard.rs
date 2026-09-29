@@ -5,12 +5,17 @@
 //! to them, it strikes with physical dice. The strike quiets them down.
 //! With nobody loud enough, the guard stands down.
 //!
-//! The guard only blocks its hex for now; fighting back is a later step.
+//! It can be fought: stepping onto it attacks it, as a rival (§20.4). It
+//! has `GUARD_HEALTH` for each time it comes out and does not heal; every
+//! hit a champion lands on it counts, in their attack or in its strike.
+//! Brought down, it leaves the board, and whoever felled it takes Style and
+//! an item from the loot deck. While someone is still loud, a fresh guard
+//! comes out of the Table in the next world phase.
 
 use hexx::Hex;
 use serde::{Deserialize, Serialize};
 
-use super::{Event, Fighter, Game, PlayerId};
+use super::{Event, Fighter, Game, PlayerId, WindowKind};
 use crate::gods::{Element, God};
 
 /// Hexes the guard walks per world phase.
@@ -19,11 +24,15 @@ pub const GUARD_STEPS: u32 = 2;
 pub const GUARD_DICE: u8 = 3;
 /// Threat a strike takes off its target.
 pub const GUARD_RELIEF: i8 = 3;
+/// Hits that bring the guard down; it does not heal.
+pub const GUARD_HEALTH: u8 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Guard {
     pub hex: Hex,
     pub target: PlayerId,
+    /// Hits it can still take.
+    pub hp: u8,
 }
 
 impl Game {
@@ -61,7 +70,11 @@ impl Game {
                     return;
                 };
                 events.push(Event::GuardSpawned { hex, target });
-                Guard { hex, target }
+                Guard {
+                    hex,
+                    target,
+                    hp: GUARD_HEALTH,
+                }
             }
         };
         guard.target = target;
@@ -99,9 +112,7 @@ impl Game {
         self.last_fight = self.round;
         self.battles += 1;
         self.offer(None, God::Trishna, 1, events);
-        // Zaga's Sentence: the guard strikes harder (§5.3).
-        let dice = GUARD_DICE
-            + u8::from(self.law_active(super::Law::Sentence) && !self.chosen(target, God::Zaga));
+        let dice = self.guard_dice(target);
         let g_faces = self.roll(Fighter::Guard, false, dice, Vec::new(), events);
         let count = self.dice_for(target, true);
         let t_faces = self.roll(Fighter::Champion(target), true, count, Vec::new(), events);
@@ -119,7 +130,103 @@ impl Game {
         if hurt > 0 {
             self.damage(target, hurt, events);
         }
+        // What the target lands, the guard takes.
+        let back = target_score.hits.saturating_sub(guard_score.shields);
+        if back > 0 {
+            self.hurt_guard(target, back, events);
+        }
         self.add_threat(target, -GUARD_RELIEF, events);
+    }
+
+    /// Dice the guard throws against `foe`. Zaga's Sentence: one more (§5.3).
+    pub fn guard_dice(&self, foe: PlayerId) -> u8 {
+        GUARD_DICE + u8::from(self.law_active(super::Law::Sentence) && !self.chosen(foe, God::Zaga))
+    }
+
+    /// `attacker` stepped onto the guard: they pay `cost`, then pick cards
+    /// to burn; the guard burns none.
+    pub(super) fn start_guard_battle(
+        &mut self,
+        attacker: PlayerId,
+        cost: u32,
+        events: &mut Vec<Event>,
+    ) {
+        self.turns[attacker.0 as usize].move_points -= cost;
+        if self.is_hidden(attacker) {
+            self.reveal(attacker, super::RevealReason::Attacked, events);
+        }
+        events.push(Event::GuardAttacked { attacker });
+        self.last_fight = self.round;
+        // Attacking is loud (§6.5), the crown's iron above all.
+        self.add_threat(attacker, 1, events);
+        self.record_deed(attacker, super::style::Deed::Attacked);
+        self.record_deed(attacker, super::style::Deed::Fought);
+        self.open_window(
+            attacker,
+            WindowKind::GuardBattle { attacker },
+            vec![attacker],
+            None,
+            None,
+            events,
+        );
+    }
+
+    /// The attacker's burned faces and throw against the guard's.
+    pub(super) fn resolve_guard_battle(
+        &mut self,
+        attacker: PlayerId,
+        burned: Vec<crate::cards::CardId>,
+        events: &mut Vec<Event>,
+    ) {
+        if self.guard.is_none() {
+            self.discard.extend(burned);
+            return;
+        }
+        self.battles += 1;
+        self.offer(None, God::Trishna, 1, events);
+        let a_faces = self.throw_side(attacker, false, burned, events);
+        let dice = self.guard_dice(attacker);
+        let g_faces = self.roll(Fighter::Guard, true, dice, Vec::new(), events);
+        self.element_breaks_ward(Element::Metal, attacker, &g_faces, events);
+        let guard_score = self.score(&g_faces);
+        let mut target_score = self.score(&a_faces);
+        target_score.shields += self.item_shields(attacker);
+        events.push(Event::GuardResolved {
+            target: attacker,
+            guard_score,
+            target_score,
+        });
+        let hurt = guard_score.hits.saturating_sub(target_score.shields);
+        if hurt > 0 {
+            self.damage(attacker, hurt, events);
+        }
+        let dealt = target_score.hits.saturating_sub(guard_score.shields);
+        if dealt > 0 {
+            self.hurt_guard(attacker, dealt, events);
+        }
+    }
+
+    /// The guard takes `amount` from `by`; at nothing left it falls, and
+    /// `by` takes Style for a won battle, doubled, and an item (§20.3).
+    pub(super) fn hurt_guard(&mut self, by: PlayerId, amount: u8, events: &mut Vec<Event>) {
+        let Some(mut guard) = self.guard else {
+            return;
+        };
+        guard.hp = guard.hp.saturating_sub(amount);
+        events.push(Event::GuardHurt {
+            amount,
+            hp: guard.hp,
+        });
+        if guard.hp > 0 {
+            self.guard = Some(guard);
+            return;
+        }
+        self.guard = None;
+        events.push(Event::GuardFell { hex: guard.hex, by });
+        self.record_deed(by, super::style::Deed::Won);
+        let style = 2 * i16::from(self.taste.battle);
+        self.add_style(by, style, super::StyleReason::Battle, events);
+        self.gain_loot(by, events);
     }
 
     /// The closest hex to `from` with nobody on it.

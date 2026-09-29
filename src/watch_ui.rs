@@ -223,7 +223,12 @@ fn about(game: &Match, show: &Show) -> String {
     let names: Vec<String> = show.who.iter().map(|&p: &PlayerId| game.name(p)).collect();
     match show.kind {
         ShowKind::Battle => names.join(" против "),
-        ShowKind::Guard => format!("гвардия против {}", names.join("")),
+        ShowKind::Guard => match show.events.first() {
+            Some(necromy_rules::Event::GuardAttacked { .. }) => {
+                format!("{} против гвардии", names.join(""))
+            }
+            _ => format!("гвардия против {}", names.join("")),
+        },
         ShowKind::Trial => format!("{} на испытании", names.join("")),
     }
 }

@@ -468,7 +468,7 @@ fn sync_guard(
         With<GuardToken>,
     >,
 ) {
-    match (game.game.guard(), guards.single_mut()) {
+    match (game.shown_guard(), guards.single_mut()) {
         (Some(guard), Ok((_, mut transform, look))) => {
             let target = board.hex_to_world(guard.hex);
             let delta = target - transform.translation;

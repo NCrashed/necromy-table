@@ -244,6 +244,10 @@ fn auto_screenshot(
                 && game.told.is_none()
                 && !dice.busy()
         }
+        // A champion's fight against the guard, its dice at rest (§20.4).
+        (Some("guardfight"), Some(game)) => {
+            game.battle.as_ref().is_some_and(|b| b.sides[1].is_none()) && dice.settled()
+        }
         // Someone wears an item, nothing over the board (§20.3).
         (Some("gear"), Some(game)) => {
             game.game

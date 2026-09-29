@@ -171,6 +171,14 @@ fn attack(game: &Game, player: PlayerId) -> Option<Intent> {
     if game.lines_of(player).any(|l| l.goal == Goal::AvoidBattle) {
         return None;
     }
+    // The guard hunting us, fought back while we are hale (§20.4).
+    if let Some(guard) = game.guard()
+        && guard.target == player
+        && me.hp >= 3
+        && game.attack_cost(player, guard.hex).is_ok()
+    {
+        return Some(Intent::Move { to: guard.hex });
+    }
     let mut targets: Vec<(bool, Hex)> = game
         .attackable(player)
         .into_iter()

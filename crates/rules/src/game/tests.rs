@@ -1342,12 +1342,17 @@ fn nobody_walks_through_the_guard() {
     g.guard = Some(Guard {
         hex: Hex::new(1, 0),
         target: me,
+        hp: GUARD_HEALTH,
     });
-    assert_eq!(
-        g.apply(me, Intent::Move { to: Hex::new(1, 0) }),
-        Err(RuleError::Occupied)
-    );
+    // Its hex is no path: a step onto it is an attack (§20.4).
     assert!(!g.reach().contains_key(&Hex::new(1, 0)));
+    let events = g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::GuardAttacked { .. }))
+    );
+    assert_eq!(g.champion(me).unwrap().hex, Hex::new(0, 0));
 }
 
 #[test]
@@ -3054,6 +3059,7 @@ fn passing_the_trial_of_a_line_closes_it() {
 fn bots_try_trials() {
     let mut tried = 0;
     let mut gained = 0;
+    let mut fought_guard = 0;
     for seed in 0..30 {
         let (mut g, _) = Game::new(Setup {
             seed,
@@ -3077,9 +3083,15 @@ fn bots_try_trials() {
             .iter()
             .filter(|e| matches!(e, Event::ItemGained { .. }))
             .count();
+        fought_guard += g
+            .log()
+            .iter()
+            .filter(|e| matches!(e, Event::GuardAttacked { .. }))
+            .count();
     }
     assert!(tried > 0, "no bot ever tried a trial");
     assert!(gained > 0, "no bot ever gained an item");
+    assert!(fought_guard > 0, "no bot ever fought the guard");
 }
 
 #[test]
@@ -3319,4 +3331,95 @@ fn a_view_hides_the_loot_order_not_what_is_worn() {
     a.sort();
     b.sort();
     assert_eq!(a, b);
+}
+
+// ---- Fighting the guard (§20.4) ----
+
+/// The guard next to `me`, hunting them, with `hp` left.
+fn guard_by(g: &mut Game, me: PlayerId, hp: u8) -> Hex {
+    let hex = Hex::new(-1, 0);
+    g.board.tile_mut(hex).unwrap().terrain = Terrain::Plains;
+    g.guard = Some(Guard {
+        hex,
+        target: me,
+        hp,
+    });
+    hex
+}
+
+#[test]
+fn stepping_onto_the_guard_attacks_it() {
+    let (mut g, me, _) = duel(3);
+    let hex = guard_by(&mut g, me, GUARD_HEALTH);
+    assert!(g.attackable(me).contains(&hex));
+    let events = g.apply(me, Intent::Move { to: hex }).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::GuardAttacked { attacker } if *attacker == me))
+    );
+    assert!(matches!(
+        g.to_answer(me).map(|w| w.kind),
+        Some(WindowKind::GuardBattle { attacker }) if attacker == me
+    ));
+    assert_eq!(g.battle_dice(me), Some(g.dice_for(me, false)));
+    // The champion stays where they were; the fight ends the walk.
+    g.apply(me, Intent::Pass).unwrap();
+    assert_eq!(g.champion(me).unwrap().hex, Hex::new(0, 0));
+    assert_eq!(g.move_points(me), 0);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::ThreatChanged { player, .. } if *player == me))
+    );
+}
+
+#[test]
+fn a_felled_guard_leaves_and_pays_its_feller() {
+    let (mut g, me, _) = duel(3);
+    // More strikes than the guard has dice to shield.
+    g.champ_mut(me).might = 5;
+    let hex = guard_by(&mut g, me, 1);
+    let cards = burn_all(&mut g, me, "Искра");
+    let (style, loot) = (g.style(me), g.loot_len());
+    g.apply(me, Intent::Move { to: hex }).unwrap();
+    let events = g.apply(me, Intent::Burn { cards }).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::GuardFell { by, .. } if *by == me))
+    );
+    assert!(g.guard().is_none());
+    assert!(g.style(me) > style);
+    assert_eq!(g.loot_len(), loot - 1);
+    assert!(g.gear(me).iter().any(Option::is_some));
+}
+
+#[test]
+fn the_guard_keeps_its_wounds() {
+    let (mut g, me, _) = duel(3);
+    guard_by(&mut g, me, GUARD_HEALTH);
+    let mut events = Vec::new();
+    g.hurt_guard(me, 1, &mut events);
+    assert_eq!(g.guard().unwrap().hp, GUARD_HEALTH - 1);
+    // It stands down and comes out whole next time.
+    g.guard = None;
+    g.threat[me.0 as usize] = 9;
+    let mut events = Vec::new();
+    g.guard_phase(&mut events);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::GuardSpawned { .. }))
+    );
+    // It may strike at once and take a blow back; it began whole.
+    let taken: u8 = events
+        .iter()
+        .map(|e| match e {
+            Event::GuardHurt { amount, .. } => *amount,
+            _ => 0,
+        })
+        .sum();
+    let left = g.guard().map_or(0, |g| g.hp);
+    assert_eq!(left + taken, GUARD_HEALTH);
 }

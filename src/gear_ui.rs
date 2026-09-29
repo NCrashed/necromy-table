@@ -207,3 +207,40 @@ fn give(slots: Query<(&Interaction, &GearSlot), Changed<Interaction>>, mut game:
         }
     }
 }
+
+/// Each worn item on its own line, for sheets that cannot be hovered: the
+/// picture, the name, what it does now, and a dark god's toll.
+pub fn gear_lines(
+    commands: &mut Commands,
+    art: &StatArt,
+    font: &UiFont,
+    m: &Match,
+    player: PlayerId,
+) -> Vec<Entity> {
+    let g = &m.game;
+    g.gear(player)
+        .into_iter()
+        .flatten()
+        .map(|item| {
+            let row = stats::row(commands);
+            let icon = commands
+                .spawn((
+                    ImageNode::new(art.items[item.0 as usize].clone()),
+                    Node {
+                        width: px(32.0),
+                        height: px(32.0),
+                        ..default()
+                    },
+                ))
+                .id();
+            let mut text = format!("{}: {}", item.def().name, names::item_does(g, item));
+            if g.item_tolls(player, item) {
+                let god = necromy_rules::God::from_index(item.def().element.index());
+                text.push_str(&format!(" · тёмный бог берёт {}", names::item_toll(god)));
+            }
+            let label = stats::label(commands, font, &text, 12.0, false);
+            commands.entity(row).add_children(&[icon, label]);
+            row
+        })
+        .collect()
+}
