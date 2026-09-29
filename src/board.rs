@@ -208,6 +208,11 @@ struct MarkerSprites {
     trial_faces: [Handle<Image>; 5],
     /// Something lying on the ground (§20.3): a pouch, drawn flat.
     pouch: Handle<Image>,
+    /// A road on a hex (§21.8), drawn flat.
+    road: Handle<Image>,
+    /// A building's sign (§21.8): tavern, forge, wall, and a shrine per god.
+    signs: [Handle<Image>; 3],
+    shrines: [Handle<Image>; 5],
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -322,6 +327,10 @@ fn spawn_board(
         trails: God::ALL.map(|g| images.add(pixel_sprite(&TRAIL_ROWS, g.accent()))),
         quest: images.add(pixel_sprite(&QUEST_ROWS, [250, 214, 120])),
         pouch: assets.load("items/ground-pouch.png"),
+        road: images.add(pixel_sprite(&ROAD_ROWS, [0; 3])),
+        signs: [[220, 160, 60], [200, 84, 44], [150, 150, 160]]
+            .map(|c| images.add(pixel_sprite(&SIGN_ROWS, c))),
+        shrines: God::ALL.map(|g| images.add(pixel_sprite(&SIGN_ROWS, g.accent()))),
         trial_rings: God::ALL.map(|g| images.add(rune_ring(g.accent()))),
         trial_faces: God::ALL.map(|g| images.add(trial_badge(g))),
     });
@@ -723,8 +732,30 @@ fn sync_markers(
             ]
         })
         .collect();
+    // Roads lie flat under everything; a building's sign stands at the
+    // back right of its settlement (§21.8).
+    let roads: Vec<_> = game
+        .game
+        .roads()
+        .map(|hex| (hex, sprites.road.clone(), Vec3::ZERO, TEXELS, true))
+        .collect();
+    let signs: Vec<_> = game
+        .game
+        .buildings()
+        .map(|(hex, b)| {
+            let image = match b {
+                necromy_rules::Building::Tavern => sprites.signs[0].clone(),
+                necromy_rules::Building::Forge => sprites.signs[1].clone(),
+                necromy_rules::Building::Wall => sprites.signs[2].clone(),
+                necromy_rules::Building::Shrine([g, _]) => sprites.shrines[g.index()].clone(),
+            };
+            (hex, image, Vec3::new(0.45, 0.0, -0.2), TEXELS, false)
+        })
+        .collect();
     let trails = trails.map(|(h, i, o, ppm)| (h, i, o, ppm, false));
     let wanted: Vec<_> = corpses
+        .chain(roads)
+        .chain(signs)
         .chain(traps)
         .chain(flags)
         .chain(trails)
@@ -895,6 +926,34 @@ const CORPSE_ROWS: [&str; 5] = [
 const TRAP_ROWS: [&str; 4] = [".r...r...r.", "#r#.#r#.#r#", "#xxxxxxxxx#", ".#########."];
 
 /// A golden exclamation mark: the goal of a quest.
+/// Cobbles of a road, lying flat.
+const ROAD_ROWS: [&str; 10] = [
+    ".....##########.....",
+    "...##xoxxoxxoxx##...",
+    "..#oxxoxxxoxxoxxo#..",
+    ".#xxoxxoxxoxxoxxox#.",
+    "#xoxxoxxoxoxxoxxoxx#",
+    "#xxoxxoxxoxxoxxoxxo#",
+    ".#oxxoxxxoxxoxxoxx#.",
+    "..#xxoxxoxxoxxoxx#..",
+    "...##oxxoxxoxxo##...",
+    ".....##########.....",
+];
+
+/// A building's sign on a post, its plank in the building's colour.
+const SIGN_ROWS: [&str; 10] = [
+    ".########.",
+    "#FFFFFFFF#",
+    "#FffFFffF#",
+    "#ffffffff#",
+    ".########.",
+    "....#w#...",
+    "....#w#...",
+    "....#w#...",
+    "....#w#...",
+    "...##w##..",
+];
+
 const QUEST_ROWS: [&str; 22] = [
     "..#####..",
     ".#FFFFF#.",

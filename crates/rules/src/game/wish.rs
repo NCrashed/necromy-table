@@ -96,12 +96,14 @@ pub enum WishKind {
     River,
     /// "Let the waters rise": the water nearest the asker spreads.
     Flood,
+    /// "Lay the register's road": on from the network about the Table.
+    Road,
     /// "Bring something new into the world": a mechanic the world lacks.
     Awaken,
 }
 
 impl WishKind {
-    pub const ALL: [WishKind; 29] = [
+    pub const ALL: [WishKind; 30] = [
         WishKind::Strength,
         WishKind::Weaken,
         WishKind::Land,
@@ -130,6 +132,7 @@ impl WishKind {
         WishKind::Stones,
         WishKind::River,
         WishKind::Flood,
+        WishKind::Road,
         WishKind::Awaken,
     ];
 
@@ -235,6 +238,8 @@ pub enum Act {
     River,
     /// The water nearest the asker spreads towards the Table.
     Flood,
+    /// The register's road runs on towards the temple nearest the asker.
+    Road,
     /// A mechanic the world lacks, the one named or else one of the god's
     /// own (§21.2); its first thing appears near the asker.
     Awaken {
@@ -273,6 +278,7 @@ impl Act {
             Act::Stones => WishKind::Stones,
             Act::River => WishKind::River,
             Act::Flood => WishKind::Flood,
+            Act::Road => WishKind::Road,
             Act::Awaken { .. } => WishKind::Awaken,
         }
     }
@@ -315,6 +321,7 @@ impl Act {
                 | Act::Stones
                 | Act::River
                 | Act::Flood
+                | Act::Road
                 | Act::Awaken { .. }
         )
     }
@@ -349,6 +356,7 @@ impl Act {
             WishKind::Stones => Act::Stones,
             WishKind::River => Act::River,
             WishKind::Flood => Act::Flood,
+            WishKind::Road => Act::Road,
             WishKind::Awaken => Act::Awaken { feature: None },
             // A prepared wager bets on a fight, the likeliest thing to happen.
             WishKind::Wager => Act::Wager {
@@ -491,7 +499,10 @@ pub const fn taste_for(god: God, kind: WishKind) -> i8 {
         (God::Trishna, Peace | Truce | Veil) => -1,
         // Order loves land, judgement, a contract and the registry of
         // secrets; the dead are paperwork, a swap is disorder.
-        (God::Ahamar, Land | Weaken | Truce | Secret | Wager | Foresee | Settle | Stones) => 1,
+        (
+            God::Ahamar,
+            Land | Weaken | Truce | Secret | Wager | Foresee | Settle | Stones | Road,
+        ) => 1,
         (God::Ahamar, Dead | Swap | Veil | Cut | Flood) => -1,
         // Dissolution loves letting go, loosening a grip, seeing through,
         // one thing becoming another; not strength, not a new thing to hold.
@@ -774,6 +785,7 @@ impl Game {
             | Act::Stones
             | Act::River
             | Act::Flood
+            | Act::Road
             | Act::Awaken { .. } => self.create(player, god, act, power, events),
             Act::Dead => {
                 let free: Vec<Hex> = (1..=2)

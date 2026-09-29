@@ -4561,6 +4561,7 @@ fn island(g: &mut Game, me: PlayerId, centre: Hex) {
 #[test]
 fn an_island_waits_on_its_eve_and_is_done_at_dusk() {
     let (mut g, me, _) = duel(3);
+    g.dusks = EARLIEST_EVE;
     g.chosen[me.0 as usize] = Some(GreatDeed::Island);
     let centre = Hex::new(0, 4);
     island(&mut g, me, centre);
@@ -4583,6 +4584,7 @@ fn an_island_waits_on_its_eve_and_is_done_at_dusk() {
 #[test]
 fn an_eve_is_broken_when_a_step_fails() {
     let (mut g, me, _) = duel(3);
+    g.dusks = EARLIEST_EVE;
     g.chosen[me.0 as usize] = Some(GreatDeed::Island);
     let centre = Hex::new(0, 4);
     island(&mut g, me, centre);
@@ -4882,6 +4884,7 @@ fn quarters_grow_a_city_and_the_city_is_a_deed() {
 #[test]
 fn a_reconciled_pair_keeps_the_peace_two_dusks() {
     let (mut g, me, _) = duel(3);
+    g.dusks = EARLIEST_EVE;
     g.chosen[me.0 as usize] = Some(GreatDeed::Reconciliation);
     // Zaga and Maya: earth quenches water.
     g.pantheon.stages[God::Zaga.index()] = 0;
@@ -4973,6 +4976,7 @@ fn companions_go_to_the_winner_and_scatter_on_a_fall() {
 #[test]
 fn a_legion_of_five_is_a_deed_and_a_god_can_thin_it() {
     let (mut g, me, foe) = duel(3);
+    g.dusks = EARLIEST_EVE;
     g.chosen[me.0 as usize] = Some(GreatDeed::Legion);
     g.champ_mut(me).companions = vec![Companion::Undead; LEGION];
     let mut ev = Vec::new();
@@ -5100,4 +5104,53 @@ fn a_river_through_the_woods_is_the_amazon() {
     assert!(but_dusks(&g, me, GreatDeed::Amazon));
     without(&mut g, &[Feature::Piranhas]);
     assert!(!but_dusks(&g, me, GreatDeed::Amazon));
+}
+
+// ---- Roads (§21.8) ----
+
+#[test]
+fn a_road_makes_any_step_one_and_bridges_a_river() {
+    let (mut g, me, _) = duel(4);
+    set_terrain(&mut g, Hex::new(1, 0), Terrain::Mountain);
+    set_terrain(&mut g, Hex::new(2, 0), Terrain::River);
+    assert_eq!(g.step_cost(me, Hex::new(1, 0)), Ok(2));
+    g.champ_mut(me).spirit_points = 3;
+    g.apply(me, Intent::Pave).unwrap();
+    assert!(g.road(Hex::new(0, 0)));
+    let mut ev = Vec::new();
+    g.lay_road(Hex::new(1, 0), &mut ev);
+    g.lay_road(Hex::new(2, 0), &mut ev);
+    assert_eq!(g.step_cost(me, Hex::new(1, 0)), Ok(1));
+    g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
+    // Over the bridge: no crossing to make.
+    assert_eq!(g.step_cost(me, Hex::new(2, 0)), Ok(1));
+}
+
+#[test]
+fn nobody_hides_on_a_road_and_the_mist_takes_it() {
+    let (mut g, me, _) = duel(4);
+    let mut ev = Vec::new();
+    let here = g.champion(me).unwrap().hex;
+    g.lay_road(here, &mut ev);
+    g.hide(me, &mut ev);
+    assert!(!g.is_hidden(me));
+    g.lay_road(Hex::new(1, 1), &mut ev);
+    g.veil(Hex::new(1, 1), &mut ev);
+    assert!(!g.road(Hex::new(1, 1)));
+}
+
+#[test]
+fn the_registers_road_runs_from_the_table_to_the_temples() {
+    // Not a duel: it paints the line to Bhava's temple as plains.
+    let (mut g, _) = started(five());
+    let me = g.order()[0];
+    g.chosen[me.0 as usize] = Some(GreatDeed::Roads);
+    assert_eq!(g.temples_linked(), 0);
+    let mut ev = Vec::new();
+    for god in God::ALL {
+        let temple = g.board().temple_of(god);
+        g.run_road(temple, 20, &mut ev);
+    }
+    assert_eq!(g.temples_linked(), 5);
+    assert!(g.checks(me, GreatDeed::Roads).iter().all(Check::met));
 }

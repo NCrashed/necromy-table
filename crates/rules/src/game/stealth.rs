@@ -83,6 +83,10 @@ impl Game {
             }
             return;
         }
+        // Nobody hides on a road (§21.8).
+        if self.road(self.hex_of(player)) {
+            return;
+        }
         let c = self.champ_mut(player);
         if c.hidden {
             return;

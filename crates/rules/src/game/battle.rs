@@ -31,7 +31,7 @@ impl Game {
     /// Move points to attack the rival on `to`, if allowed.
     pub fn attack_cost(&self, player: PlayerId, to: Hex) -> Result<u32, RuleError> {
         let me = self.champion(player).ok_or(RuleError::UnknownPlayer)?;
-        let tile = self.board.tile(to).ok_or(RuleError::OffBoard)?;
+        self.board.tile(to).ok_or(RuleError::OffBoard)?;
         if me.hex.unsigned_distance_to(to) != 1 {
             return Err(RuleError::NotAdjacent);
         }
@@ -39,7 +39,7 @@ impl Game {
             return Err(RuleError::InvalidTarget);
         }
         let have = self.move_points(player);
-        let cost = self.step_price(player, me.hex, tile.terrain, have);
+        let cost = self.step_price(player, me.hex, to, have);
         if cost > have {
             return Err(RuleError::NotEnoughMovePoints { need: cost, have });
         }

@@ -43,13 +43,15 @@ pub enum GreatDeed {
     FloodedTable,
     /// Woods of six hexes a river runs through, with piranhas in it.
     Amazon,
+    /// One network of roads joining all five temples and the Table.
+    Roads,
     /// A whole region of another god gone into the mist, but its temple and
     /// the champions' homes, and fifteen hexes of it at least.
     DissolvedLand,
 }
 
 impl GreatDeed {
-    pub const ALL: [GreatDeed; 9] = [
+    pub const ALL: [GreatDeed; 10] = [
         GreatDeed::WorldTree,
         GreatDeed::Island,
         GreatDeed::DissolvedLand,
@@ -59,6 +61,7 @@ impl GreatDeed {
         GreatDeed::River,
         GreatDeed::FloodedTable,
         GreatDeed::Amazon,
+        GreatDeed::Roads,
     ];
 
     /// The god whose deed it is: its card's colour, its voice.
@@ -70,6 +73,7 @@ impl GreatDeed {
             | GreatDeed::River
             | GreatDeed::FloodedTable => God::Maya,
             GreatDeed::City => God::Trishna,
+            GreatDeed::Roads => God::Ahamar,
             GreatDeed::Reconciliation | GreatDeed::Legion => God::Zaga,
         }
     }
@@ -84,6 +88,7 @@ impl GreatDeed {
             GreatDeed::City => &[Feature::Settlements, Feature::Buildings, Feature::City],
             GreatDeed::Reconciliation => &[Feature::Settlements, Feature::Buildings],
             GreatDeed::River => &[Feature::Rivers],
+            GreatDeed::Roads => &[Feature::Settlements, Feature::Roads],
             GreatDeed::FloodedTable => &[Feature::Rivers, Feature::Lakes],
             GreatDeed::Amazon => &[Feature::Beasts, Feature::Rivers, Feature::Piranhas],
             GreatDeed::Legion => &[
@@ -123,6 +128,8 @@ pub enum CheckKind {
     SharedShrine,
     /// Undead of your legion following you.
     LegionSize,
+    /// Temples on the register's roads.
+    TemplesLinked,
     /// Hexes of the longest river.
     RiverLength,
     /// It rises by the mountains.
@@ -154,6 +161,8 @@ impl Check {
 
 /// Settlements side by side a City needs.
 pub const CITY: usize = 7;
+/// Dusks before any deed may begin its eve: Great Deeds are the late game.
+pub const EARLIEST_EVE: u32 = 10;
 /// Undead in a legion for the Legion.
 pub const LEGION: usize = 5;
 /// Hexes of a river for the River.
@@ -310,6 +319,7 @@ impl Game {
                     check(CheckKind::CityHas, has, 3),
                 ]
             }
+            GreatDeed::Roads => vec![check(CheckKind::TemplesLinked, self.temples_linked(), 5)],
             GreatDeed::River => {
                 let (len, source, mouth) = self.best_river();
                 vec![
@@ -583,7 +593,8 @@ impl Game {
             let Some(deed) = self.deed(p) else {
                 continue;
             };
-            let holds = self.deed_holds(p);
+            // A deed is the late game: no eve before `EARLIEST_EVE` dusks.
+            let holds = self.deed_holds(p) && self.dusks >= EARLIEST_EVE;
             let eve = &mut self.eves[p.0 as usize];
             match (holds, *eve) {
                 (true, None) => {

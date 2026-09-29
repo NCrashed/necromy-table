@@ -22,6 +22,7 @@ pub mod items;
 pub use cards::{CardDef, CardId, CardKind, CardMod, DefId, Effect, TargetRule, Timing};
 pub use features::{Feature, Mode, World};
 pub use game::Cargo;
+pub use game::EARLIEST_EVE;
 pub use game::LEGION;
 pub use game::RIVER_RUN;
 pub use game::{
@@ -39,6 +40,7 @@ pub use game::{
 pub use game::{BUILD_SPIRIT, Building, CITY, QUARTER_SPIRIT, WALLED_MILITIA};
 pub use game::{COMPANION_DICE, Companion, ENLIST_SPIRIT, RETINUE, TAME_SPIRIT};
 pub use game::{JUNGLE, JUNGLE_RIVER, RIVER};
+pub use game::{PAVE_SPIRIT, ROAD_RUN};
 pub use gods::{Element, God};
 pub use hexx::Hex;
 pub use items::{ITEMS, ItemDef, ItemEffect, ItemId, Slot, When};

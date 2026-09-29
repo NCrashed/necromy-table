@@ -164,6 +164,7 @@ pub fn novelty(n: necromy_rules::Novelty) -> String {
         Novelty::Built => "строит на поселении".into(),
         Novelty::Tamed => "приручает зверя".into(),
         Novelty::Enlisted => "вписывает мертвеца в легион".into(),
+        Novelty::Paved => "мостит дорогу".into(),
         Novelty::Sacrificed => "отдаёт предмет богу".into(),
         Novelty::Hid => "уходит в тень".into(),
         Novelty::FinishedLine => "доводит до конца свою историю".into(),
@@ -264,6 +265,10 @@ pub fn great_deed(d: necromy_rules::GreatDeed) -> (&'static str, String) {
                 necromy_rules::JUNGLE_RIVER
             ),
         ),
+        GreatDeed::Roads => (
+            "Дороги реестра",
+            "Одна сеть дорог связывает Стол и все пять храмов.".into(),
+        ),
         GreatDeed::Legion => (
             "Легион",
             format!(
@@ -293,6 +298,7 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::PairLight => "боги пары в свете",
         CheckKind::SharedShrine => "святилище обоих",
         CheckKind::LegionSize => "мертвецов в твоём легионе",
+        CheckKind::TemplesLinked => "храмов на дорогах реестра",
         CheckKind::RiverLength => "клеток самой длинной реки",
         CheckKind::RiverSource => "исток у гор",
         CheckKind::RiverMouth => "устье на краю мира",
@@ -335,6 +341,7 @@ pub fn wish(kind: necromy_rules::WishKind) -> &'static str {
         WishKind::Stones => "Подними камни силы",
         WishKind::River => "Пусть потечёт река",
         WishKind::Flood => "Пусть поднимутся воды",
+        WishKind::Road => "Проложи дорогу реестра",
         WishKind::Awaken => "Принеси в мир новое",
     }
 }
@@ -408,6 +415,10 @@ pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {
         Feature::Piranhas => (
             "Пираньи",
             "в реках пираньи: кусают входящего, но не насмерть",
+        ),
+        Feature::Roads => (
+            "Дороги",
+            "шаг по дороге стоит 1 на любой земле, дорога через реку — мост; на дороге не скрыться",
         ),
     }
 }

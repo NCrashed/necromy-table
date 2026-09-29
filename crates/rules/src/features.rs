@@ -57,10 +57,12 @@ pub enum Feature {
     Lakes,
     /// Piranhas in the rivers bite whoever steps in.
     Piranhas,
+    /// Roads: a step along one costs one; nobody hides on them.
+    Roads,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 20] = [
+    pub const ALL: [Feature; 21] = [
         Feature::Bodies,
         Feature::Groves,
         Feature::Settlements,
@@ -81,6 +83,7 @@ impl Feature {
         Feature::Rivers,
         Feature::Lakes,
         Feature::Piranhas,
+        Feature::Roads,
     ];
 
     /// What the world must have before this can come in (§21.2): all of
@@ -96,6 +99,7 @@ impl Feature {
             Feature::Legion => &[Has(Feature::Undead), Has(Feature::Companions)],
             Feature::Rivers => &[Land(&[Terrain::Mountain, Terrain::Swamp])],
             Feature::Lakes => &[Has(Feature::Rivers)],
+            Feature::Roads => &[Has(Feature::Settlements)],
             Feature::Piranhas => &[Has(Feature::Beasts), Has(Feature::Rivers)],
             Feature::Groves | Feature::Undead => &[Has(Feature::Bodies)],
             Feature::Militia => &[Has(Feature::Settlements)],
@@ -123,7 +127,7 @@ impl Feature {
                 God::Trishna
             }
             Feature::Bodies | Feature::Poison | Feature::Trials | Feature::Legion => God::Zaga,
-            Feature::Militia | Feature::Loot | Feature::Guard => God::Ahamar,
+            Feature::Militia | Feature::Loot | Feature::Guard | Feature::Roads => God::Ahamar,
             Feature::Undead
             | Feature::Ruins
             | Feature::Stealth

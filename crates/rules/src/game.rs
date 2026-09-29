@@ -186,6 +186,8 @@ pub enum Intent {
     Recruit {
         mob: u32,
     },
+    /// On your turn: a road on the hex underfoot (§21.8).
+    Pave,
     /// On your turn: take the body (or burden) underfoot on your back (§21.8).
     Take,
     /// On your turn: lay down what you carry where you stand.
@@ -743,6 +745,10 @@ pub enum Event {
         from: PlayerId,
         cargo: cargo::Cargo,
     },
+    /// A road on `hex` (§21.8).
+    RoadLaid {
+        hex: Hex,
+    },
     /// Piranhas bit `player` stepping into a river (§21.8).
     PiranhasBit {
         player: PlayerId,
@@ -1261,6 +1267,8 @@ pub struct Game {
     loads: Vec<(Hex, cargo::Cargo)>,
     /// Buildings on settlements (§21.8).
     buildings: BTreeMap<(i32, i32), buildings::Building>,
+    /// Roads of the register (§21.8).
+    roads: std::collections::BTreeSet<(i32, i32)>,
     /// Who did what first at the table (§21.5).
     firsts: BTreeMap<novelty::Novelty, PlayerId>,
     /// Per player, battles won so far: each is worth less.
@@ -1393,6 +1401,7 @@ impl Game {
             raised: Vec::new(),
             loads: Vec::new(),
             buildings: BTreeMap::new(),
+            roads: Default::default(),
             firsts: BTreeMap::new(),
             won: vec![0; champions_len],
             log: Vec::new(),
@@ -1624,18 +1633,16 @@ impl Game {
     /// Cost to step from a champion's hex onto `to`, if it is allowed at all.
     pub fn step_cost(&self, player: PlayerId, to: Hex) -> Result<u32, RuleError> {
         let champion = self.champion(player).ok_or(RuleError::UnknownPlayer)?;
-        let tile = self
-            .board
-            .tile(to)
-            .filter(|t| t.terrain.is_land())
-            .ok_or(RuleError::OffBoard)?;
+        if !self.board.contains(to) {
+            return Err(RuleError::OffBoard);
+        }
         if champion.hex.unsigned_distance_to(to) != 1 {
             return Err(RuleError::NotAdjacent);
         }
         if self.occupant(to).is_some() || (self.mob_at(to) && !self.lets_pass(player, to)) {
             return Err(RuleError::Occupied);
         }
-        Ok(self.step_price(player, champion.hex, tile.terrain, self.move_points(player)))
+        Ok(self.step_price(player, champion.hex, to, self.move_points(player)))
     }
 
     /// Hexes `player` can reach this turn, with the cheapest cost.
@@ -1681,16 +1688,16 @@ impl Game {
                 continue;
             }
             for next in at.all_neighbors() {
-                let Some(tile) = self.board.tile(next).filter(|t| t.terrain.is_land()) else {
+                if !self.board.contains(next) {
                     continue;
-                };
+                }
                 // Militia who let one through are a hex to end on, not to pass.
                 let passing = self.lets_pass(player, next);
                 if next == start || self.occupant(next).is_some() || (self.mob_at(next) && !passing)
                 {
                     continue;
                 }
-                let total = cost + self.step_price(player, at, tile.terrain, points - cost);
+                let total = cost + self.step_price(player, at, next, points - cost);
                 if total > points {
                     continue;
                 }
@@ -1918,6 +1925,7 @@ impl Game {
             Intent::Play { card, target } => self.play_own(player, card, target, events),
             Intent::Sacrifice { slot } => self.sacrifice(player, slot, events),
             Intent::Rebuild => self.rebuild(player, events),
+            Intent::Pave => self.pave(player, events),
             Intent::Recruit { mob } => self.take_companion(player, mob, events),
             Intent::Take => self.take(player, events),
             Intent::Build { building } => self.build(player, building, events),
@@ -1949,6 +1957,7 @@ impl Game {
             Intent::Play { card, target } => self.check_play(player, card, target),
             Intent::Sacrifice { slot } => self.check_sacrifice(player, slot).map(|_| ()),
             Intent::Rebuild => self.check_rebuild(player).map(|_| ()),
+            Intent::Pave => self.check_pave(player),
             Intent::Recruit { mob } => self.check_recruit(player, mob).map(|_| ()),
             Intent::Take => self.check_take(player).map(|_| ()),
             Intent::Build { building } => self.check_build(player, building).map(|_| ()),
@@ -2177,8 +2186,8 @@ impl Game {
         // The champion may have fallen to a trap and woken at home.
         let at = self.hex_of(player);
         if at == to {
-            // People live there: nobody walks in unseen.
-            if self.board.tile(at).is_some_and(|t| t.terrain.crowded()) {
+            // People live there, or travel: nobody walks in unseen.
+            if self.road(at) || self.board.tile(at).is_some_and(|t| t.terrain.crowded()) {
                 self.reveal(player, RevealReason::Crowd, events);
             }
             self.claim(player, at, events);
@@ -2407,6 +2416,7 @@ impl Game {
             | Intent::Lay
             | Intent::Build { .. }
             | Intent::Recruit { .. }
+            | Intent::Pave
             | Intent::Quarter { .. }
             | Intent::Cycle { .. } => {
                 return Err(RuleError::WindowOpen);
@@ -3250,6 +3260,7 @@ mod militia;
 mod mobs;
 mod novelty;
 mod poison;
+mod roads;
 mod scenario;
 mod stealth;
 mod story;
@@ -3278,14 +3289,15 @@ pub use mobs::{
 };
 pub use novelty::{FIRST_STYLE, Novelty, VARIETY};
 pub use poison::{Cure, Poison};
+pub use roads::{PAVE_SPIRIT, ROAD_RUN};
 pub use scenario::{Scenario, SceneSeat, SceneWorld};
 pub use stealth::RevealReason;
 pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
 pub use trial::{Boon, TRIAL_ROUNDS, TRIALS_ON_BOARD, Trial, trial_face};
 pub use victory::{
-    CITY, Check, CheckKind, DISSOLVED, GreatDeed, ISLAND, JUNGLE, JUNGLE_RIVER, LEGION, OFFERED,
-    REFUSAL_THREAT, RIVER,
+    CITY, Check, CheckKind, DISSOLVED, EARLIEST_EVE, GreatDeed, ISLAND, JUNGLE, JUNGLE_RIVER,
+    LEGION, OFFERED, REFUSAL_THREAT, RIVER,
 };
 pub use water::RIVER_RUN;
 pub use wish::{

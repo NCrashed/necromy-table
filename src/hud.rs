@@ -546,6 +546,9 @@ fn tooltip(
             names::mob(b.kind, b.id).0.to_lowercase()
         ));
     }
+    if g.road(hex) {
+        lines.push("дорога: шаг по ней стоит 1; здесь не скрыться".into());
+    }
     // A building on the settlement, and its city (§21.8).
     if let Some(b) = g.building(hex) {
         lines.push(format!("постройка: {}", names::building(b)));

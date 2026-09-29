@@ -108,6 +108,7 @@ fn kind_id(kind: WishKind) -> &'static str {
         WishKind::Stones => "stones",
         WishKind::River => "river",
         WishKind::Flood => "flood",
+        WishKind::Road => "road",
         WishKind::Awaken => "awaken",
     }
 }
@@ -143,6 +144,7 @@ pub fn kind_phrase(kind: WishKind) -> &'static str {
         WishKind::Stones => "подними камни силы",
         WishKind::River => "пусть потечёт река",
         WishKind::Flood => "пусть поднимутся воды",
+        WishKind::Road => "проложи дорогу реестра",
         WishKind::Awaken => "принеси в мир новое",
     }
 }
@@ -170,6 +172,7 @@ pub fn feature_id(f: Feature) -> &'static str {
         Feature::Rivers => "rivers",
         Feature::Lakes => "lakes",
         Feature::Piranhas => "piranhas",
+        Feature::Roads => "roads",
     }
 }
 
@@ -196,6 +199,7 @@ fn feature_words(f: Feature) -> &'static str {
         Feature::Rivers => "реки: переправа кончает ход",
         Feature::Lakes => "озёра: стоячая вода, не пройти",
         Feature::Piranhas => "пираньи в реках",
+        Feature::Roads => "дороги реестра",
     }
 }
 

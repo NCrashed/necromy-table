@@ -459,6 +459,7 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
             | GreatDeed::City
             | GreatDeed::Reconciliation
             | GreatDeed::River
+            | GreatDeed::Roads
             | GreatDeed::Amazon => wish(
                 God::Maya,
                 crate::Act::Veil {
@@ -529,6 +530,7 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
             wish(God::Maya, crate::Act::River)
         }
         (GreatDeed::FloodedTable, TableFlooded) => wish(God::Maya, crate::Act::Flood),
+        (GreatDeed::Roads, TemplesLinked) => wish(God::Ahamar, crate::Act::Road),
         (GreatDeed::Amazon, JungleWoods) => wish(God::Bhava, crate::Act::Land),
         (GreatDeed::Amazon, JungleRiver) => wish(God::Maya, crate::Act::River),
         // Bhava's woods round where it stands.
@@ -570,6 +572,7 @@ fn deed_goal(game: &Game, player: PlayerId) -> Option<Hex> {
                 .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
         }
         GreatDeed::Amazon => None,
+        GreatDeed::Roads => None,
         // The nearest undead to write into the legion.
         GreatDeed::Legion => {
             let me = game.champion(player)?.hex;

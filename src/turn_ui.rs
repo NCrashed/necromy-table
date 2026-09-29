@@ -73,6 +73,8 @@ enum ActionButton {
     Build(necromy_rules::Building),
     /// Tame the beast or enlist the undead next to you (§21.8).
     Recruit(u32),
+    /// A road on the hex underfoot (§21.8).
+    Pave,
     Quarter(hexx::Hex),
 }
 
@@ -498,6 +500,12 @@ fn rebuild_action(
             };
             buttons.push((ActionButton::Recruit(id), label));
         }
+        if g.may_pave(human) && spirit >= necromy_rules::PAVE_SPIRIT {
+            buttons.push((
+                ActionButton::Pave,
+                format!("Замостить\n{} Духа", necromy_rules::PAVE_SPIRIT),
+            ));
+        }
         if spirit >= necromy_rules::QUARTER_SPIRIT
             && let Some(&hex) = g.quarters(human).first()
         {
@@ -554,6 +562,7 @@ fn action_buttons(
             },
             ActionButton::Quarter(hex) => Intent::Quarter { hex: *hex },
             ActionButton::Recruit(mob) => Intent::Recruit { mob: *mob },
+            ActionButton::Pave => Intent::Pave,
             ActionButton::Cycle => Intent::Cycle {
                 cards: selection.sift.take().unwrap_or_default(),
             },

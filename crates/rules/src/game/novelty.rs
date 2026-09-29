@@ -35,6 +35,8 @@ pub enum Novelty {
     /// A beast tamed, an undead enlisted.
     Tamed,
     Enlisted,
+    /// A road laid by one's own hand.
+    Paved,
     /// A wish of this kind, granted.
     Wished(WishKind),
     /// A mechanic brought into the world.

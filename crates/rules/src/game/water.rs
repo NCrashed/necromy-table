@@ -21,15 +21,15 @@ use crate::gods::God;
 pub const RIVER_RUN: usize = 3;
 
 impl Game {
-    /// Move points to step from `from` onto land of `terrain`, with
-    /// `points` left: crossing onto a river takes them all.
-    pub(super) fn step_price(
-        &self,
-        player: PlayerId,
-        from: Hex,
-        terrain: Terrain,
-        points: u32,
-    ) -> u32 {
+    /// Move points to step from `from` onto `to`, with `points` left:
+    /// crossing onto a river takes them all; a road costs one (§21.8).
+    pub(super) fn step_price(&self, player: PlayerId, from: Hex, to: Hex, points: u32) -> u32 {
+        let Some(terrain) = self.board.tile(to).map(|t| t.terrain) else {
+            return points.max(1);
+        };
+        if self.on_road(from, to) {
+            return 1;
+        }
         let along = self
             .board
             .tile(from)
@@ -99,6 +99,7 @@ impl Game {
             events.push(Event::MobLeft { id });
         }
         if terrain == Terrain::Lake {
+            self.wash_road(hex);
             self.traps.retain(|t| t.hex != hex);
             self.ground.retain(|(h, _)| *h != hex);
             self.loads.retain(|(h, _)| *h != hex);
