@@ -19,6 +19,7 @@ mod icons;
 mod lighting;
 mod lobby;
 mod menu_stage;
+mod menu_world;
 mod names;
 mod play;
 mod props;
@@ -92,7 +93,11 @@ fn main() {
             ring_ui::RingUiPlugin,
             audio::SoundPlugin,
         ))
-        .add_plugins((settings::SettingsPlugin, menu_stage::MenuStagePlugin))
+        .add_plugins((
+            settings::SettingsPlugin,
+            menu_stage::MenuStagePlugin,
+            menu_world::MenuWorldPlugin,
+        ))
         .add_plugins(AutoScreenshotPlugin)
         .add_systems(Startup, setup_scene)
         .run();

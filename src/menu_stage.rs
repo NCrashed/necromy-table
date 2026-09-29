@@ -23,6 +23,7 @@ use necromy_rules::God;
 
 use crate::audio::{Sound, Speech};
 use crate::hud::{INK, UiFont};
+use crate::menu_world::{Kind, MenuWorld};
 use crate::play::Match;
 use crate::ui_skin::{Accent, Frame};
 
@@ -30,12 +31,14 @@ const CELL: u32 = 96;
 const WALK_COLUMNS: u32 = 6;
 const WALK_ROWS: u32 = 8;
 const ACT_COLUMNS: u32 = 12;
-const ACT_ROWS: u32 = 2;
+const ACT_ROWS: u32 = 3;
 const ROW_IDLE: usize = 0;
 const ROW_WALK_E: usize = 5;
 const ROW_WALK_W: usize = 7;
 const ROW_WAVE: usize = 0;
 const ROW_ACT: usize = 1;
+/// A second act, for those that have one (Maya's summoning).
+const ROW_ALT: usize = 2;
 /// Texels a second a champion walks.
 const WALK_SPEED: f32 = 34.0;
 const WALK_FPS: f32 = 9.0;
@@ -44,7 +47,7 @@ const ACT_FPS: f32 = 8.0;
 const FIRST_VISIT: f32 = 2.5;
 const BETWEEN: (f32, f32) = (5.0, 12.0);
 /// Logical pixels between the feet and the bottom of the window.
-const FLOOR: f32 = 26.0;
+pub(crate) const FLOOR: f32 = 26.0;
 
 pub struct MenuStagePlugin;
 
@@ -77,6 +80,8 @@ struct MenuArt {
     act_layout: Handle<TextureAtlasLayout>,
     stones: [Handle<Image>; 3],
     feasts: [Handle<Image>; 3],
+    /// Flowers to spring around Bhava's tree.
+    flowers: Vec<Handle<Image>>,
     dust: Handle<Image>,
     splash: Handle<Image>,
 }
@@ -114,6 +119,9 @@ fn load_art(
         )),
         stones: [1, 2, 3].map(|n| assets.load(format!("props/menu/stone-{n}.png"))),
         feasts: [1, 2, 3].map(|n| assets.load(format!("props/menu/feast-{n}.png"))),
+        flowers: (1..=FLOWERS)
+            .map(|n| assets.load(format!("props/menu/flower-{n}.png")))
+            .collect(),
         dust: assets.load("props/menu/dust.png"),
         splash: assets.load("props/menu/splash.png"),
     });
@@ -187,6 +195,10 @@ enum Cue {
     Bolt,
     Stone,
     Feast,
+    /// Bhava's tree grows where he planted, flowers spring around.
+    Grove,
+    /// Maya's spirits and fireflies rise.
+    Summon,
     Splash,
     /// The champion's greeting, in a bubble over its head.
     Hello,
@@ -338,7 +350,8 @@ struct Visits {
     next_at: f32,
     count: u64,
     seed: u64,
-    forced: Option<(God, bool)>,
+    /// A dev visit: the god, only a wave, the second act.
+    forced: Option<(God, bool, bool)>,
     /// Bubbles so far: each types out under its own key.
     said: u64,
     /// The saying last said, not to be said twice running.
@@ -348,14 +361,14 @@ struct Visits {
 impl Default for Visits {
     fn default() -> Self {
         let forced = std::env::var("NECROMY_MENU_ACT").ok().and_then(|s| {
-            let (name, wave) = match s.split_once(':') {
-                Some((name, rest)) => (name.to_string(), rest == "wave"),
-                None => (s, false),
+            let (name, rest) = match s.split_once(':') {
+                Some((name, rest)) => (name.to_string(), rest.to_string()),
+                None => (s, String::new()),
             };
             God::ALL
                 .into_iter()
                 .find(|g| g.name().eq_ignore_ascii_case(&name))
-                .map(|g| (g, wave))
+                .map(|g| (g, rest == "wave", rest == "summon"))
         });
         let seed = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -400,7 +413,7 @@ impl Visits {
 }
 
 /// Screen pixels per texel: 3 on a 1080-line window.
-fn scale(height: f32) -> f32 {
+pub(crate) fn scale(height: f32) -> f32 {
     (height / 360.0).round().clamp(2.0, 4.0)
 }
 
@@ -444,11 +457,11 @@ fn begin_visit(
     };
     let s = geo.s;
     let forced = visits.forced.is_some();
-    let (god, wave_only) = match visits.forced.take() {
+    let (god, wave_only, alt) = match visits.forced.take() {
         Some(f) => f,
         None => {
             let god = God::ALL[(visits.roll() * 5.0) as usize % 5];
-            (god, visits.roll() < 0.3)
+            (god, visits.roll() < 0.3, visits.roll() < 0.55)
         }
     };
     let (Some(walk), act) = (&art.walk[god.index()], &art.acts[god.index()]) else {
@@ -491,7 +504,31 @@ fn begin_visit(
             plan.push_back(Step::Idle { secs: 1.2 });
         }
     };
+    let alt_row = act
+        .as_ref()
+        .and_then(|a| images.get(a))
+        .and_then(|image| read_row(image, ROW_ALT, ACT_COLUMNS));
     match (god, act_rows.1) {
+        (God::Maya, _) if !wave_only && alt && alt_row.is_some() => {
+            // Spirits and fireflies rise from her hands and stay.
+            let n = alt_row.map_or(1, |r| r.frames);
+            plan.push_back(Step::Walk { to: spot });
+            plan.push_back(Step::Play {
+                row: ROW_ALT,
+                from: 0,
+                to: 4.min(n),
+                hold: 0.0,
+            });
+            plan.push_back(Step::Cue(Cue::Summon));
+            plan.push_back(Step::Play {
+                row: ROW_ALT,
+                from: 4.min(n),
+                to: n,
+                hold: 0.5,
+            });
+            plan.push_back(Step::Cue(Cue::Hello));
+            wave(&mut plan);
+        }
         (God::Maya, Some(jump)) if !wave_only => {
             // Up onto the panel from beside it, along its top, down the far side.
             let air = jump.frames * 3 / 5;
@@ -528,7 +565,7 @@ fn begin_visit(
             });
             plan.push_back(Step::Cue(Cue::Splash));
         }
-        (God::Ahamar | God::Zaga | God::Trishna, Some(row)) if !wave_only => {
+        (God::Ahamar | God::Zaga | God::Trishna | God::Bhava, Some(row)) if !wave_only => {
             plan.push_back(Step::Walk { to: spot });
             let n = row.frames;
             // The frame the act lands on: an arm up, the stone called, the
@@ -536,6 +573,7 @@ fn begin_visit(
             let (mid, cue, hold) = match god {
                 God::Ahamar => (n * 2 / 3, Cue::Bolt, 0.9),
                 God::Zaga => (n / 3, Cue::Stone, 0.4),
+                God::Bhava => (n * 2 / 5, Cue::Grove, 0.8),
                 _ => (n * 3 / 5, Cue::Feast, 1.6),
             };
             plan.push_back(Step::Play {
@@ -679,6 +717,7 @@ fn walk_on(
     root: Single<Entity, With<StageRoot>>,
     mut visitors: Query<(Entity, &mut Visitor)>,
     mut sounds: MessageWriter<Sound>,
+    mut world: ResMut<MenuWorld>,
 ) {
     let dt = time.delta_secs();
     let now = time.elapsed_secs();
@@ -795,6 +834,8 @@ fn walk_on(
                     &mut visits,
                     entity,
                     &mut sounds,
+                    &mut world,
+                    geo.w,
                 );
                 true
             }
@@ -821,9 +862,14 @@ struct Effect {
     rise: Option<(f32, f32)>,
     /// Images to flicker between, a new one every `FLICKER` seconds.
     flicker: Vec<Handle<Image>>,
+    /// With a step in seconds, `flicker` is a sequence shown once, each
+    /// image for that long, the last held: a tree growing.
+    grow: f32,
 }
 
 const FLICKER: f32 = 0.07;
+/// Flowers in `props/menu/flower-N.png`.
+const FLOWERS: usize = 6;
 
 /// Words over a champion's head, following it.
 #[derive(Component)]
@@ -848,6 +894,8 @@ fn cue_effect(
     visits: &mut Visits,
     visitor: Entity,
     sounds: &mut MessageWriter<Sound>,
+    world: &mut MenuWorld,
+    w: f32,
 ) {
     let pick = |visits: &mut Visits| (visits.roll() * 3.0) as usize % 3;
     let prop = 64.0 * s;
@@ -908,6 +956,7 @@ fn cue_effect(
                         peak: 1.0,
                         rise: None,
                         flicker: frames.clone(),
+                        grow: 0.0,
                     },
                     ImageNode::new(frames[0].clone()),
                     Node {
@@ -932,6 +981,7 @@ fn cue_effect(
                         peak: 0.22,
                         rise: None,
                         flicker: Vec::new(),
+                        grow: 0.0,
                     },
                     // A plain fill: an image node would keep its image's
                     // square shape and light only the middle of the window.
@@ -948,6 +998,16 @@ fn cue_effect(
                 .id();
             commands.entity(root).add_children(&[flash, bolt]);
             sounds.write(Sound::new("ward-break"));
+            // The sky answers: the sun, the moon, or a cloud where it struck.
+            let r = visits.roll();
+            if !world.has(Kind::Sun) && r < 0.3 {
+                world.add(Kind::Sun, 0, 0.09, 0.05);
+            } else if !world.has(Kind::Moon) && r < 0.55 {
+                world.add(Kind::Moon, 0, 0.91, 0.06);
+            } else {
+                let v = (visits.roll() * 3.0) as usize;
+                world.add(Kind::Cloud, v, hand.x / w, 0.03 + 0.22 * visits.roll());
+            }
         }
         Cue::Stone => {
             // Beside the champion, towards the middle of the window.
@@ -978,6 +1038,7 @@ fn cue_effect(
                         peak: 1.0,
                         rise: Some((0.9, 0.8)),
                         flicker: Vec::new(),
+                        grow: 0.0,
                     },
                     ImageNode::new(art.stones[pick(visits)].clone()),
                     Node {
@@ -994,6 +1055,15 @@ fn cue_effect(
             let dust = puff(commands, &art.dust, Vec2::new(x, feet.y), s, now, 1.1);
             commands.entity(root).add_children(&[clip, dust]);
             sounds.write(Sound::new("terrain"));
+            // The earth first; then mountains on the horizon, or rocks here.
+            if !world.has(Kind::Ground) {
+                world.add(Kind::Ground, 0, 0.5, 0.0);
+            } else if visits.roll() < 0.7 {
+                let v = (visits.roll() * Kind::Mountain.variants() as f32) as usize;
+                world.add(Kind::Mountain, v, visits.roll(), 0.0);
+            } else {
+                world.add(Kind::Rock, 0, x / w, 0.0);
+            }
         }
         Cue::Feast => {
             // On the ground beside her, where she was heading: left for the player.
@@ -1008,6 +1078,7 @@ fn cue_effect(
                         peak: 1.0,
                         rise: None,
                         flicker: Vec::new(),
+                        grow: 0.0,
                     },
                     ImageNode::new(art.feasts[pick(visits)].clone())
                         .with_color(Color::WHITE.with_alpha(0.0)),
@@ -1025,6 +1096,69 @@ fn cue_effect(
                 .id();
             commands.entity(root).add_child(feast);
             sounds.write(Sound::new("offer"));
+            // Someone comes to the feast, and stays about.
+            let v = (visits.roll() * 12.0) as usize;
+            // Beside the cloth, not under it.
+            world.add(Kind::Animal, v, (feet.x + 84.0 * s * facing) / w, 0.0);
+        }
+        Cue::Grove => {
+            let x = feet.x + 44.0 * s * facing;
+            // The tree stays in the menu's world, growing there from a
+            // sprout; a bush springs up somewhere too.
+            world.add(Kind::Tree, 0, x / w, 0.0);
+            let v = (visits.roll() * 4.0) as usize;
+            world.add(Kind::Bush, v, visits.roll(), 0.0);
+            // Flowers spring up one after another around him and the tree.
+            let small = 30.0 * s;
+            let n = art.flowers.len();
+            for k in 0..5.min(n) {
+                let dx = (visits.roll() - 0.5) * 150.0 * s + (x - feet.x) * 0.5;
+                let flower = commands
+                    .spawn((
+                        Effect {
+                            born: now + 0.3 + 0.18 * k as f32,
+                            life: 10.0 - 0.18 * k as f32,
+                            fade_in: 0.25,
+                            fade_out: 1.2,
+                            peak: 1.0,
+                            rise: None,
+                            flicker: Vec::new(),
+                            grow: 0.0,
+                        },
+                        ImageNode::new(art.flowers[(visits.roll() * n as f32) as usize % n].clone())
+                            .with_color(Color::WHITE.with_alpha(0.0)),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: px((feet.x + dx - small / 2.0).round()),
+                            top: px((feet.y + (2.0 + 6.0 * visits.roll()) * s - small).round()),
+                            width: px(small),
+                            height: px(small),
+                            ..default()
+                        },
+                        Pickable::IGNORE,
+                        ZIndex(3),
+                    ))
+                    .id();
+                commands.entity(root).add_child(flower);
+            }
+            sounds.write(Sound::new("grove"));
+        }
+        Cue::Summon => {
+            // A spirit and a handful of fireflies rise from her and stay;
+            // now and then a glowing cap comes up at her feet.
+            let at = feet.x / w;
+            let v = (visits.roll() * 4.0) as usize;
+            world.add(Kind::Spirit, v, at, 0.1 + 0.5 * visits.roll());
+            for _ in 0..3 {
+                let x = at + (visits.roll() - 0.5) * 0.2;
+                world.add(Kind::Firefly, 0, x, visits.roll());
+            }
+            if visits.roll() < 0.35 {
+                world.add(Kind::Glowcap, 0, at + (visits.roll() - 0.5) * 0.1, 0.0);
+            }
+            let splash = puff(commands, &art.splash, feet - Vec2::Y * 30.0 * s, s, now, 0.9);
+            commands.entity(root).add_child(splash);
+            sounds.write(Sound::new("spirit"));
         }
         Cue::Splash => {
             let splash = puff(commands, &art.splash, feet, s, now, 0.6);
@@ -1047,6 +1181,7 @@ fn puff(commands: &mut Commands, image: &Handle<Image>, at: Vec2, s: f32, now: f
                 peak: 1.0,
                 rise: None,
                 flicker: Vec::new(),
+                grow: 0.0,
             },
             ImageNode::new(image.clone()),
             Node {
@@ -1217,7 +1352,8 @@ fn effects(
         if effect.fade_out > 0.0 {
             alpha = alpha.min((effect.life - age) / effect.fade_out);
         }
-        let want = alpha * effect.peak;
+        // A negative age is an effect that has not begun yet.
+        let want = alpha.clamp(0.0, 1.0) * effect.peak;
         // Every node has a (transparent) background: fade it only where
         // there is no image, or the image gets a black box.
         let Some(mut image) = image else {
@@ -1232,7 +1368,12 @@ fn effects(
             image.color.set_alpha(want);
         }
         if !effect.flicker.is_empty() {
-            let k = (age / FLICKER) as usize % effect.flicker.len();
+            let n = effect.flicker.len();
+            let k = if effect.grow > 0.0 {
+                ((age.max(0.0) / effect.grow) as usize).min(n - 1)
+            } else {
+                (age.max(0.0) / FLICKER) as usize % n
+            };
             if image.image != effect.flicker[k] {
                 image.image = effect.flicker[k].clone();
             }

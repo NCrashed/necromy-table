@@ -27,7 +27,6 @@ use crate::ui_skin::{Accent, BRONZE_RIM, Frame};
 const GOLD: Color = Color::srgb(1.0, 0.82, 0.3);
 const DIM: Color = Color::srgb(0.72, 0.70, 0.64);
 const BAD: Color = Color::srgb(0.95, 0.5, 0.4);
-const GROUND: Color = Color::srgb(0.09, 0.08, 0.11);
 const MAX_FIELD: usize = 40;
 
 pub struct LobbyPlugin;
@@ -226,7 +225,7 @@ fn spawn(mut commands: Commands) {
             align_items: AlignItems::Center,
             ..default()
         },
-        BackgroundColor(GROUND),
+        // No fill: the menu's world (`menu_world.rs`) paints behind it.
         GlobalZIndex(50),
     ));
 }
