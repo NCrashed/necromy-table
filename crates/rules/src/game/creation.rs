@@ -364,7 +364,9 @@ impl Game {
             | Feature::Dragons
             | Feature::Wilds
             | Feature::Pens
-            | Feature::WalkingGroves => {}
+            | Feature::WalkingGroves
+            | Feature::Arena
+            | Feature::Debts => {}
         }
     }
 

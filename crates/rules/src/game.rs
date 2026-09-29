@@ -195,6 +195,19 @@ pub enum Intent {
     Feast,
     /// On your turn, in a settlement of yours: open a fair.
     Fair,
+    /// On your turn, in an arena of yours: challenge a rival (§21.8).
+    Challenge {
+        rival: PlayerId,
+    },
+    /// On your turn: bet that `rival` does `bet` before the next dusk.
+    BetOn {
+        rival: PlayerId,
+        bet: wish::Bet,
+    },
+    /// On your turn: pay what you owe `creditor`.
+    PayDebt {
+        creditor: PlayerId,
+    },
     /// On your turn, in a pen of yours: tether a tamed beast (§21.8).
     Tether {
         element: Element,
@@ -794,6 +807,47 @@ pub enum Event {
     /// A road on `hex` (§21.8).
     RoadLaid {
         hex: Hex,
+    },
+    /// `host` challenged `rival` to a duel in the arena on `hex` (§21.8).
+    Challenged {
+        host: PlayerId,
+        rival: PlayerId,
+        hex: Hex,
+    },
+    /// A duel was fought out.
+    DuelWon {
+        winner: PlayerId,
+        loser: PlayerId,
+        host: PlayerId,
+    },
+    /// `rival` never came: the duel is `host`'s.
+    DuelForfeit {
+        host: PlayerId,
+        rival: PlayerId,
+    },
+    /// `by` bet that `on` does `bet`.
+    BetPlaced {
+        by: PlayerId,
+        on: PlayerId,
+        bet: wish::Bet,
+    },
+    /// The bet came due: `won` if it happened.
+    BetSettled {
+        by: PlayerId,
+        on: PlayerId,
+        bet: wish::Bet,
+        won: bool,
+    },
+    /// A debt paid in Style.
+    DebtPaid {
+        debtor: PlayerId,
+        creditor: PlayerId,
+        amount: u8,
+    },
+    /// The debtor beat the creditor: the debt is gone.
+    DebtVoided {
+        debtor: PlayerId,
+        creditor: PlayerId,
     },
     /// `player` woke the grove on `hex` (§21.8).
     GroveWoke {
@@ -1492,6 +1546,12 @@ pub struct Game {
     buildings: BTreeMap<(i32, i32), buildings::Building>,
     /// Roads of the register (§21.8).
     roads: std::collections::BTreeSet<(i32, i32)>,
+    /// Duels, bets between players, debts, and duels won in one's arena
+    /// (§21.8).
+    duels: Vec<contest::Duel>,
+    player_bets: Vec<contest::PlayerBet>,
+    debts: Vec<contest::Debt>,
+    arena_wins: Vec<u8>,
     /// Walking groves and who woke them; who rooted one by the Table (§21.8).
     walkers: BTreeMap<(i32, i32), PlayerId>,
     rooted: Vec<bool>,
@@ -1656,6 +1716,10 @@ impl Game {
             stores: BTreeMap::new(),
             fairs: BTreeMap::new(),
             rulers: BTreeMap::new(),
+            duels: Vec::new(),
+            player_bets: Vec::new(),
+            debts: Vec::new(),
+            arena_wins: vec![0; champions_len],
             walkers: BTreeMap::new(),
             rooted: vec![false; champions_len],
             pens: BTreeMap::new(),
@@ -2198,6 +2262,9 @@ impl Game {
             Intent::Feast => self.hold_feast(player, events),
             Intent::Fair => self.open_fair(player, events),
             Intent::DrawCircle => self.draw_circle(player, events),
+            Intent::Challenge { rival } => self.challenge(player, rival, events),
+            Intent::BetOn { rival, bet } => self.place_bet(player, rival, bet, events),
+            Intent::PayDebt { creditor } => self.pay_debt(player, creditor, events),
             Intent::Tether { element } => self.tether(player, element, events),
             Intent::Untether { element } => self.untether(player, element, events),
             Intent::Consecrate => self.consecrate(player, events),
@@ -2245,6 +2312,9 @@ impl Game {
             Intent::Feast => self.check_feast(player),
             Intent::Fair => self.check_fair(player),
             Intent::DrawCircle => self.check_circle(player),
+            Intent::Challenge { rival } => self.check_challenge(player, rival),
+            Intent::BetOn { rival, .. } => self.check_bet(player, rival),
+            Intent::PayDebt { creditor } => self.check_pay(player, creditor),
             Intent::Tether { element } => self.check_tether(player, element),
             Intent::Untether { element } => self.check_untether(player, element),
             Intent::Consecrate | Intent::DigPit => self.check_consecrate(player),
@@ -2727,6 +2797,9 @@ impl Game {
             | Intent::Feast
             | Intent::Fair
             | Intent::DrawCircle
+            | Intent::Challenge { .. }
+            | Intent::BetOn { .. }
+            | Intent::PayDebt { .. }
             | Intent::Tether { .. }
             | Intent::Untether { .. }
             | Intent::Consecrate
@@ -3588,6 +3661,7 @@ mod buildings;
 mod burial;
 mod cargo;
 mod companions;
+mod contest;
 mod creation;
 mod dusk;
 mod fields;
@@ -3621,6 +3695,7 @@ pub use buildings::{BUILD_SPIRIT, Building, QUARTER_SPIRIT, WALLED_MILITIA};
 pub use burial::{CONSECRATE_SPIRIT, NECROPOLIS, NECROPOLIS_BODIES, PIT_BODIES, Pit};
 pub use cargo::Cargo;
 pub use companions::{COMPANION_DICE, Companion, ENLIST_SPIRIT, RETINUE, TAME_SPIRIT};
+pub use contest::{ARENA_WINS, BET_STAKE, DEBTORS, DUEL_ROUNDS, Debt, Duel, PlayerBet};
 pub use dusk::{DuskStep, Seal, SealedWish};
 pub use fields::{FEAST_FIELDS, FEAST_FOOD, FEAST_GUESTS, GUEST_RANGE, SOW_SPIRIT};
 pub use fire::{DOUSE_SPIRIT, Fire, GREAT_FIRE, KINDLE_SPIRIT};

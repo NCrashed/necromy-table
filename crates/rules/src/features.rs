@@ -85,10 +85,14 @@ pub enum Feature {
     Pens,
     /// Groves woken by «Дикий энт» walk to the Table.
     WalkingGroves,
+    /// Arenas and duels.
+    Arena,
+    /// Bets between players, and debts.
+    Debts,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 34] = [
+    pub const ALL: [Feature; 36] = [
         Feature::Bodies,
         Feature::Groves,
         Feature::Settlements,
@@ -123,6 +127,8 @@ impl Feature {
         Feature::Wilds,
         Feature::Pens,
         Feature::WalkingGroves,
+        Feature::Arena,
+        Feature::Debts,
     ];
 
     /// What the world must have before this can come in (§21.2): all of
@@ -155,6 +161,8 @@ impl Feature {
             Feature::Guests => &[Has(Feature::Companions)],
             Feature::Wilds => &[Has(Feature::Beasts)],
             Feature::WalkingGroves => &[Has(Feature::Groves)],
+            Feature::Arena => &[Has(Feature::Buildings)],
+            Feature::Debts => &[],
             Feature::Pens => &[
                 Has(Feature::Beasts),
                 Has(Feature::Companions),
@@ -207,7 +215,9 @@ impl Feature {
             | Feature::Guard
             | Feature::Roads
             | Feature::Rulers
-            | Feature::Ritual => God::Ahamar,
+            | Feature::Ritual
+            | Feature::Arena
+            | Feature::Debts => God::Ahamar,
             Feature::Undead
             | Feature::Ruins
             | Feature::Stealth

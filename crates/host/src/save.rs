@@ -27,7 +27,7 @@ use crate::{Seat, Timers};
 /// Bump whenever `Game` or anything else saved changes shape (together with
 /// `necromy_net::PROTOCOL`): postcard is not self-describing, so an old save
 /// would read as garbage.
-pub const SAVE_VERSION: u32 = 19;
+pub const SAVE_VERSION: u32 = 20;
 
 const MAGIC: &[u8; 8] = b"NECROSAV";
 const SNAPSHOT: &str = "snapshot";

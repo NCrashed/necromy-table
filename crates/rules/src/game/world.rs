@@ -105,6 +105,8 @@ impl Game {
     pub(super) fn settle_the_day(&mut self, events: &mut Vec<Event>) {
         self.end_truces();
         self.settle_wagers(events);
+        self.settle_player_bets(events);
+        self.duels_at_dusk(events);
     }
 
     /// Dusk, after the wishes: Trishna pulls, then every god whose pressure

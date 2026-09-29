@@ -69,6 +69,10 @@ pub enum GreatDeed {
     Ark,
     /// A grove you woke walked to the Table and put down roots there.
     WalkingForest,
+    /// Three duels won in an arena of yours, those never fought included.
+    Arena,
+    /// Three rivals in your debt at once.
+    DebtBondage,
     /// Marriages of your making binding three lands into one house.
     TripleUnion,
     /// Crowned over three vassals, then their oaths broken and three of
@@ -80,7 +84,7 @@ pub enum GreatDeed {
 }
 
 impl GreatDeed {
-    pub const ALL: [GreatDeed; 23] = [
+    pub const ALL: [GreatDeed; 25] = [
         GreatDeed::WorldTree,
         GreatDeed::Island,
         GreatDeed::DissolvedLand,
@@ -104,6 +108,8 @@ impl GreatDeed {
         GreatDeed::Guest,
         GreatDeed::Ark,
         GreatDeed::WalkingForest,
+        GreatDeed::Arena,
+        GreatDeed::DebtBondage,
     ];
 
     /// The god whose deed it is: its card's colour, its voice.
@@ -124,7 +130,11 @@ impl GreatDeed {
             | GreatDeed::Feast
             | GreatDeed::FairOfFive
             | GreatDeed::DeadFeast => God::Trishna,
-            GreatDeed::Roads | GreatDeed::FallenEmpire | GreatDeed::Summoning => God::Ahamar,
+            GreatDeed::Roads
+            | GreatDeed::FallenEmpire
+            | GreatDeed::Summoning
+            | GreatDeed::Arena
+            | GreatDeed::DebtBondage => God::Ahamar,
             GreatDeed::Reconciliation
             | GreatDeed::Legion
             | GreatDeed::Necropolis
@@ -166,6 +176,8 @@ impl GreatDeed {
                 Feature::Dragons,
             ],
             GreatDeed::Guest => &[Feature::Companions, Feature::Guests],
+            GreatDeed::Arena => &[Feature::Settlements, Feature::Buildings, Feature::Arena],
+            GreatDeed::DebtBondage => &[Feature::Debts],
             GreatDeed::WalkingForest => &[Feature::Bodies, Feature::Groves, Feature::WalkingGroves],
             GreatDeed::Ark => &[
                 Feature::Beasts,
@@ -262,6 +274,10 @@ pub enum CheckKind {
     GuestHome,
     /// A grove of yours rooted by the Table.
     GroveRooted,
+    /// Duels won in your arena.
+    ArenaWins,
+    /// Rivals in your debt.
+    Debtors,
     /// Elements of the beasts in a pen of yours.
     PenElements,
     /// A shrine of yours in its city.
@@ -493,6 +509,16 @@ impl Game {
                 CheckKind::DragonFollows,
                 usize::from(self.companions(player).contains(&super::Companion::Dragon)),
                 1,
+            )],
+            GreatDeed::Arena => vec![check(
+                CheckKind::ArenaWins,
+                self.arena_wins(player),
+                super::ARENA_WINS,
+            )],
+            GreatDeed::DebtBondage => vec![check(
+                CheckKind::Debtors,
+                self.debtors(player),
+                super::DEBTORS,
             )],
             GreatDeed::WalkingForest => vec![check(
                 CheckKind::GroveRooted,
@@ -782,7 +808,7 @@ impl Game {
                     super::Building::Tavern => has[0] = true,
                     super::Building::Forge => has[1] = true,
                     super::Building::Shrine(_) => has[2] = true,
-                    super::Building::Wall | super::Building::Pen => {}
+                    super::Building::Wall | super::Building::Pen | super::Building::Arena => {}
                 }
             }
             let found = (city.len(), has.iter().filter(|&&x| x).count());

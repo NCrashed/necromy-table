@@ -1204,6 +1204,7 @@ impl Game {
 
     /// `player` did `bet` today: wagers on it are won.
     pub(super) fn note_bet(&mut self, player: PlayerId, bet: Bet) {
+        self.note_player_bet(player, bet);
         for w in &mut self.wagers {
             if w.target == player && w.bet == bet {
                 w.happened = true;

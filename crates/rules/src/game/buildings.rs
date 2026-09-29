@@ -25,6 +25,8 @@ pub enum Building {
     Wall,
     /// A pen where tamed beasts are tethered (§21.8).
     Pen,
+    /// An arena for duels.
+    Arena,
 }
 
 /// Spirit a building costs.
@@ -64,6 +66,9 @@ impl Game {
         let mut all = vec![Building::Tavern, Building::Forge, Building::Wall];
         if self.has(Feature::Pens) {
             all.push(Building::Pen);
+        }
+        if self.has(Feature::Arena) {
+            all.push(Building::Arena);
         }
         all.push(Building::Shrine([own, own]));
         // A shrine of two where the land touches another god's.

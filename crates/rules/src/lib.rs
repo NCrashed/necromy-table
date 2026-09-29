@@ -26,6 +26,7 @@ pub use game::Cargo;
 pub use game::EARLIEST_EVE;
 pub use game::LEGION;
 pub use game::RIVER_RUN;
+pub use game::{ARENA_WINS, BET_STAKE, DEBTORS, DUEL_ROUNDS, Debt, Duel, PlayerBet};
 pub use game::{
     Act, BEAST_DICE, BEAST_HEALTH, BEAST_RANGE, Bet, BodyVerb, Boon, CHOSEN, Champion, Character,
     Check, CheckKind, Cure, DISSOLVED, Deed, DuskStep, Event, FIRST_STYLE, FORESEE, FRIENDLY,

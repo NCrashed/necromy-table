@@ -82,6 +82,10 @@ enum ActionButton {
     Fair,
     /// A circle on the stones underfoot.
     DrawCircle,
+    /// Arena and debts: a challenge, a bet, a debt paid.
+    Challenge(necromy_rules::PlayerId),
+    BetOn(necromy_rules::PlayerId),
+    PayDebt(necromy_rules::PlayerId),
     /// Tether a beast in one's pen; untie one in a rival's.
     Tether(necromy_rules::Element),
     Untether(necromy_rules::Element),
@@ -544,6 +548,36 @@ fn rebuild_action(
                 format!("Поджечь\n{} Духа", necromy_rules::KINDLE_SPIRIT),
             ));
         }
+        if let Some(&rival) = g.challengeable(human).first() {
+            buttons.push((
+                ActionButton::Challenge(rival),
+                format!(
+                    "Вызвать\n{}",
+                    names::god_accusative(
+                        g.champion(rival)
+                            .map_or(necromy_rules::God::Ahamar, |c| c.god)
+                    )
+                ),
+            ));
+        }
+        if let Some(d) = g.debts().iter().find(|d| d.debtor == human) {
+            buttons.push((
+                ActionButton::PayDebt(d.creditor),
+                format!("Отдать долг\n{} Стиля", d.amount),
+            ));
+        }
+        if let Some(&rival) = g.bettable(human).first() {
+            buttons.push((
+                ActionButton::BetOn(rival),
+                format!(
+                    "Пари: {}\nвступит в бой",
+                    names::god(
+                        g.champion(rival)
+                            .map_or(necromy_rules::God::Ahamar, |c| c.god)
+                    )
+                ),
+            ));
+        }
         if let Some(&e) = g.tetherable(human).first() {
             buttons.push((ActionButton::Tether(e), "Привязать\nзверя".to_string()));
         }
@@ -666,6 +700,14 @@ fn action_buttons(
             ActionButton::Feast => Intent::Feast,
             ActionButton::Fair => Intent::Fair,
             ActionButton::DrawCircle => Intent::DrawCircle,
+            ActionButton::Challenge(rival) => Intent::Challenge { rival: *rival },
+            ActionButton::BetOn(rival) => Intent::BetOn {
+                rival: *rival,
+                bet: necromy_rules::Bet::Fight,
+            },
+            ActionButton::PayDebt(creditor) => Intent::PayDebt {
+                creditor: *creditor,
+            },
             ActionButton::Tether(element) => Intent::Tether { element: *element },
             ActionButton::Untether(element) => Intent::Untether { element: *element },
             ActionButton::Consecrate => Intent::Consecrate,

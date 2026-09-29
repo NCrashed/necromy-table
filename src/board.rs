@@ -221,7 +221,7 @@ struct MarkerSprites {
     /// Goods lying on the ground, a sack in its land's colour.
     goods: [Handle<Image>; 5],
     /// A building's sign (§21.8): tavern, forge, wall, and a shrine per god.
-    signs: [Handle<Image>; 4],
+    signs: [Handle<Image>; 5],
     shrines: [Handle<Image>; 5],
 }
 
@@ -348,6 +348,7 @@ fn spawn_board(
             [200, 84, 44],
             [150, 150, 160],
             [110, 170, 70],
+            [190, 40, 40],
         ]
         .map(|c| images.add(pixel_sprite(&SIGN_ROWS, c))),
         shrines: God::ALL.map(|g| images.add(pixel_sprite(&SIGN_ROWS, g.accent()))),
@@ -808,6 +809,7 @@ fn sync_markers(
                 necromy_rules::Building::Forge => sprites.signs[1].clone(),
                 necromy_rules::Building::Wall => sprites.signs[2].clone(),
                 necromy_rules::Building::Pen => sprites.signs[3].clone(),
+                necromy_rules::Building::Arena => sprites.signs[4].clone(),
                 necromy_rules::Building::Shrine([g, _]) => sprites.shrines[g.index()].clone(),
             };
             (hex, image, Vec3::new(0.45, 0.0, -0.2), TEXELS, false)

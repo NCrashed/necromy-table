@@ -5683,3 +5683,56 @@ fn choosing_the_walking_forest_brings_the_ent_into_the_deck() {
             .any(|d| d.def().effect == crate::cards::Effect::Ent)
     );
 }
+
+// ---- Arenas, bets and debts (§21.8) ----
+
+#[test]
+fn a_duel_never_fought_is_the_hosts() {
+    let (mut g, me, foe) = duel(4);
+    g.chosen[me.0 as usize] = Some(GreatDeed::Arena);
+    let town = Hex::new(0, 2);
+    settled(&mut g, me, town);
+    g.apply(
+        me,
+        Intent::Build {
+            building: Building::Arena,
+        },
+    )
+    .unwrap();
+    let mut ev = Vec::new();
+    g.challenge(me, foe, &mut ev).unwrap();
+    assert!(g.challengeable(me).is_empty(), "one duel at a time");
+    g.round += DUEL_ROUNDS;
+    g.duels_at_dusk(&mut ev);
+    assert_eq!(g.arena_wins(me), 1);
+    // A duel fought: the winner's, counted for the host if the host won.
+    let third = g.players().find(|&p| p != me && p != foe).unwrap();
+    g.challenge(me, third, &mut ev).unwrap();
+    g.settle_by_battle(me, third, &mut ev);
+    assert_eq!(g.arena_wins(me), 2);
+    g.arena_wins[me.0 as usize] = ARENA_WINS as u8;
+    assert!(g.checks(me, GreatDeed::Arena).iter().all(Check::met));
+}
+
+#[test]
+fn bets_between_players_make_debts_paid_in_style_or_blood() {
+    let (mut g, me, foe) = duel(4);
+    let mut ev = Vec::new();
+    g.place_bet(me, foe, Bet::Fight, &mut ev).unwrap();
+    g.note_bet(foe, Bet::Fight);
+    g.round += 2;
+    g.settle_player_bets(&mut ev);
+    assert_eq!(g.debtors(me), 1);
+    // Beaten by the debtor, the creditor loses the debt.
+    g.settle_by_battle(foe, me, &mut ev);
+    assert_eq!(g.debtors(me), 0);
+    // A bet lost: the bettor owes, and pays in Style.
+    g.place_bet(me, foe, Bet::Hide, &mut ev).unwrap();
+    g.round += 2;
+    g.settle_player_bets(&mut ev);
+    assert_eq!(g.debtors(foe), 1);
+    g.add_style(me, 5, StyleReason::Battle, &mut ev);
+    let before = g.style(foe);
+    g.pay_debt(me, foe, &mut ev).unwrap();
+    assert_eq!(g.style(foe), before + u16::from(BET_STAKE));
+}

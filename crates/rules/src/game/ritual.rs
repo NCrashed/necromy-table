@@ -266,7 +266,7 @@ impl Game {
                 matches!(c.cargo, Some(super::Cargo::Egg { .. }))
                     || c.companions.contains(&super::Companion::Dragon)
             });
-        if !mountain || about || !self.has(Feature::Dragons) {
+        if !mountain || about || !self.has(Feature::Dragons) || !self.has(Feature::Cargo) {
             return;
         }
         let egg = super::Cargo::Egg {

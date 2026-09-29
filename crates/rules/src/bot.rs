@@ -335,6 +335,13 @@ fn walk(game: &Game, player: PlayerId) -> Intent {
                 .min_by_key(|&hex| (me.hex.unsigned_distance_to(hex), hex.x(), hex.y())),
             _ => None,
         })
+        // Called to a duel: to the one who called.
+        .or_else(|| {
+            game.duels()
+                .iter()
+                .find(|d| d.rival == player)
+                .map(|d| hex_of(game, d.host))
+        })
         // Where its deed is made.
         .or_else(|| deed_goal(game, player))
         // Something lying close by.
@@ -473,6 +480,8 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
             | GreatDeed::Guest
             | GreatDeed::Ark
             | GreatDeed::WalkingForest
+            | GreatDeed::Arena
+            | GreatDeed::DebtBondage
             | GreatDeed::Amazon => wish(
                 God::Maya,
                 crate::Act::Veil {
@@ -678,6 +687,23 @@ fn deed_goal(game: &Game, player: PlayerId) -> Option<Hex> {
                     .collect(),
             )
         }
+        // An arena at home, and there to wait for the challenged.
+        GreatDeed::Arena => {
+            let me = game.champion(player)?.hex;
+            let arena = game
+                .buildings()
+                .find(|&(h, b)| b == crate::Building::Arena && game.owner(h) == Some(player))
+                .map(|(h, _)| h);
+            match arena {
+                Some(a) => (a != me).then_some(a),
+                None => game
+                    .claims()
+                    .filter(|&(h, p)| p == player && game.building(h).is_none() && h != me)
+                    .map(|(h, _)| h)
+                    .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y())),
+            }
+        }
+        GreatDeed::DebtBondage => None,
         // A grove to wake, while none of its own walks.
         GreatDeed::WalkingForest => {
             if game.walkers().any(|(_, p)| p == player) {
@@ -1032,6 +1058,47 @@ fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
     {
         return Some(Intent::Douse { hex });
     }
+    // A debt it can pay, it pays.
+    if let Some(d) = game
+        .debts()
+        .iter()
+        .find(|d| d.debtor == player && game.style(player) >= u16::from(d.amount))
+    {
+        return Some(Intent::PayDebt {
+            creditor: d.creditor,
+        });
+    }
+    match game.deed(player) {
+        Some(GreatDeed::Arena) => {
+            let can = game.may_build(player);
+            let arena = game
+                .buildings()
+                .any(|(h, b)| b == crate::Building::Arena && game.owner(h) == Some(player));
+            if !arena && can.contains(&crate::Building::Arena) && spirit_now >= crate::BUILD_SPIRIT
+            {
+                return Some(Intent::Build {
+                    building: crate::Building::Arena,
+                });
+            }
+            let me = game.champion(player)?.hex;
+            if let Some(rival) = game
+                .challengeable(player)
+                .into_iter()
+                .min_by_key(|&p| (hex_of(game, p).unsigned_distance_to(me), p.0))
+            {
+                return Some(Intent::Challenge { rival });
+            }
+        }
+        Some(GreatDeed::DebtBondage) => {
+            if let Some(&rival) = game.bettable(player).first() {
+                return Some(Intent::BetOn {
+                    rival,
+                    bet: crate::Bet::Fight,
+                });
+            }
+        }
+        _ => {}
+    }
     // Its walking grove: «Дикий энт» on the grove nearest the Table.
     if game.deed(player) == Some(GreatDeed::WalkingForest) {
         for card in game.playable(player) {
@@ -1106,7 +1173,7 @@ fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
             .iter()
             .find(|(_, c)| matches!(c, crate::Cargo::Egg { by, .. } if *by == Some(player)))
         {
-            if *egg == here && !burns(here) && game.cargo(player).is_none() {
+            if *egg == here && !burns(here) && game.takeable(player).is_some() {
                 return Some(Intent::Take);
             }
             if game.kindleable(player).contains(egg)

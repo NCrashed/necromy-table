@@ -303,6 +303,20 @@ pub fn great_deed(d: necromy_rules::GreatDeed) -> (&'static str, String) {
                 necromy_rules::GREAT_FIRE
             ),
         ),
+        GreatDeed::Arena => (
+            "Арена",
+            format!(
+                "Построй арену и вызывай на дуэль: {} выигранные дуэли (неявка вызванного — тоже победа).",
+                necromy_rules::ARENA_WINS
+            ),
+        ),
+        GreatDeed::DebtBondage => (
+            "Долговое рабство",
+            format!(
+                "Одновременно {} соперника у тебя в долгу по проигранным пари.",
+                necromy_rules::DEBTORS
+            ),
+        ),
         GreatDeed::WalkingForest => (
             "Шагающий лес",
             "Разбуди рощу картой «Дикий энт»: каждую ночь она шагает к Столу Ахамара и, дойдя, укореняется у него.".into(),
@@ -427,6 +441,8 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::DragonFollows => "за тобой идёт дракон",
         CheckKind::GuestHome => "гость доведён до Стола",
         CheckKind::GroveRooted => "твоя роща укоренилась у Стола",
+        CheckKind::ArenaWins => "дуэлей выиграно на твоей арене",
+        CheckKind::Debtors => "соперников у тебя в долгу",
         CheckKind::PenElements => "стихий зверей в твоём загоне",
         CheckKind::PenByShrine => "твоё святилище рядом",
         CheckKind::Crowned => "коронация на Столе",
@@ -552,6 +568,14 @@ pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {
         Feature::Roads => (
             "Дороги",
             "шаг по дороге стоит 1 на любой земле, дорога через реку — мост; на дороге не скрыться",
+        ),
+        Feature::Arena => (
+            "Арены",
+            "на поселении можно построить арену и вызывать соперников на дуэль; неявка — поражение",
+        ),
+        Feature::Debts => (
+            "Долги",
+            "можно поспорить с соперником, что он что-то сделает до заката; проигравший в долгу",
         ),
         Feature::WalkingGroves => (
             "Бродячие рощи",
@@ -1152,6 +1176,7 @@ pub fn building(b: necromy_rules::Building) -> String {
         Building::Forge => "кузня".into(),
         Building::Wall => "стена".into(),
         Building::Pen => "загон".into(),
+        Building::Arena => "арена".into(),
         Building::Shrine([a, b]) if a == b => format!("святилище {}", god_genitive(a)),
         Building::Shrine([a, b]) => {
             format!("святилище {} и {}", god_genitive(a), god_genitive(b))
