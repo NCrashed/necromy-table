@@ -195,6 +195,14 @@ pub enum Intent {
     Feast,
     /// On your turn, in a settlement of yours: open a fair.
     Fair,
+    /// On your turn: the ground underfoot becomes a graveyard (§21.8).
+    Consecrate,
+    /// On your turn: a plague pit underfoot.
+    DigPit,
+    /// On your turn, at your full pit: lay the bodies to rest or raise them.
+    SettlePit {
+        raise: bool,
+    },
     /// On your turn: a gift to the ruler beside you or underfoot (§21.8).
     Gift {
         hex: Hex,
@@ -776,6 +784,17 @@ pub enum Event {
     /// A road on `hex` (§21.8).
     RoadLaid {
         hex: Hex,
+    },
+    /// `player` buried a body on `hex` (§21.8).
+    Buried {
+        player: PlayerId,
+        hex: Hex,
+    },
+    /// `player` settled their pit on `hex`: raised as the dead, or at rest.
+    PitSettled {
+        player: PlayerId,
+        hex: Hex,
+        raised: bool,
     },
     /// `player` gave the ruler on `hex` a gift worth `worth` (§21.8).
     Gifted {
@@ -1396,6 +1415,11 @@ pub struct Game {
     buildings: BTreeMap<(i32, i32), buildings::Building>,
     /// Roads of the register (§21.8).
     roads: std::collections::BTreeSet<(i32, i32)>,
+    /// Bodies buried in graveyards, plague pits, and who settled a pit
+    /// (§21.8).
+    graves: BTreeMap<(i32, i32), u8>,
+    pits: BTreeMap<(i32, i32), burial::Pit>,
+    plague_done: Vec<bool>,
     /// Rulers of settlements (§21.8), the emperor, and who has been crowned.
     rulers: BTreeMap<(i32, i32), rulers::Ruler>,
     emperor: Option<PlayerId>,
@@ -1547,6 +1571,9 @@ impl Game {
             stores: BTreeMap::new(),
             fairs: BTreeMap::new(),
             rulers: BTreeMap::new(),
+            graves: BTreeMap::new(),
+            pits: BTreeMap::new(),
+            plague_done: vec![false; champions_len],
             emperor: None,
             crowned: vec![false; champions_len],
             dead_feasts: vec![0; champions_len],
@@ -2079,6 +2106,9 @@ impl Game {
             Intent::Sow => self.sow(player, events),
             Intent::Feast => self.hold_feast(player, events),
             Intent::Fair => self.open_fair(player, events),
+            Intent::Consecrate => self.consecrate(player, events),
+            Intent::DigPit => self.dig_pit(player, events),
+            Intent::SettlePit { raise } => self.settle_pit(player, raise, events),
             Intent::Gift { hex } => self.gift(player, hex, events),
             Intent::Betroth { a, b } => self.betroth(player, a, b, events),
             Intent::Coronation => self.coronation(player, events),
@@ -2120,6 +2150,8 @@ impl Game {
             Intent::Sow => self.check_sow(player),
             Intent::Feast => self.check_feast(player),
             Intent::Fair => self.check_fair(player),
+            Intent::Consecrate | Intent::DigPit => self.check_consecrate(player),
+            Intent::SettlePit { .. } => self.check_settle_pit(player),
             Intent::Gift { hex } => self.check_gift(player, hex),
             Intent::Betroth { a, b } => self.check_betroth(player, a, b),
             Intent::Coronation => self.check_crown(player),
@@ -2398,6 +2430,7 @@ impl Game {
     fn end_turn(&mut self, player: PlayerId, events: &mut Vec<Event>) {
         events.push(Event::TurnEnded { player });
         self.turns[player.0 as usize].phase = Phase::Done;
+        self.pit_fumes(player, events);
         // Ending the turn on a temple is a prayer to its god; on a shrine, to
         // its gods (§21.8).
         let hex = self.hex_of(player);
@@ -2593,6 +2626,9 @@ impl Game {
             | Intent::Sow
             | Intent::Feast
             | Intent::Fair
+            | Intent::Consecrate
+            | Intent::DigPit
+            | Intent::SettlePit { .. }
             | Intent::Gift { .. }
             | Intent::Betroth { .. }
             | Intent::Coronation
@@ -3438,6 +3474,7 @@ impl Game {
 mod battle;
 mod beasts;
 mod buildings;
+mod burial;
 mod cargo;
 mod companions;
 mod creation;
@@ -3467,6 +3504,7 @@ mod world;
 pub use battle::Score;
 pub use beasts::{BEAST_DICE, BEAST_HEALTH, BEAST_RANGE};
 pub use buildings::{BUILD_SPIRIT, Building, QUARTER_SPIRIT, WALLED_MILITIA};
+pub use burial::{CONSECRATE_SPIRIT, NECROPOLIS, NECROPOLIS_BODIES, PIT_BODIES, Pit};
 pub use cargo::Cargo;
 pub use companions::{COMPANION_DICE, Companion, ENLIST_SPIRIT, RETINUE, TAME_SPIRIT};
 pub use dusk::{DuskStep, Seal, SealedWish};

@@ -554,6 +554,17 @@ fn tooltip(
             "пожар{whose}: войти — обжечься; в ход мира перекинется дальше"
         ));
     }
+    if g.graves(hex) > 0 {
+        lines.push(format!("погребено: {}", g.graves(hex)));
+    }
+    if let Some(pit) = g.pit(hex) {
+        lines.push(format!(
+            "чумная яма {}: тел {}/{}",
+            game.name_genitive(pit.owner),
+            pit.bodies,
+            necromy_rules::PIT_BODIES
+        ));
+    }
     if let Some(r) = g.ruler(hex) {
         let mut says = vec![format!("к тебе {:+}", r.regard_for(game.human))];
         if let Some(p) = r.sworn {

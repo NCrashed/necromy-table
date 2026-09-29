@@ -80,6 +80,10 @@ enum ActionButton {
     Feast,
     /// Open a fair in the settlement underfoot.
     Fair,
+    /// Burial: a graveyard, a pit, a pit settled.
+    Consecrate,
+    DigPit,
+    SettlePit(bool),
     /// Rulers: a gift, a betrothal, the crown, discord.
     Gift(hexx::Hex),
     Betroth(hexx::Hex, hexx::Hex),
@@ -535,6 +539,17 @@ fn rebuild_action(
                 format!("Поджечь\n{} Духа", necromy_rules::KINDLE_SPIRIT),
             ));
         }
+        if g.may_settle_pit(human) {
+            buttons.push((ActionButton::SettlePit(false), "Упокоить\nяму".to_string()));
+            buttons.push((
+                ActionButton::SettlePit(true),
+                "Поднять\nмертвецов".to_string(),
+            ));
+        }
+        if g.may_consecrate(human) && spirit >= necromy_rules::CONSECRATE_SPIRIT {
+            buttons.push((ActionButton::Consecrate, "Освятить\nкладбище".to_string()));
+            buttons.push((ActionButton::DigPit, "Вырыть\nяму".to_string()));
+        }
         if g.may_crown(human) {
             buttons.push((ActionButton::Coronation, "Коронация\nна Столе".to_string()));
         }
@@ -633,6 +648,9 @@ fn action_buttons(
             ActionButton::Sow => Intent::Sow,
             ActionButton::Feast => Intent::Feast,
             ActionButton::Fair => Intent::Fair,
+            ActionButton::Consecrate => Intent::Consecrate,
+            ActionButton::DigPit => Intent::DigPit,
+            ActionButton::SettlePit(raise) => Intent::SettlePit { raise: *raise },
             ActionButton::Gift(hex) => Intent::Gift { hex: *hex },
             ActionButton::Betroth(a, b) => Intent::Betroth { a: *a, b: *b },
             ActionButton::Coronation => Intent::Coronation,

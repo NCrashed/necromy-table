@@ -108,6 +108,13 @@ impl Game {
     /// The age at which the body on `hex` rises, if it ever does.
     fn rising_age(&self, hex: Hex) -> Option<u8> {
         let tile = self.board.tile(hex)?;
+        // Consecrated ground and pits keep their dead (§21.8).
+        if matches!(
+            tile.terrain,
+            crate::board::Terrain::Graveyard | crate::board::Terrain::Pit
+        ) {
+            return None;
+        }
         // The yin gods' lands keep their dead restless unless their god is
         // in the light: sooner still when it is dark.
         let yin_stage = tile

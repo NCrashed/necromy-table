@@ -146,7 +146,9 @@ pub fn terrain_icon(terrain: Terrain) -> Option<Image> {
         | Terrain::River
         | Terrain::Lake
         | Terrain::Ash
-        | Terrain::Fields => {
+        | Terrain::Fields
+        | Terrain::Graveyard
+        | Terrain::Pit => {
             return None;
         }
         Terrain::Mountain => {

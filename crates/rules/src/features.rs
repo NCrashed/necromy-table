@@ -69,10 +69,12 @@ pub enum Feature {
     Fairs,
     /// Rulers of settlements: gifts, oaths, marriages, feuds.
     Rulers,
+    /// Graveyards and plague pits: the buried never rise.
+    Burial,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 26] = [
+    pub const ALL: [Feature; 27] = [
         Feature::Bodies,
         Feature::Groves,
         Feature::Settlements,
@@ -99,6 +101,7 @@ impl Feature {
         Feature::Goods,
         Feature::Fairs,
         Feature::Rulers,
+        Feature::Burial,
     ];
 
     /// What the world must have before this can come in (§21.2): all of
@@ -119,6 +122,7 @@ impl Feature {
             Feature::Goods => &[Has(Feature::Settlements), Has(Feature::Cargo)],
             Feature::Fairs => &[Has(Feature::Goods)],
             Feature::Rulers => &[Has(Feature::Settlements)],
+            Feature::Burial => &[Has(Feature::Bodies), Has(Feature::Cargo)],
             Feature::Fires => &[Land(&[Terrain::Forest, Terrain::Grove])],
             Feature::Piranhas => &[Has(Feature::Beasts), Has(Feature::Rivers)],
             Feature::Groves | Feature::Undead => &[Has(Feature::Bodies)],
@@ -152,7 +156,11 @@ impl Feature {
             | Feature::Fires
             | Feature::Goods
             | Feature::Fairs => God::Trishna,
-            Feature::Bodies | Feature::Poison | Feature::Trials | Feature::Legion => God::Zaga,
+            Feature::Bodies
+            | Feature::Poison
+            | Feature::Trials
+            | Feature::Legion
+            | Feature::Burial => God::Zaga,
             Feature::Militia
             | Feature::Loot
             | Feature::Guard

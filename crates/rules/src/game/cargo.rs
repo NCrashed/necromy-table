@@ -101,6 +101,7 @@ impl Game {
             return;
         };
         match cargo {
+            Cargo::Body { .. } if self.bury(player, hex, events) => {}
             Cargo::Body { hero } => match self.board.tile_mut(hex) {
                 Some(tile) if tile.corpse.is_none() && tile.terrain.is_land() => {
                     tile.corpse = Some(Corpse { age: 0, hero });

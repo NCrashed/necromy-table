@@ -100,6 +100,8 @@ impl Game {
         }
         self.put_out(hex, events);
         if terrain == Terrain::Lake {
+            self.graves.remove(&key);
+            self.pits.remove(&key);
             self.wash_road(hex);
             self.traps.retain(|t| t.hex != hex);
             self.ground.retain(|(h, _)| *h != hex);

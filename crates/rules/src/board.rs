@@ -46,6 +46,10 @@ pub enum Terrain {
     Ash,
     /// A field beside a settlement: food at dusk (§21.8).
     Fields,
+    /// Consecrated ground: bodies buried here never rise (§21.8).
+    Graveyard,
+    /// A plague pit: bodies thrown in rot and poison the ground about.
+    Pit,
 }
 
 impl Terrain {

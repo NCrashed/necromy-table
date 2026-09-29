@@ -47,6 +47,9 @@ pub enum Novelty {
     HeldFair,
     /// A gift to a ruler.
     Gifted,
+    /// Ground consecrated, a body buried.
+    Consecrated,
+    Buried,
     /// A wish of this kind, granted.
     Wished(WishKind),
     /// A mechanic brought into the world.

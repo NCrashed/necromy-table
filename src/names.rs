@@ -173,6 +173,8 @@ pub fn novelty(n: necromy_rules::Novelty) -> String {
         Novelty::Feasted => "устраивает пир".into(),
         Novelty::HeldFair => "открывает ярмарку".into(),
         Novelty::Gifted => "одаривает правителя".into(),
+        Novelty::Consecrated => "освящает кладбище".into(),
+        Novelty::Buried => "хоронит тело".into(),
         Novelty::Sacrificed => "отдаёт предмет богу".into(),
         Novelty::Hid => "уходит в тень".into(),
         Novelty::FinishedLine => "доводит до конца свою историю".into(),
@@ -212,6 +214,14 @@ pub fn terrain(terrain: necromy_rules::Terrain) -> (&'static str, &'static str) 
         Terrain::Fields => (
             "Поле",
             "на закате рождает еду; еду носят ношей в своё поселение",
+        ),
+        Terrain::Graveyard => (
+            "Кладбище",
+            "тело, положенное или оставленное здесь, не встаёт мертвецом",
+        ),
+        Terrain::Pit => (
+            "Чумная яма",
+            "тела гниют вместе; кто кончит ход рядом — отравлен",
         ),
     }
 }
@@ -292,6 +302,21 @@ pub fn great_deed(d: necromy_rules::GreatDeed) -> (&'static str, String) {
                 necromy_rules::GREAT_FIRE
             ),
         ),
+        GreatDeed::Necropolis => (
+            "Некрополь",
+            format!(
+                "Кладбище из {} клеток подряд, на нём погребено {} тел, и на закате в краю Заги ни одного мертвеца.",
+                necromy_rules::NECROPOLIS,
+                necromy_rules::NECROPOLIS_BODIES
+            ),
+        ),
+        GreatDeed::PlaguePit => (
+            "Чумная яма",
+            format!(
+                "Вырой яму, брось в неё {} тел и реши их участь: упокоить или поднять.",
+                necromy_rules::PIT_BODIES
+            ),
+        ),
         GreatDeed::TripleUnion => (
             "Тройная уния",
             format!(
@@ -364,6 +389,10 @@ pub fn check(kind: necromy_rules::CheckKind) -> &'static str {
         CheckKind::FairGoods => "товаров продано на твоей ярмарке",
         CheckKind::DeadFeasts => "твоих ярмарок съели мертвецы",
         CheckKind::UnionLands => "краёв связано твоими браками",
+        CheckKind::NecropolisSize => "клеток кладбища подряд",
+        CheckKind::NecropolisBodies => "погребено на нём",
+        CheckKind::ZagaQuiet => "в краю Заги нет мертвецов",
+        CheckKind::PitSettled => "твоя яма упокоена или поднята",
         CheckKind::Crowned => "коронация на Столе",
         CheckKind::Feuding => "бывших вассалов в распре",
         CheckKind::RiverLength => "клеток самой длинной реки",
@@ -487,6 +516,10 @@ pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {
         Feature::Roads => (
             "Дороги",
             "шаг по дороге стоит 1 на любой земле, дорога через реку — мост; на дороге не скрыться",
+        ),
+        Feature::Burial => (
+            "Погребение",
+            "клетку можно освятить под кладбище или вырыть чумную яму; погребённые не встают",
         ),
         Feature::Rulers => (
             "Правители",

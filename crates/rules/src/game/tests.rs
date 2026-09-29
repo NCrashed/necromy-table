@@ -5430,3 +5430,69 @@ fn an_emperor_breaks_the_empire_and_a_gift_ends_a_feud() {
     g.gift(foe, courts[1], &mut ev).unwrap();
     assert_eq!(g.feuding(me), 2);
 }
+
+// ---- Burial (§21.8) ----
+
+#[test]
+fn the_buried_never_rise_and_a_necropolis_needs_zagas_land_quiet() {
+    let (mut g, me, _) = duel(4);
+    g.chosen[me.0 as usize] = Some(GreatDeed::Necropolis);
+    let yard = [Hex::new(0, 2), Hex::new(1, 2), Hex::new(-1, 2)];
+    for h in yard {
+        set_terrain(&mut g, h, Terrain::Plains);
+    }
+    g.place(me, yard[0]);
+    g.champ_mut(me).spirit_points = 3;
+    g.apply(me, Intent::Consecrate).unwrap();
+    assert_eq!(g.board().tile(yard[0]).unwrap().terrain, Terrain::Graveyard);
+    // A body left lying there does not rise.
+    g.board.tile_mut(yard[0]).unwrap().corpse = Some(Corpse {
+        age: 9,
+        hero: false,
+    });
+    let mut ev = Vec::new();
+    g.raise_dead(&mut ev);
+    assert!(g.board().tile(yard[0]).unwrap().corpse.is_some());
+    g.board.tile_mut(yard[0]).unwrap().corpse = None;
+    for h in &yard[1..] {
+        set_terrain(&mut g, *h, Terrain::Graveyard);
+    }
+    for _ in 0..NECROPOLIS_BODIES {
+        g.champ_mut(me).cargo = Some(Cargo::Body { hero: false });
+        g.drop_cargo(me, yard[0], &mut ev);
+    }
+    assert_eq!(g.best_necropolis(), (NECROPOLIS, NECROPOLIS_BODIES));
+    g.mobs.clear();
+    assert!(g.checks(me, GreatDeed::Necropolis).iter().all(Check::met));
+    let zaga = g
+        .board()
+        .land()
+        .find(|(_, t)| t.region == Some(God::Zaga))
+        .map(|(h, _)| h)
+        .unwrap();
+    undead_on(&mut g, zaga, 2);
+    assert!(!g.checks(me, GreatDeed::Necropolis).iter().all(Check::met));
+}
+
+#[test]
+fn a_full_pit_is_laid_to_rest_or_raised() {
+    let (mut g, me, foe) = duel(2);
+    let pit = Hex::new(0, 0);
+    set_terrain(&mut g, pit, Terrain::Plains);
+    g.champ_mut(me).spirit_points = 3;
+    g.apply(me, Intent::DigPit).unwrap();
+    let mut ev = Vec::new();
+    for _ in 0..PIT_BODIES {
+        g.champ_mut(me).cargo = Some(Cargo::Body { hero: false });
+        g.drop_cargo(me, pit, &mut ev);
+    }
+    // Its fumes poison the neighbours.
+    g.place(foe, Hex::new(1, 0));
+    g.pit_fumes(foe, &mut ev);
+    assert!(g.champion(foe).unwrap().poison.is_some());
+    g.chosen[me.0 as usize] = Some(GreatDeed::PlaguePit);
+    g.apply(me, Intent::SettlePit { raise: true }).unwrap();
+    assert!(g.settled_pit(me));
+    assert!(g.checks(me, GreatDeed::PlaguePit).iter().all(Check::met));
+    assert!(g.mobs().iter().filter(|m| m.is_undead()).count() >= 3);
+}

@@ -466,6 +466,8 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
             | GreatDeed::DeadFeast
             | GreatDeed::TripleUnion
             | GreatDeed::FallenEmpire
+            | GreatDeed::Necropolis
+            | GreatDeed::PlaguePit
             | GreatDeed::Amazon => wish(
                 God::Maya,
                 crate::Act::Veil {
@@ -580,6 +582,63 @@ fn deed_goal(game: &Game, player: PlayerId) -> Option<Hex> {
         }
         GreatDeed::Amazon => None,
         GreatDeed::Roads => None,
+        // Ground to consecrate by the graveyard, bodies to bring to it or the
+        // pit, the dead to clear from Zaga's land.
+        GreatDeed::Necropolis | GreatDeed::PlaguePit => {
+            let me = game.champion(player)?.hex;
+            let nearest = |hexes: Vec<Hex>| {
+                hexes
+                    .into_iter()
+                    .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
+            };
+            let ground = |t: crate::Terrain| {
+                game.board()
+                    .land()
+                    .filter(move |(_, x)| x.terrain == t)
+                    .map(|(h, _)| h)
+            };
+            let carrying = matches!(game.cargo(player), Some(crate::Cargo::Body { .. }));
+            if game.deed(player) == Some(GreatDeed::PlaguePit) {
+                let pit = game.pits().find(|(_, p)| p.owner == player).map(|(h, _)| h);
+                return match pit {
+                    Some(pit) if carrying || game.may_settle_pit(player) => Some(pit),
+                    _ => nearest(game.board().corpses().map(|(h, _)| h).collect()),
+                };
+            }
+            let (size, _) = game.best_necropolis();
+            if size < crate::NECROPOLIS {
+                let yard: Vec<Hex> = ground(crate::Terrain::Graveyard).collect();
+                return nearest(
+                    game.board()
+                        .land()
+                        .filter(|(h, t)| {
+                            matches!(t.terrain, crate::Terrain::Plains | crate::Terrain::Ash)
+                                && (yard.is_empty()
+                                    || h.all_neighbors().iter().any(|n| yard.contains(n)))
+                                && game.occupant(*h).is_none_or(|p| p == player)
+                        })
+                        .map(|(h, _)| h)
+                        .collect(),
+                );
+            }
+            if carrying {
+                return nearest(ground(crate::Terrain::Graveyard).collect());
+            }
+            if !game.zaga_land_quiet() {
+                return nearest(
+                    game.mobs()
+                        .iter()
+                        .filter(|m| {
+                            m.is_undead()
+                                && game.board().tile(m.hex).and_then(|t| t.region)
+                                    == Some(God::Zaga)
+                        })
+                        .map(|m| m.hex)
+                        .collect(),
+                );
+            }
+            nearest(game.board().corpses().map(|(h, _)| h).collect())
+        }
         // Rulers to win over; for the empire the Table once three are sworn,
         // then a vassal to set against the rest.
         GreatDeed::TripleUnion | GreatDeed::FallenEmpire => {
@@ -806,6 +865,44 @@ fn deed_work(game: &Game, player: PlayerId) -> Option<Intent> {
         })
     {
         return Some(Intent::Douse { hex });
+    }
+    // Its graveyard or its pit: consecrate, dig, bury, settle.
+    if matches!(
+        game.deed(player),
+        Some(GreatDeed::Necropolis | GreatDeed::PlaguePit)
+    ) {
+        let here = game.champion(player)?.hex;
+        let terrain = game.board().tile(here).map(|t| t.terrain);
+        let carrying = matches!(game.cargo(player), Some(crate::Cargo::Body { .. }));
+        if game.may_settle_pit(player) {
+            return Some(Intent::SettlePit { raise: false });
+        }
+        let pit_of_mine = game.pit(here).is_some_and(|p| p.owner == player);
+        if carrying && (terrain == Some(crate::Terrain::Graveyard) || pit_of_mine) {
+            return Some(Intent::Lay);
+        }
+        if !carrying && matches!(game.takeable(player), Some(crate::Cargo::Body { .. })) {
+            return Some(Intent::Take);
+        }
+        if game.may_consecrate(player) && spirit_now >= crate::CONSECRATE_SPIRIT {
+            if game.deed(player) == Some(GreatDeed::PlaguePit) {
+                if !game.pits().any(|(_, p)| p.owner == player) {
+                    return Some(Intent::DigPit);
+                }
+            } else {
+                let yard: Vec<Hex> = game
+                    .board()
+                    .land()
+                    .filter(|(_, t)| t.terrain == crate::Terrain::Graveyard)
+                    .map(|(h, _)| h)
+                    .collect();
+                let beside =
+                    yard.is_empty() || here.all_neighbors().iter().any(|n| yard.contains(n));
+                if beside && game.best_necropolis().0 < crate::NECROPOLIS {
+                    return Some(Intent::Consecrate);
+                }
+            }
+        }
     }
     // A rival's Fallen Empire on its eve: a gift makes peace.
     if spirit_now >= 1

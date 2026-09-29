@@ -904,6 +904,8 @@ fn ground_color(tile: &RulesTile, painted: bool, stage: Option<u8>) -> Color {
             Terrain::Lake => [0.12, 0.30, 0.62],
             Terrain::Ash => [0.24, 0.22, 0.22],
             Terrain::Fields => [0.80, 0.70, 0.30],
+            Terrain::Graveyard => [0.40, 0.42, 0.36],
+            Terrain::Pit => [0.30, 0.26, 0.16],
         }
     };
     let tint = tile

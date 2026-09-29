@@ -67,6 +67,8 @@ impl Game {
         self.loads.retain(|(h, _)| *h != hex);
         self.wash_road(hex);
         self.put_out(hex, events);
+        self.graves.remove(&key);
+        self.pits.remove(&key);
         self.buildings.remove(&key);
         self.claims.remove(&key);
         self.militia.remove(&key);
@@ -354,7 +356,8 @@ impl Game {
             | Feature::Companions
             | Feature::Legion
             | Feature::Piranhas
-            | Feature::Fairs => {}
+            | Feature::Fairs
+            | Feature::Burial => {}
         }
     }
 

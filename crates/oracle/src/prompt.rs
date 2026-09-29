@@ -180,6 +180,7 @@ pub fn feature_id(f: Feature) -> &'static str {
         Feature::Goods => "goods",
         Feature::Fairs => "fairs",
         Feature::Rulers => "rulers",
+        Feature::Burial => "burial",
     }
 }
 
@@ -212,6 +213,7 @@ fn feature_words(f: Feature) -> &'static str {
         Feature::Goods => "товары краёв и обозы",
         Feature::Fairs => "ярмарки",
         Feature::Rulers => "правители поселений: дары, присяга, браки",
+        Feature::Burial => "кладбища и чумные ямы",
     }
 }
 

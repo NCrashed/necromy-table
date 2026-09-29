@@ -54,6 +54,11 @@ pub enum GreatDeed {
     FairOfFive,
     /// Three fairs of yours eaten by the dead.
     DeadFeast,
+    /// A graveyard of three hexes with five buried in it, and no undead in
+    /// Zaga's land at dusk.
+    Necropolis,
+    /// A plague pit of yours filled with five bodies and settled.
+    PlaguePit,
     /// Marriages of your making binding three lands into one house.
     TripleUnion,
     /// Crowned over three vassals, then their oaths broken and three of
@@ -65,7 +70,7 @@ pub enum GreatDeed {
 }
 
 impl GreatDeed {
-    pub const ALL: [GreatDeed; 16] = [
+    pub const ALL: [GreatDeed; 18] = [
         GreatDeed::WorldTree,
         GreatDeed::Island,
         GreatDeed::DissolvedLand,
@@ -82,6 +87,8 @@ impl GreatDeed {
         GreatDeed::DeadFeast,
         GreatDeed::TripleUnion,
         GreatDeed::FallenEmpire,
+        GreatDeed::Necropolis,
+        GreatDeed::PlaguePit,
     ];
 
     /// The god whose deed it is: its card's colour, its voice.
@@ -98,7 +105,10 @@ impl GreatDeed {
             | GreatDeed::FairOfFive
             | GreatDeed::DeadFeast => God::Trishna,
             GreatDeed::Roads | GreatDeed::FallenEmpire => God::Ahamar,
-            GreatDeed::Reconciliation | GreatDeed::Legion => God::Zaga,
+            GreatDeed::Reconciliation
+            | GreatDeed::Legion
+            | GreatDeed::Necropolis
+            | GreatDeed::PlaguePit => God::Zaga,
         }
     }
 
@@ -114,6 +124,13 @@ impl GreatDeed {
             GreatDeed::River => &[Feature::Rivers],
             GreatDeed::Roads => &[Feature::Settlements, Feature::Roads],
             GreatDeed::GreatFire => &[Feature::Fires],
+            GreatDeed::Necropolis => &[
+                Feature::Bodies,
+                Feature::Undead,
+                Feature::Cargo,
+                Feature::Burial,
+            ],
+            GreatDeed::PlaguePit => &[Feature::Bodies, Feature::Cargo, Feature::Burial],
             GreatDeed::TripleUnion | GreatDeed::FallenEmpire => {
                 &[Feature::Settlements, Feature::Rulers]
             }
@@ -185,6 +202,14 @@ pub enum CheckKind {
     FairGoods,
     /// Fairs of yours the dead have eaten.
     DeadFeasts,
+    /// Graveyard hexes side by side.
+    NecropolisSize,
+    /// Bodies buried in it.
+    NecropolisBodies,
+    /// No undead in Zaga's land.
+    ZagaQuiet,
+    /// A plague pit of yours settled.
+    PitSettled,
     /// Lands bound by your marriages.
     UnionLands,
     /// You have been crowned.
@@ -381,6 +406,23 @@ impl Game {
                 ]
             }
             GreatDeed::Roads => vec![check(CheckKind::TemplesLinked, self.temples_linked(), 5)],
+            GreatDeed::Necropolis => {
+                let (size, buried) = self.best_necropolis();
+                vec![
+                    check(CheckKind::NecropolisSize, size, super::NECROPOLIS),
+                    check(
+                        CheckKind::NecropolisBodies,
+                        buried,
+                        super::NECROPOLIS_BODIES,
+                    ),
+                    check(CheckKind::ZagaQuiet, usize::from(self.zaga_land_quiet()), 1),
+                ]
+            }
+            GreatDeed::PlaguePit => vec![check(
+                CheckKind::PitSettled,
+                usize::from(self.settled_pit(player)),
+                1,
+            )],
             GreatDeed::TripleUnion => vec![check(
                 CheckKind::UnionLands,
                 self.union_lands(player),
