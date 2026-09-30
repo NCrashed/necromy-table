@@ -130,6 +130,8 @@ impl Game {
             Act::Flood => Feature::Lakes,
             Act::Road => Feature::Roads,
             Act::Fire => Feature::Fires,
+            Act::Treasure => Feature::Loot,
+            Act::Ordeal => Feature::Trials,
             _ => return None,
         };
         (!self.has(needs)).then_some(needs)

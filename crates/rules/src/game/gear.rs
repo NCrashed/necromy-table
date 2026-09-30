@@ -28,6 +28,8 @@ pub enum Gain {
     Loot,
     /// Picked up from the ground.
     Ground,
+    /// Given by a god: a wish, or its joy at turning light.
+    Gift(God),
 }
 
 impl Game {
@@ -193,6 +195,23 @@ impl Game {
         if let Some(item) = self.loot.pop() {
             self.equip(player, item, Gain::Loot, events);
         }
+    }
+
+    /// `god` gives `player` an item from the loot deck: one of its own
+    /// element if the deck holds one, else the top.
+    pub(super) fn god_gift(&mut self, player: PlayerId, god: God, events: &mut Vec<Event>) {
+        if !self.has(super::Feature::Loot) {
+            return;
+        }
+        let own = self
+            .loot
+            .iter()
+            .rposition(|i| i.def().element == god.element());
+        let Some(at) = own.or(self.loot.len().checked_sub(1)) else {
+            return;
+        };
+        let item = self.loot.remove(at);
+        self.equip(player, item, Gain::Gift(god), events);
     }
 
     /// `item` goes into its slot; what was there drops where they stand.

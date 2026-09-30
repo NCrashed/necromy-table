@@ -506,6 +506,8 @@ pub fn wish(kind: necromy_rules::WishKind) -> &'static str {
         WishKind::Road => "Проложи дорогу реестра",
         WishKind::Fire => "Подожги лес",
         WishKind::Awaken => "Принеси в мир новое",
+        WishKind::Treasure => "Дай мне сокровище",
+        WishKind::Ordeal => "Испытай меня",
     }
 }
 

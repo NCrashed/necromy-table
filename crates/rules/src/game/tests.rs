@@ -5811,3 +5811,71 @@ fn a_treasury_under_ruins_is_dug_guarded_and_raided() {
     g.work_delve(foe, DelveWork::Raid, &mut ev).unwrap();
     assert_eq!(g.treasury_held(me), 0);
 }
+
+#[test]
+fn a_treasure_wish_gives_an_item_of_the_gods_own() {
+    let (mut g, me, _) = duel(3);
+    assert!(g.has(Feature::Loot));
+    let events = wish_now(&mut g, me, God::Bhava, Act::Treasure);
+    let item = events
+        .iter()
+        .find_map(|e| match e {
+            Event::ItemGained {
+                player,
+                item,
+                from: Gain::Gift(God::Bhava),
+            } if *player == me => Some(*item),
+            _ => None,
+        })
+        .expect("Bhava gives an item");
+    assert_eq!(item.def().element, God::Bhava.element());
+    assert!(!g.loot.contains(&item));
+}
+
+#[test]
+fn an_ordeal_wish_sets_a_trial_near_and_tells_them_to_pass_it() {
+    let (mut g, me, _) = duel(3);
+    g.trials.clear();
+    let events = wish_now(&mut g, me, God::Zaga, Act::Ordeal);
+    let trial = events
+        .iter()
+        .find_map(|e| match e {
+            Event::TrialSet { trial } => Some(trial.clone()),
+            _ => None,
+        })
+        .expect("a trial is set");
+    let d = trial.hex.unsigned_distance_to(g.champion(me).unwrap().hex);
+    assert!((2..=4).contains(&d), "{d} hexes away");
+    assert!(
+        g.lines_of(me)
+            .any(|l| l.goal == Goal::PassTrial(trial.hex) && l.god == trial.god)
+    );
+}
+
+#[test]
+fn a_god_turning_light_gifts_the_one_it_favours_most() {
+    let (mut g, me, foe) = duel(3);
+    let god = God::Bhava;
+    let i = god.index();
+    let lighten = |g: &mut Game| {
+        g.pantheon.stages[i] = 1;
+        g.pantheon.pressure[i] = -STAGE_THRESHOLD;
+        let mut events = Vec::new();
+        g.shift_stages(&mut events);
+        events
+    };
+    g.favor[me.0 as usize][i] = SIGN + 1;
+    g.favor[foe.0 as usize][i] = SIGN;
+    let events = lighten(&mut g);
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::ItemGained { player, from: Gain::Gift(God::Bhava), .. } if *player == me
+    )));
+    // A tie at the top, or nobody at its Sign: no gift.
+    g.favor[foe.0 as usize][i] = SIGN + 1;
+    assert!(
+        !lighten(&mut g)
+            .iter()
+            .any(|e| matches!(e, Event::ItemGained { .. }))
+    );
+}

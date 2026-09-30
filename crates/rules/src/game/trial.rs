@@ -303,6 +303,56 @@ impl Game {
         Some(god)
     }
 
+    /// A wish's trial (§7.3): `god` sets one 2–4 hexes from `player`, on
+    /// its own land if it can, and tells them to pass it.
+    pub(super) fn wished_trial(&mut self, player: PlayerId, god: God, events: &mut Vec<Event>) {
+        let at = self.hex_of(player);
+        let own = self.trial_spots(Some((at, 2, 4)), Some(god));
+        let spot = if own.is_empty() {
+            self.trial_spot(Some((at, 2, 4)))
+        } else {
+            self.rng.pick(&own).copied()
+        };
+        if let Some(hex) = spot
+            && let Some(god) = self.set_trial(hex, events)
+        {
+            self.tell_ordeal(player, god, hex, events);
+        }
+    }
+
+    /// Free hexes for a trial, as `trial_spot` takes them; only `god`'s
+    /// land if one is given.
+    fn trial_spots(&self, near: Option<(Hex, u32, u32)>, god: Option<God>) -> Vec<Hex> {
+        self.board
+            .tiles()
+            .filter(|(_, t)| god.is_none_or(|g| t.region == Some(g)))
+            .map(|(h, _)| h)
+            .filter(|&h| self.trial_free(h, near))
+            .collect()
+    }
+
+    /// `hex` may take a trial: free land of some god's, away from everyone.
+    fn trial_free(&self, h: Hex, near: Option<(Hex, u32, u32)>) -> bool {
+        let Some(t) = self.board.tile(h) else {
+            return false;
+        };
+        t.region.is_some()
+            && t.terrain.is_land()
+            && !matches!(
+                t.terrain,
+                Terrain::Settlement | Terrain::Temple | Terrain::Table
+            )
+            && t.corpse.is_none()
+            && self.trial_at(h).is_none()
+            && self.champion_at(h).is_none()
+            && !self.mob_at(h)
+            && !self.traps.iter().any(|tr| tr.hex == h)
+            && self.players().all(|p| {
+                self.champions[p.0 as usize].hex.unsigned_distance_to(h) >= TRIAL_CLEARANCE
+            })
+            && near.is_none_or(|(c, lo, hi)| (lo..=hi).contains(&c.unsigned_distance_to(h)))
+    }
+
     /// A free hex of some god's land, away from everyone; `near` asks for
     /// one within a distance range of a hex. Stones are the gods' first
     /// choice (§20.2): standing stones are where a god tests people.
@@ -310,26 +360,7 @@ impl Game {
         let spots: Vec<(Hex, bool)> = self
             .board
             .tiles()
-            .filter(|(h, t)| {
-                t.region.is_some()
-                    && t.terrain.is_land()
-                    && !matches!(
-                        t.terrain,
-                        Terrain::Settlement | Terrain::Temple | Terrain::Table
-                    )
-                    && t.corpse.is_none()
-                    && self.trial_at(*h).is_none()
-                    && self.champion_at(*h).is_none()
-                    && !self.mob_at(*h)
-                    && !self.traps.iter().any(|tr| tr.hex == *h)
-                    && self.players().all(|p| {
-                        self.champions[p.0 as usize].hex.unsigned_distance_to(*h) >= TRIAL_CLEARANCE
-                    })
-                    && near.is_none_or(|(c, lo, hi)| {
-                        let d = c.unsigned_distance_to(*h);
-                        (lo..=hi).contains(&d)
-                    })
-            })
+            .filter(|(h, _)| self.trial_free(*h, near))
             .map(|(h, t)| (h, t.terrain == Terrain::Stones))
             .collect();
         let stones: Vec<Hex> = spots.iter().filter(|s| s.1).map(|s| s.0).collect();

@@ -1770,6 +1770,13 @@ impl Match {
                 necromy_rules::Gain::Ground => {
                     format!("{} подбирает: {}.", self.name(*player), item.def().name)
                 }
+                necromy_rules::Gain::Gift(god) => format!(
+                    "{} дарит {}: {} ({}).",
+                    names::god(*god),
+                    self.name_dative(*player),
+                    item.def().name,
+                    names::slot(item.def().slot)
+                ),
             },
             Event::ItemDropped { player, item, .. } => {
                 format!(

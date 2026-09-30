@@ -155,6 +155,26 @@ impl Game {
         }
     }
 
+    /// A god asked for a trial (a wish) tells `player` to pass the one it
+    /// set on `hex`.
+    pub(super) fn tell_ordeal(
+        &mut self,
+        player: PlayerId,
+        god: God,
+        hex: Hex,
+        events: &mut Vec<Event>,
+    ) {
+        self.tell(
+            player,
+            god,
+            LineKind::Ordeal,
+            Goal::PassTrial(hex),
+            3,
+            0,
+            events,
+        );
+    }
+
     /// A trial passed may close a line that asked for it.
     pub(super) fn story_trial(&mut self, player: PlayerId, hex: Hex, events: &mut Vec<Event>) {
         let done: Vec<u32> = self

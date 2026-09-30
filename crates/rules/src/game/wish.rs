@@ -102,10 +102,14 @@ pub enum WishKind {
     Fire,
     /// "Bring something new into the world": a mechanic the world lacks.
     Awaken,
+    /// "Give me a treasure": an item, the god's own if it has one to give.
+    Treasure,
+    /// "Test me": the god sets its trial near the asker.
+    Ordeal,
 }
 
 impl WishKind {
-    pub const ALL: [WishKind; 31] = [
+    pub const ALL: [WishKind; 33] = [
         WishKind::Strength,
         WishKind::Weaken,
         WishKind::Land,
@@ -137,6 +141,8 @@ impl WishKind {
         WishKind::Road,
         WishKind::Fire,
         WishKind::Awaken,
+        WishKind::Treasure,
+        WishKind::Ordeal,
     ];
 
     /// Asks for the outcome itself instead of going through the world: always
@@ -250,6 +256,12 @@ pub enum Act {
     Awaken {
         feature: Option<crate::features::Feature>,
     },
+    /// An item from the loot deck, one of the god's element if there is
+    /// one (§20.3).
+    Treasure,
+    /// A trial 2–4 hexes from the asker, the god's own land first; passing
+    /// it is a story line of the god's (§20.2).
+    Ordeal,
 }
 
 impl Act {
@@ -286,6 +298,8 @@ impl Act {
             Act::Road => WishKind::Road,
             Act::Fire => WishKind::Fire,
             Act::Awaken { .. } => WishKind::Awaken,
+            Act::Treasure => WishKind::Treasure,
+            Act::Ordeal => WishKind::Ordeal,
         }
     }
 
@@ -310,7 +324,13 @@ impl Act {
     pub const fn cost(self) -> u8 {
         match self {
             Act::Awaken { .. } => AWAKEN_COST,
-            Act::Forge | Act::Swap { .. } | Act::Tribute | Act::Plant | Act::Settle | Act::Cut => 2,
+            Act::Forge
+            | Act::Swap { .. }
+            | Act::Tribute
+            | Act::Plant
+            | Act::Settle
+            | Act::Cut
+            | Act::Treasure => 2,
             _ => 1,
         }
     }
@@ -366,6 +386,8 @@ impl Act {
             WishKind::Road => Act::Road,
             WishKind::Fire => Act::Fire,
             WishKind::Awaken => Act::Awaken { feature: None },
+            WishKind::Treasure => Act::Treasure,
+            WishKind::Ordeal => Act::Ordeal,
             // A prepared wager bets on a fight, the likeliest thing to happen.
             WishKind::Wager => Act::Wager {
                 target: target?,
@@ -503,23 +525,24 @@ pub const fn taste_for(god: God, kind: WishKind) -> i8 {
     match (god, kind) {
         // Hunger loves strength, feasts of the dead and a gift that feeds;
         // quiet and truce bore it.
-        (God::Trishna, Strength | Dead | Forge | Tribute | Plant | Settle | Fire) => 1,
+        (God::Trishna, Strength | Dead | Forge | Tribute | Plant | Settle | Fire | Treasure) => 1,
         (God::Trishna, Peace | Truce | Veil) => -1,
-        // Order loves land, judgement, a contract and the registry of
+        // Order loves land, judgement (a trial too), a contract and the registry of
         // secrets; the dead are paperwork, a swap is disorder.
         (
             God::Ahamar,
-            Land | Weaken | Truce | Secret | Wager | Foresee | Settle | Stones | Road,
+            Land | Weaken | Truce | Secret | Wager | Foresee | Settle | Stones | Road | Ordeal,
         ) => 1,
         (God::Ahamar, Dead | Swap | Veil | Cut | Flood) => -1,
         // Dissolution loves letting go, loosening a grip, seeing through,
         // one thing becoming another; not strength, not a new thing to hold.
         (God::Maya, Peace | Weaken | Swap | Hand | Rot | Veil | Unveil | Cut | River | Flood) => 1,
-        (God::Maya, Strength | Forge | Tribute | Settle) => -1,
+        (God::Maya, Strength | Forge | Tribute | Settle | Treasure) => -1,
         // Renunciation loves quiet, the dead at rest and the price a desire
-        // exacts; not strength, not blessing what is held.
-        (God::Zaga, Peace | Dead | Blight | Tribute | Stones) => 1,
-        (God::Zaga, Strength | Bless | Hallow | Rise) => -1,
+        // exacts, a trial of it; not strength, not blessing or keeping what is
+        // held.
+        (God::Zaga, Peace | Dead | Blight | Tribute | Stones | Ordeal) => 1,
+        (God::Zaga, Strength | Bless | Hallow | Rise | Treasure) => -1,
         // Growth loves the land, strength, what grows in the hand; not harm.
         (God::Bhava, Land | Strength | Bless | Forge | Hallow | Rise) => 1,
         (God::Bhava, Weaken | Blight | Wager | Rot | Veil | Fire) => -1,
@@ -781,6 +804,15 @@ impl Game {
                 }
             }
             Act::Land => self.grant_land(god, me, usize::from(power), events),
+            // No items or trials in the world yet: asking brings them in.
+            Act::Treasure if !self.has(super::Feature::Loot) => {
+                self.awaken(Some(player), god, super::Feature::Loot, me, events);
+            }
+            Act::Treasure => self.god_gift(player, god, events),
+            Act::Ordeal if !self.has(super::Feature::Trials) => {
+                self.awaken(Some(player), god, super::Feature::Trials, me, events);
+            }
+            Act::Ordeal => self.wished_trial(player, god, events),
             // No bodies in the world yet: asking for the dead brings them in.
             Act::Dead if !self.has(super::Feature::Bodies) => {
                 self.awaken(Some(player), god, super::Feature::Bodies, me, events);

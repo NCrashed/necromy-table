@@ -128,8 +128,33 @@ impl Game {
             self.pantheon.stages[i] = next;
             self.pantheon.pressure[i] = 0;
             events.push(Event::StageChanged { god, stage: next });
+            if next < s {
+                self.rejoice(god, events);
+            }
         }
         self.dusk_laws(events);
+    }
+}
+
+impl Game {
+    /// A god turned lighter gives an item (§20.3) to whoever it favours
+    /// most, if they stand out: at least its Sign, and alone at the top.
+    fn rejoice(&mut self, god: God, events: &mut Vec<Event>) {
+        let best = self
+            .players()
+            .map(|p| self.favor(p, god))
+            .max()
+            .unwrap_or(0);
+        if best < super::SIGN {
+            return;
+        }
+        let top: Vec<PlayerId> = self
+            .players()
+            .filter(|&p| self.favor(p, god) == best)
+            .collect();
+        if let [player] = top[..] {
+            self.god_gift(player, god, events);
+        }
     }
 }
 
