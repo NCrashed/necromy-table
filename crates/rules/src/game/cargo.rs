@@ -15,8 +15,13 @@ use crate::features::Feature;
 /// What a champion carries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Cargo {
-    /// A body; a champion's still counts as one (a World Tree).
-    Body { hero: bool },
+    /// A body; a champion's still counts as one (a World Tree). A
+    /// poisoned one stays poisoned (§20.1).
+    Body {
+        hero: bool,
+        #[serde(default)]
+        tainted: bool,
+    },
     /// Food from a field, for a settlement's stores.
     Food,
     /// Goods of a region, for a fair.
@@ -50,7 +55,10 @@ impl Game {
                 self.board
                     .tile(at)
                     .and_then(|t| t.corpse)
-                    .map(|c| Cargo::Body { hero: c.hero })
+                    .map(|c| Cargo::Body {
+                        hero: c.hero,
+                        tainted: c.tainted,
+                    })
             })
     }
 
@@ -112,9 +120,13 @@ impl Game {
                     by: Some(player),
                 },
             )),
-            Cargo::Body { hero } => match self.board.tile_mut(hex) {
+            Cargo::Body { hero, tainted } => match self.board.tile_mut(hex) {
                 Some(tile) if tile.corpse.is_none() && tile.terrain.is_land() => {
-                    tile.corpse = Some(Corpse { age: 0, hero });
+                    tile.corpse = Some(Corpse {
+                        age: 0,
+                        hero,
+                        tainted,
+                    });
                 }
                 _ => self.loads.push((hex, cargo)),
             },

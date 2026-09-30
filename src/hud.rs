@@ -473,10 +473,14 @@ fn tooltip(
         lines.push(format!("владелец: {}", game.name(owner)));
     }
     if let Some(corpse) = tile.corpse {
-        let left = necromy_rules::board::GROVE_AGE.saturating_sub(corpse.age);
-        lines.push(format!(
-            "тело: не тронуть {left} раунд(а) — прорастёт рощей"
-        ));
+        if corpse.tainted {
+            lines.push("тело отравлено: рощей не прорастёт, может встать неупокоенным".into());
+        } else {
+            let left = necromy_rules::board::GROVE_AGE.saturating_sub(corpse.age);
+            lines.push(format!(
+                "тело: не тронуть {left} раунд(а) — прорастёт рощей"
+            ));
+        }
     }
     if g.traps()
         .iter()

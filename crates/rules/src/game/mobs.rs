@@ -35,6 +35,8 @@ pub const UNDEAD_AGE: u8 = 2;
 pub const UNDEAD_AGE_DARK: u8 = 1;
 pub const UNDEAD_HEALTH: u8 = 2;
 pub const UNDEAD_DICE: u8 = 2;
+/// Stacks of poison a wound from the undead or a beast leaves (§20.1).
+pub const MOB_POISON: u8 = 1;
 /// Hexes an undead sees the living from.
 pub const UNDEAD_SIGHT: u32 = 4;
 /// More stay in their graves: the world phase must stay short (§20.4).
@@ -140,7 +142,10 @@ impl Game {
         match yin_stage {
             Some(2..) => Some(UNDEAD_AGE_DARK),
             Some(1) => Some(UNDEAD_AGE),
-            _ if !tile.terrain.can_grow_grove() => Some(UNDEAD_AGE),
+            // A poisoned body no grove takes rises like one on stone.
+            _ if !tile.terrain.can_grow_grove() || tile.corpse.is_some_and(|c| c.tainted) => {
+                Some(UNDEAD_AGE)
+            }
             _ => None,
         }
     }
@@ -413,7 +418,7 @@ impl Game {
     }
 
     /// Both sides take what got past the other's shields.
-    fn settle_mob_fight(
+    pub(super) fn settle_mob_fight(
         &mut self,
         id: u32,
         champion: PlayerId,
@@ -436,7 +441,21 @@ impl Game {
         });
         let hurt = mob_score.hits.saturating_sub(champion_score.shields);
         if hurt > 0 {
+            let from = events.len();
             self.damage(champion, hurt, events);
+            let fell = events[from..]
+                .iter()
+                .any(|e| matches!(e, Event::ChampionFell { player, .. } if *player == champion));
+            // A wound from the dead or a beast festers (§20.1): water of the
+            // grave, wood of the fang.
+            let venom = self
+                .mobs
+                .iter()
+                .find(|m| m.id == id)
+                .is_some_and(|m| m.is_undead() || m.is_beast());
+            if venom && !fell {
+                self.poison(champion, element, MOB_POISON, events);
+            }
         }
         let dealt = champion_score.hits.saturating_sub(mob_score.shields);
         if dealt > 0 {

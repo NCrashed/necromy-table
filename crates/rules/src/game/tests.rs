@@ -3375,6 +3375,7 @@ fn untended_bodies_rise_where_no_grove_grows() {
     tile.corpse = Some(Corpse {
         age: UNDEAD_AGE,
         hero: false,
+        tainted: false,
     });
     let meadow = Hex::new(3, -3);
     let tile = g.board.tile_mut(meadow).unwrap();
@@ -3383,6 +3384,7 @@ fn untended_bodies_rise_where_no_grove_grows() {
     tile.corpse = Some(Corpse {
         age: UNDEAD_AGE_DARK,
         hero: false,
+        tainted: false,
     });
     // Whatever the board drew there, no militia stand on the two.
     g.militia
@@ -4728,7 +4730,13 @@ fn a_body_is_carried_a_step_shorter_and_laid_down_again() {
     let here = g.champion(me).unwrap().hex;
     g.board.tile_mut(here).unwrap().corpse = Some(Corpse::fresh());
     g.apply(me, Intent::Take).unwrap();
-    assert_eq!(g.cargo(me), Some(Cargo::Body { hero: false }));
+    assert_eq!(
+        g.cargo(me),
+        Some(Cargo::Body {
+            hero: false,
+            tainted: false
+        })
+    );
     assert!(g.board().tile(here).unwrap().corpse.is_none());
     assert_eq!(
         g.apply(me, Intent::Take),
@@ -4750,13 +4758,25 @@ fn a_body_is_carried_a_step_shorter_and_laid_down_again() {
 #[test]
 fn the_winner_takes_the_losers_burden() {
     let (mut g, me, foe) = duel(3);
-    g.champ_mut(foe).cargo = Some(Cargo::Body { hero: true });
+    g.champ_mut(foe).cargo = Some(Cargo::Body {
+        hero: true,
+        tainted: false,
+    });
     let mut ev = Vec::new();
     g.seize_cargo(me, foe, &mut ev);
-    assert_eq!(g.cargo(me), Some(Cargo::Body { hero: true }));
+    assert_eq!(
+        g.cargo(me),
+        Some(Cargo::Body {
+            hero: true,
+            tainted: false
+        })
+    );
     assert!(g.cargo(foe).is_none());
     // The fallen drop theirs where they fall.
-    g.champ_mut(foe).cargo = Some(Cargo::Body { hero: false });
+    g.champ_mut(foe).cargo = Some(Cargo::Body {
+        hero: false,
+        tainted: false,
+    });
     let at = g.champion(foe).unwrap().hex;
     g.fall(foe, &mut ev);
     assert!(g.cargo(foe).is_none());
@@ -5456,6 +5476,7 @@ fn the_buried_never_rise_and_a_necropolis_needs_zagas_land_quiet() {
     g.board.tile_mut(yard[0]).unwrap().corpse = Some(Corpse {
         age: 9,
         hero: false,
+        tainted: false,
     });
     let mut ev = Vec::new();
     g.raise_dead(&mut ev);
@@ -5465,7 +5486,10 @@ fn the_buried_never_rise_and_a_necropolis_needs_zagas_land_quiet() {
         set_terrain(&mut g, *h, Terrain::Graveyard);
     }
     for _ in 0..NECROPOLIS_BODIES {
-        g.champ_mut(me).cargo = Some(Cargo::Body { hero: false });
+        g.champ_mut(me).cargo = Some(Cargo::Body {
+            hero: false,
+            tainted: false,
+        });
         g.drop_cargo(me, yard[0], &mut ev);
     }
     assert_eq!(g.best_necropolis(), (NECROPOLIS, NECROPOLIS_BODIES));
@@ -5490,7 +5514,10 @@ fn a_full_pit_is_laid_to_rest_or_raised() {
     g.apply(me, Intent::DigPit).unwrap();
     let mut ev = Vec::new();
     for _ in 0..PIT_BODIES {
-        g.champ_mut(me).cargo = Some(Cargo::Body { hero: false });
+        g.champ_mut(me).cargo = Some(Cargo::Body {
+            hero: false,
+            tainted: false,
+        });
         g.drop_cargo(me, pit, &mut ev);
     }
     // Its fumes poison the neighbours.
@@ -5517,7 +5544,10 @@ fn a_fed_circle_opens_its_gate_and_its_monster_is_the_summoning() {
     g.apply(me, Intent::DrawCircle).unwrap();
     let mut ev = Vec::new();
     for _ in 0..SUMMON_BODIES {
-        g.champ_mut(me).cargo = Some(Cargo::Body { hero: false });
+        g.champ_mut(me).cargo = Some(Cargo::Body {
+            hero: false,
+            tainted: false,
+        });
         g.drop_cargo(me, stones, &mut ev);
     }
     g.open_gates(&mut ev);
@@ -5971,4 +6001,99 @@ fn a_full_world_deals_the_core_and_some_mechanic_cards() {
     });
     let mech = g.slice.iter().filter(|d| d.def().is_mechanic()).count();
     assert!(mech >= crate::cards::MECHANIC_SLICE, "only {mech}");
+}
+
+#[test]
+fn a_body_that_fell_poisoned_grows_no_grove_but_rises() {
+    let (mut g, me, _) = duel(3);
+    let here = g.champion(me).unwrap().hex;
+    let tile = g.board.tile_mut(here).unwrap();
+    tile.terrain = Terrain::Plains;
+    tile.region = Some(God::Trishna);
+    let mut ev = Vec::new();
+    g.poison(me, Element::Wood, 2, &mut ev);
+    let hp = g.champion(me).unwrap().hp;
+    g.damage(me, hp, &mut ev);
+    let body = g.board().tile(here).unwrap().corpse.expect("a body");
+    assert!(body.tainted);
+    // Where a grove would take it, it rises instead.
+    g.board.tile_mut(here).unwrap().corpse = Some(Corpse {
+        age: UNDEAD_AGE,
+        ..body
+    });
+    let mut events = Vec::new();
+    g.raise_dead(&mut events);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::MobAppeared { mob } if mob.hex == here))
+    );
+    // And a tainted body left to its day decays, no grove.
+    g.mobs.clear();
+    g.board.tile_mut(here).unwrap().corpse = Some(Corpse {
+        age: GROVE_AGE,
+        ..body
+    });
+    let mut events = Vec::new();
+    g.world_phase(&mut events);
+    assert!(!events.iter().any(|e| matches!(e, Event::GroveGrew { .. })));
+}
+
+#[test]
+fn poison_is_catching_under_zagas_sentence() {
+    let (mut g, me, foe) = duel(1);
+    let mut ev = Vec::new();
+    g.poison(me, Element::Water, 2, &mut ev);
+    // Not without the Sentence.
+    g.bite_poison(me, &mut ev);
+    assert!(g.champion(foe).unwrap().poison.is_none());
+    g.pantheon.stages[God::Zaga.index()] = 2;
+    assert!(g.law_active(Law::Sentence));
+    let mut events = Vec::new();
+    g.bite_poison(me, &mut events);
+    assert_eq!(
+        g.champion(foe).unwrap().poison,
+        Some(Poison {
+            element: Element::Water,
+            stacks: 1
+        })
+    );
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::Law { law: Law::Sentence, player: Some(p), .. } if *p == foe
+    )));
+    // Zaga's Chosen are spared.
+    g.champ_mut(foe).poison = None;
+    g.favor[foe.0 as usize][God::Zaga.index()] = CHOSEN;
+    g.poison(me, Element::Water, 2, &mut ev);
+    g.bite_poison(me, &mut ev);
+    assert!(g.champion(foe).unwrap().poison.is_none());
+}
+
+#[test]
+fn a_wound_from_a_beast_or_the_dead_festers() {
+    use necromy_dice::Face;
+    let (mut g, me, _) = duel(3);
+    g.champ_mut(me).body = 9;
+    g.champ_mut(me).hp = 9;
+    let beast = beast_on(&mut g, Hex::new(1, 0), Hex::new(1, 0));
+    let hits = [Face::Strike, Face::Strike];
+    let mut events = Vec::new();
+    g.settle_mob_fight(beast, me, &hits, &[Face::Blank], false, &mut events);
+    assert_eq!(
+        g.champion(me).unwrap().poison.map(|p| p.element),
+        Some(Element::Wood)
+    );
+    g.champ_mut(me).poison = None;
+    let undead = undead_on(&mut g, Hex::new(0, 1), UNDEAD_HEALTH);
+    g.settle_mob_fight(undead, me, &hits, &[Face::Blank], false, &mut events);
+    assert_eq!(
+        g.champion(me).unwrap().poison.map(|p| p.element),
+        Some(Element::Water)
+    );
+    // Shields that hold keep it out.
+    g.champ_mut(me).poison = None;
+    let shields = [Face::Shield, Face::Shield];
+    g.settle_mob_fight(undead, me, &hits, &shields, false, &mut events);
+    assert!(g.champion(me).unwrap().poison.is_none());
 }

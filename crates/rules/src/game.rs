@@ -3489,12 +3489,18 @@ impl Game {
         self.note_bet(player, wish::Bet::Fall);
         let at = self.hex_of(player);
         let bodies = self.has(Feature::Bodies);
+        // Whoever falls poisoned leaves a body no grove takes (§20.1).
+        let tainted = self.champions[player.0 as usize].poison.is_some();
         if bodies
             && let Some(tile) = self.board.tile_mut(at)
             && tile.corpse.is_none()
         {
             // A champion's body: what grows of it may be a World Tree.
-            tile.corpse = Some(Corpse { age: 0, hero: true });
+            tile.corpse = Some(Corpse {
+                age: 0,
+                hero: true,
+                tainted,
+            });
         }
         let home = self.board.start_of(self.champions[player.0 as usize].god);
         let respawn = (0..=self.board.extent() * 2)
@@ -3684,7 +3690,7 @@ impl Game {
             let age = corpse.age + 1;
             if age < ripe {
                 tile.corpse = Some(Corpse { age, ..corpse });
-            } else if groves && tile.terrain.can_grow_grove() {
+            } else if groves && !corpse.tainted && tile.terrain.can_grow_grove() {
                 tile.corpse = None;
                 tile.terrain = Terrain::Grove;
                 events.push(Event::GroveGrew { hex });

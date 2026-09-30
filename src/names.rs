@@ -897,7 +897,9 @@ pub fn law_text(law: necromy_rules::Law) -> &'static str {
         Devouring => "на закате тела в краю Тришны сгорают, в поселениях голод: −1 здоровья",
         Stillness => "на закате у всех −1 Угрозы",
         Burden => "каждая карта сверх двух за ход: +1 Угрозы",
-        Sentence => "гвардия выходит уже при Угрозе 3 и бьёт на кубик больше",
+        Sentence => {
+            "гвардия выходит уже при Угрозе 3 и бьёт на кубик больше; яд заразен: укус передаёт стак соседям без яда"
+        }
         Mask => "у кого есть владения, тому +1 Стиль на рассвете",
         Crack => "владение платит на рассвете, только если хозяин не дальше 3 клеток",
         Exposure => "днём не скрыться нигде",
@@ -1180,8 +1182,8 @@ pub fn mob(kind: necromy_rules::MobKind, id: u32) -> (&'static str, &'static str
 pub fn cargo(c: necromy_rules::Cargo) -> &'static str {
     use necromy_rules::Cargo;
     match c {
-        Cargo::Body { hero: true } => "тело чемпиона",
-        Cargo::Body { hero: false } => "тело",
+        Cargo::Body { hero: true, .. } => "тело чемпиона",
+        Cargo::Body { hero: false, .. } => "тело",
         Cargo::Food => "еда",
         Cargo::Goods(g) => goods(g),
         Cargo::Egg { .. } => "драконье яйцо",

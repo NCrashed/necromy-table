@@ -29,7 +29,8 @@ pub enum Law {
     Stillness,
     /// Zaga, mid: every card past the second in a turn is loud.
     Burden,
-    /// Zaga, dark: the guard marches at a lower Threat and strikes harder.
+    /// Zaga, dark: the guard marches at a lower Threat and strikes harder,
+    /// and poison is catching (`bite_poison`).
     Sentence,
     /// Ahamar, light: holding any land earns Style at dawn.
     Mask,

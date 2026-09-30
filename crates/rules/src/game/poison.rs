@@ -5,7 +5,10 @@
 //! takes the last one: only a battle or a damaging card finishes. A heal of
 //! the element that quenches the poison takes it off; a heal of the element
 //! that generates it feeds it a stack instead. A temple cleanses, and so
-//! does death.
+//! does death; but a body that fell poisoned grows no grove, it rises.
+//! Under Zaga's Sentence poison is catching: each bite passes a stack to
+//! every neighbour free of it, her Chosen aside. Wounds from the undead
+//! and beasts fester (`MOB_POISON`).
 
 use serde::{Deserialize, Serialize};
 
@@ -107,5 +110,23 @@ impl Game {
             hp,
             stacks,
         });
+        // Zaga's Sentence: the sick are shunned for a reason (§20.1).
+        if self.law_active(super::Law::Sentence) {
+            let at = self.hex_of(player);
+            let near: Vec<PlayerId> = self
+                .players()
+                .filter(|&p| p != player && self.hex_of(p).unsigned_distance_to(at) == 1)
+                .filter(|&p| self.champions[p.0 as usize].poison.is_none())
+                .filter(|&p| !self.chosen(p, crate::gods::God::Zaga))
+                .collect();
+            for p in near {
+                events.push(Event::Law {
+                    law: super::Law::Sentence,
+                    player: Some(p),
+                    hex: None,
+                });
+                self.poison(p, poison.element, 1, events);
+            }
+        }
     }
 }

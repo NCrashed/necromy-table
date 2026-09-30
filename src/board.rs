@@ -668,7 +668,8 @@ fn sync_markers(
                 .game
                 .board()
                 .tile(hex)
-                .is_some_and(|t| t.terrain.can_grow_grove());
+                .is_some_and(|t| t.terrain.can_grow_grove())
+                && !corpse.tainted;
             let stage = match corpse.age {
                 0 | 1 => 0,
                 a if a + 1 >= necromy_rules::board::GROVE_AGE && grows => 2,

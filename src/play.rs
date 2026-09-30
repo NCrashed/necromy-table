@@ -2356,6 +2356,16 @@ impl Match {
                 names::stage(*god, *stage),
                 names::law_line(necromy_rules::Law::of(*god, *stage), &self.game)
             ),
+            // Zaga's Sentence passed poison on (§20.1).
+            Event::Law {
+                law: necromy_rules::Law::Sentence,
+                player: Some(p),
+                ..
+            } => format!(
+                "Закон «{}»: яд перекинулся на {}.",
+                names::law_name(necromy_rules::Law::Sentence),
+                self.name_accusative(*p)
+            ),
             // A law of the world acted (§5.3).
             Event::Law { law, player, .. } => {
                 let whom = player.map_or(String::new(), |p| format!(" ({})", self.name(p)));

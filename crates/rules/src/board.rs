@@ -92,6 +92,10 @@ pub struct Corpse {
     /// A champion fell here: what grows of it is theirs to tell (a World
     /// Tree, §21.7).
     pub hero: bool,
+    /// They fell poisoned: no grove takes the body, it rises instead
+    /// (§20.1).
+    #[serde(default)]
+    pub tainted: bool,
 }
 
 impl Corpse {
@@ -100,6 +104,7 @@ impl Corpse {
         Corpse {
             age: 0,
             hero: false,
+            tainted: false,
         }
     }
 }
