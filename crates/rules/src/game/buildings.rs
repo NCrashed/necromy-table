@@ -16,7 +16,7 @@ use crate::features::Feature;
 use crate::gods::God;
 
 /// One building on a settlement.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Building {
     Tavern,
     Forge,

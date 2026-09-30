@@ -79,7 +79,7 @@ impl Game {
         });
     }
 
-    fn god_act(
+    pub(super) fn god_act(
         &mut self,
         god: God,
         stage: u8,

@@ -122,16 +122,26 @@ impl Game {
 
     /// The mechanic a thing asked for stands on, if the world lacks it:
     /// asking for the dead where there are no bodies brings bodies in.
-    fn lacks_for(&self, act: Act) -> Option<Feature> {
+    pub(super) fn lacks_for(&self, act: Act) -> Option<Feature> {
         let needs = match act {
-            Act::Dead => Feature::Bodies,
+            Act::Dead { .. } => Feature::Bodies,
             Act::Settle => Feature::Settlements,
-            Act::River => Feature::Rivers,
-            Act::Flood => Feature::Lakes,
+            Act::River { .. } => Feature::Rivers,
+            Act::Flood { .. } => Feature::Lakes,
             Act::Road => Feature::Roads,
-            Act::Fire => Feature::Fires,
+            Act::Fire { .. } => Feature::Fires,
             Act::Treasure => Feature::Loot,
             Act::Ordeal => Feature::Trials,
+            Act::Poison { .. } => Feature::Poison,
+            Act::Beast { .. } => Feature::Beasts,
+            Act::Undead { .. } => Feature::Undead,
+            Act::Guard { .. } => Feature::Guard,
+            Act::Debt { .. } => Feature::Debts,
+            Act::Build { .. } => Feature::Buildings,
+            Act::Sway => Feature::Rulers,
+            Act::Harvest => Feature::Fields,
+            Act::Fair => Feature::Fairs,
+            Act::WakeGrove => Feature::WalkingGroves,
             _ => return None,
         };
         (!self.has(needs)).then_some(needs)
@@ -572,16 +582,18 @@ impl Game {
             Act::Stones => {
                 self.stones_near(me, events);
             }
-            Act::River => {
+            Act::River { target } => {
+                let at = target.map_or(me, |t| self.hex_of(t));
                 if self.has(Feature::Rivers) {
-                    self.run_river(me, super::RIVER_RUN + usize::from(power), events);
+                    self.run_river(at, super::RIVER_RUN + usize::from(power), events);
                 } else {
                     self.awaken(Some(player), god, Feature::Rivers, me, events);
                 }
             }
-            Act::Fire => {
+            Act::Fire { target } => {
+                let at = target.map_or(me, |t| self.hex_of(t));
                 if self.has(Feature::Fires) {
-                    self.fire_near(player, me, 1 + usize::from(power) / 3, events);
+                    self.fire_near(player, at, 1 + usize::from(power) / 3, events);
                 } else if self.can_awaken(Feature::Fires) {
                     self.awaken(Some(player), god, Feature::Fires, me, events);
                 }
@@ -593,9 +605,10 @@ impl Game {
                     self.awaken(Some(player), god, Feature::Roads, me, events);
                 }
             }
-            Act::Flood => {
+            Act::Flood { target } => {
+                let at = target.map_or(me, |t| self.hex_of(t));
                 if self.has(Feature::Lakes) {
-                    self.flood(me, 1 + usize::from(power) / 2, events);
+                    self.flood(at, 1 + usize::from(power) / 2, events);
                 } else if self.can_awaken(Feature::Lakes) {
                     self.awaken(Some(player), god, Feature::Lakes, me, events);
                 }

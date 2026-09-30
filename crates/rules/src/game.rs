@@ -3819,6 +3819,7 @@ mod view;
 mod walking;
 mod water;
 mod wish;
+mod wish_world;
 mod world;
 pub use battle::Score;
 pub use beasts::{BEAST_DICE, BEAST_HEALTH, BEAST_RANGE};

@@ -106,10 +106,30 @@ pub enum WishKind {
     Treasure,
     /// "Test me": the god sets its trial near the asker.
     Ordeal,
+    /// "Poison them": poison of the god's element in a rival.
+    Poison,
+    /// "Send me a beast" / "set a beast on them": a companion, or a hunter.
+    Beast,
+    /// "Raise the dead against them": an undead beside a rival.
+    Undead,
+    /// "Send the guard on them": the register marks a rival.
+    Guard,
+    /// "Let them owe me": a rival in the asker's debt.
+    Debt,
+    /// "Build me a ...": a building on the asker's settlement.
+    Build,
+    /// "Let the ruler bow to me": the ruler nearest leans to the asker.
+    Sway,
+    /// "Let the fields bear": a harvest near the asker.
+    Harvest,
+    /// "Let there be a fair": a fair in the asker's settlement.
+    Fair,
+    /// "Let the forest walk": the grove nearest wakes and walks.
+    WakeGrove,
 }
 
 impl WishKind {
-    pub const ALL: [WishKind; 33] = [
+    pub const ALL: [WishKind; 43] = [
         WishKind::Strength,
         WishKind::Weaken,
         WishKind::Land,
@@ -143,6 +163,16 @@ impl WishKind {
         WishKind::Awaken,
         WishKind::Treasure,
         WishKind::Ordeal,
+        WishKind::Poison,
+        WishKind::Beast,
+        WishKind::Undead,
+        WishKind::Guard,
+        WishKind::Debt,
+        WishKind::Build,
+        WishKind::Sway,
+        WishKind::Harvest,
+        WishKind::Fair,
+        WishKind::WakeGrove,
     ];
 
     /// Asks for the outcome itself instead of going through the world: always
@@ -161,6 +191,10 @@ impl WishKind {
                 | WishKind::Truce
                 | WishKind::Swap
                 | WishKind::Wager
+                | WishKind::Poison
+                | WishKind::Undead
+                | WishKind::Guard
+                | WishKind::Debt
         )
     }
 }
@@ -174,7 +208,10 @@ pub enum Act {
         target: PlayerId,
     },
     Land,
-    Dead,
+    /// Bodies near the asker, or near `target`.
+    Dead {
+        target: Option<PlayerId>,
+    },
     Peace,
     Fortune,
     Doom,
@@ -244,13 +281,20 @@ pub enum Act {
     /// Standing stones on free land near the asker.
     Stones,
     /// A river near the asker, on from one within reach.
-    River,
+    River {
+        target: Option<PlayerId>,
+    },
     /// The water nearest the asker spreads towards the Table.
-    Flood,
+    Flood {
+        target: Option<PlayerId>,
+    },
     /// The register's road runs on towards the temple nearest the asker.
     Road,
-    /// Fire in the woods or settlement nearest the asker, theirs.
-    Fire,
+    /// Fire in the woods or settlement nearest the asker (or `target`),
+    /// the asker's.
+    Fire {
+        target: Option<PlayerId>,
+    },
     /// A mechanic the world lacks, the one named or else one of the god's
     /// own (§21.2); its first thing appears near the asker.
     Awaken {
@@ -262,6 +306,39 @@ pub enum Act {
     /// A trial 2–4 hexes from the asker, the god's own land first; passing
     /// it is a story line of the god's (§20.2).
     Ordeal,
+    // The world's mechanics in words (§21.8): `wish_world.rs`.
+    /// Poison of the god's element in `target`.
+    Poison {
+        target: PlayerId,
+    },
+    /// A beast: following the asker, or hunting `target`.
+    Beast {
+        target: Option<PlayerId>,
+    },
+    /// An undead risen beside `target`.
+    Undead {
+        target: PlayerId,
+    },
+    /// The royal guard set on `target`.
+    Guard {
+        target: PlayerId,
+    },
+    /// `target` owes the asker.
+    Debt {
+        target: PlayerId,
+    },
+    /// A building on the asker's settlement, the one named or the god's own.
+    Build {
+        building: Option<super::buildings::Building>,
+    },
+    /// The ruler nearest the asker leans to them.
+    Sway,
+    /// The fields near the asker bear.
+    Harvest,
+    /// A fair in the asker's settlement.
+    Fair,
+    /// The grove nearest the asker wakes and walks.
+    WakeGrove,
 }
 
 impl Act {
@@ -270,7 +347,7 @@ impl Act {
             Act::Strength => WishKind::Strength,
             Act::Weaken { .. } => WishKind::Weaken,
             Act::Land => WishKind::Land,
-            Act::Dead => WishKind::Dead,
+            Act::Dead { .. } => WishKind::Dead,
             Act::Peace => WishKind::Peace,
             Act::Fortune => WishKind::Fortune,
             Act::Doom => WishKind::Doom,
@@ -293,13 +370,23 @@ impl Act {
             Act::Cut => WishKind::Cut,
             Act::Settle => WishKind::Settle,
             Act::Stones => WishKind::Stones,
-            Act::River => WishKind::River,
-            Act::Flood => WishKind::Flood,
+            Act::River { .. } => WishKind::River,
+            Act::Flood { .. } => WishKind::Flood,
             Act::Road => WishKind::Road,
-            Act::Fire => WishKind::Fire,
+            Act::Fire { .. } => WishKind::Fire,
             Act::Awaken { .. } => WishKind::Awaken,
             Act::Treasure => WishKind::Treasure,
             Act::Ordeal => WishKind::Ordeal,
+            Act::Poison { .. } => WishKind::Poison,
+            Act::Beast { .. } => WishKind::Beast,
+            Act::Undead { .. } => WishKind::Undead,
+            Act::Guard { .. } => WishKind::Guard,
+            Act::Debt { .. } => WishKind::Debt,
+            Act::Build { .. } => WishKind::Build,
+            Act::Sway => WishKind::Sway,
+            Act::Harvest => WishKind::Harvest,
+            Act::Fair => WishKind::Fair,
+            Act::WakeGrove => WishKind::WakeGrove,
         }
     }
 
@@ -311,8 +398,17 @@ impl Act {
             | Act::Blight { target }
             | Act::Truce { target }
             | Act::Swap { target }
-            | Act::Wager { target, .. } => Some(target),
-            Act::Veil { target } => target,
+            | Act::Wager { target, .. }
+            | Act::Poison { target }
+            | Act::Undead { target }
+            | Act::Guard { target }
+            | Act::Debt { target } => Some(target),
+            Act::Veil { target }
+            | Act::Dead { target }
+            | Act::River { target }
+            | Act::Flood { target }
+            | Act::Fire { target }
+            | Act::Beast { target } => target,
             _ => None,
         }
     }
@@ -330,7 +426,9 @@ impl Act {
             | Act::Plant
             | Act::Settle
             | Act::Cut
-            | Act::Treasure => 2,
+            | Act::Treasure
+            | Act::Build { .. }
+            | Act::Guard { .. } => 2,
             _ => 1,
         }
     }
@@ -345,11 +443,17 @@ impl Act {
                 | Act::Cut
                 | Act::Settle
                 | Act::Stones
-                | Act::River
-                | Act::Flood
+                | Act::River { .. }
+                | Act::Flood { .. }
                 | Act::Road
-                | Act::Fire
+                | Act::Fire { .. }
                 | Act::Awaken { .. }
+                | Act::Beast { .. }
+                | Act::Undead { .. }
+                | Act::Build { .. }
+                | Act::Harvest
+                | Act::Fair
+                | Act::WakeGrove
         )
     }
 
@@ -359,7 +463,7 @@ impl Act {
             WishKind::Strength => Act::Strength,
             WishKind::Weaken => Act::Weaken { target: target? },
             WishKind::Land => Act::Land,
-            WishKind::Dead => Act::Dead,
+            WishKind::Dead => Act::Dead { target },
             WishKind::Peace => Act::Peace,
             WishKind::Fortune => Act::Fortune,
             WishKind::Doom => Act::Doom,
@@ -381,13 +485,23 @@ impl Act {
             WishKind::Cut => Act::Cut,
             WishKind::Settle => Act::Settle,
             WishKind::Stones => Act::Stones,
-            WishKind::River => Act::River,
-            WishKind::Flood => Act::Flood,
+            WishKind::River => Act::River { target },
+            WishKind::Flood => Act::Flood { target },
             WishKind::Road => Act::Road,
-            WishKind::Fire => Act::Fire,
+            WishKind::Fire => Act::Fire { target },
             WishKind::Awaken => Act::Awaken { feature: None },
             WishKind::Treasure => Act::Treasure,
             WishKind::Ordeal => Act::Ordeal,
+            WishKind::Poison => Act::Poison { target: target? },
+            WishKind::Beast => Act::Beast { target },
+            WishKind::Undead => Act::Undead { target: target? },
+            WishKind::Guard => Act::Guard { target: target? },
+            WishKind::Debt => Act::Debt { target: target? },
+            WishKind::Build => Act::Build { building: None },
+            WishKind::Sway => Act::Sway,
+            WishKind::Harvest => Act::Harvest,
+            WishKind::Fair => Act::Fair,
+            WishKind::WakeGrove => Act::WakeGrove,
             // A prepared wager bets on a fight, the likeliest thing to happen.
             WishKind::Wager => Act::Wager {
                 target: target?,
@@ -461,6 +575,12 @@ pub enum Price {
     Style(u8),
     /// A settlement, temple or the Table the Dominant holds, let go.
     Claim(Hex),
+    /// The burden on one's back (§21.8).
+    Cargo,
+    /// One who follows (§21.8), the last to join.
+    Companion,
+    /// An item worn in this slot (§20.3), back into the loot.
+    Item(crate::items::Slot),
 }
 
 impl Price {
@@ -476,6 +596,8 @@ impl Price {
                 }
             }
             Price::Claim(_) => 2,
+            Price::Cargo => 1,
+            Price::Companion | Price::Item(_) => 2,
         }
     }
 }
@@ -525,27 +647,37 @@ pub const fn taste_for(god: God, kind: WishKind) -> i8 {
     match (god, kind) {
         // Hunger loves strength, feasts of the dead and a gift that feeds;
         // quiet and truce bore it.
-        (God::Trishna, Strength | Dead | Forge | Tribute | Plant | Settle | Fire | Treasure) => 1,
+        (
+            God::Trishna,
+            Strength | Dead | Forge | Tribute | Plant | Settle | Fire | Treasure | Harvest | Fair,
+        ) => 1,
         (God::Trishna, Peace | Truce | Veil) => -1,
         // Order loves land, judgement (a trial too), a contract and the registry of
         // secrets; the dead are paperwork, a swap is disorder.
         (
             God::Ahamar,
-            Land | Weaken | Truce | Secret | Wager | Foresee | Settle | Stones | Road | Ordeal,
+            Land | Weaken | Truce | Secret | Wager | Foresee | Settle | Stones | Road | Ordeal
+            | Guard | Debt | Sway | Build,
         ) => 1,
-        (God::Ahamar, Dead | Swap | Veil | Cut | Flood) => -1,
+        (God::Ahamar, Dead | Swap | Veil | Cut | Flood | Undead) => -1,
         // Dissolution loves letting go, loosening a grip, seeing through,
         // one thing becoming another; not strength, not a new thing to hold.
-        (God::Maya, Peace | Weaken | Swap | Hand | Rot | Veil | Unveil | Cut | River | Flood) => 1,
-        (God::Maya, Strength | Forge | Tribute | Settle | Treasure) => -1,
+        (
+            God::Maya,
+            Peace | Weaken | Swap | Hand | Rot | Veil | Unveil | Cut | River | Flood | Undead,
+        ) => 1,
+        (God::Maya, Strength | Forge | Tribute | Settle | Treasure | Build) => -1,
         // Renunciation loves quiet, the dead at rest and the price a desire
         // exacts, a trial of it; not strength, not blessing or keeping what is
         // held.
-        (God::Zaga, Peace | Dead | Blight | Tribute | Stones | Ordeal) => 1,
+        (God::Zaga, Peace | Dead | Blight | Tribute | Stones | Ordeal | Poison) => 1,
         (God::Zaga, Strength | Bless | Hallow | Rise | Treasure) => -1,
         // Growth loves the land, strength, what grows in the hand; not harm.
-        (God::Bhava, Land | Strength | Bless | Forge | Hallow | Rise) => 1,
-        (God::Bhava, Weaken | Blight | Wager | Rot | Veil | Fire) => -1,
+        (
+            God::Bhava,
+            Land | Strength | Bless | Forge | Hallow | Rise | Beast | Harvest | WakeGrove,
+        ) => 1,
+        (God::Bhava, Weaken | Blight | Wager | Rot | Veil | Fire | Poison) => -1,
         _ => 0,
     }
 }
@@ -624,6 +756,9 @@ impl Game {
             }
             Some(Price::Style(n)) => (1..=2).contains(&n) && self.style(player) >= u16::from(n),
             Some(Price::Claim(hex)) => self.claims().any(|(h, p)| h == hex && p == player),
+            Some(Price::Cargo) => self.cargo(player).is_some(),
+            Some(Price::Companion) => !self.companions(player).is_empty(),
+            Some(Price::Item(slot)) => self.gear(player)[slot.index()].is_some(),
         };
         if payable {
             Ok(())
@@ -738,6 +873,26 @@ impl Game {
         }
         self.raised.clear();
 
+        // A wish short of the god's own style spills its nature into the
+        // world beside the asker (§7.3): always at a grade of 1, half the
+        // time at 2; only a fine wish is granted exactly. The god's hand acts
+        // after its stage, as at dusk (`gods_hand.rs`).
+        let spills = match grade {
+            1 => true,
+            2 => self.rng.below(2) == 0,
+            _ => false,
+        };
+        if spills && self.scripted.is_none() {
+            let me = self.hex_of(player);
+            let stage = self.stage(god);
+            let act = self.god_act(god, stage, player, me, events);
+            events.push(Event::GodActed {
+                god,
+                act,
+                near: player,
+            });
+        }
+
         // The grade becomes Style; a wish without style also carries a curse.
         // Kept small: a wish is power already, and Style keeps the Crown.
         let style = self.crown_wish_style(player, super::dusk::grade_style(grade));
@@ -768,6 +923,17 @@ impl Game {
             Price::Style(n) => self.add_style(player, -i16::from(n), StyleReason::Wish, events),
             Price::Claim(hex) => {
                 self.claims.remove(&(hex.x(), hex.y()));
+            }
+            Price::Cargo => {
+                self.champ_mut(player).cargo = None;
+            }
+            Price::Companion => {
+                self.champ_mut(player).companions.pop();
+            }
+            Price::Item(slot) => {
+                if let Some(item) = self.champ_mut(player).gear[slot.index()].take() {
+                    self.loot.insert(0, item);
+                }
             }
         }
     }
@@ -813,8 +979,18 @@ impl Game {
                 self.awaken(Some(player), god, super::Feature::Trials, me, events);
             }
             Act::Ordeal => self.wished_trial(player, god, events),
+            Act::Poison { .. }
+            | Act::Beast { .. }
+            | Act::Undead { .. }
+            | Act::Guard { .. }
+            | Act::Debt { .. }
+            | Act::Build { .. }
+            | Act::Sway
+            | Act::Harvest
+            | Act::Fair
+            | Act::WakeGrove => self.grant_world_act(player, god, act, power, events),
             // No bodies in the world yet: asking for the dead brings them in.
-            Act::Dead if !self.has(super::Feature::Bodies) => {
+            Act::Dead { .. } if !self.has(super::Feature::Bodies) => {
                 self.awaken(Some(player), god, super::Feature::Bodies, me, events);
             }
             Act::Rise { .. }
@@ -823,14 +999,15 @@ impl Game {
             | Act::Cut
             | Act::Settle
             | Act::Stones
-            | Act::River
-            | Act::Flood
+            | Act::River { .. }
+            | Act::Flood { .. }
             | Act::Road
-            | Act::Fire
+            | Act::Fire { .. }
             | Act::Awaken { .. } => self.create(player, god, act, power, events),
-            Act::Dead => {
+            Act::Dead { target } => {
+                let at = target.map_or(me, |t| self.hex_of(t));
                 let free: Vec<Hex> = (1..=2)
-                    .flat_map(|r| me.ring(r).collect::<Vec<_>>())
+                    .flat_map(|r| at.ring(r).collect::<Vec<_>>())
                     .filter(|&h| {
                         self.has(super::Feature::Bodies)
                             && self.board.contains(h)

@@ -508,6 +508,16 @@ pub fn wish(kind: necromy_rules::WishKind) -> &'static str {
         WishKind::Awaken => "Принеси в мир новое",
         WishKind::Treasure => "Дай мне сокровище",
         WishKind::Ordeal => "Испытай меня",
+        WishKind::Poison => "Отрави соперника",
+        WishKind::Beast => "Пошли мне зверя",
+        WishKind::Undead => "Подними мертвеца на соперника",
+        WishKind::Guard => "Натрави на соперника гвардию",
+        WishKind::Debt => "Пусть соперник будет мне должен",
+        WishKind::Build => "Построй мне дом в моём поселении",
+        WishKind::Sway => "Пусть правитель склонится ко мне",
+        WishKind::Harvest => "Пусть поля уродят",
+        WishKind::Fair => "Пусть у меня будет ярмарка",
+        WishKind::WakeGrove => "Пусть лес пойдёт",
     }
 }
 
@@ -688,6 +698,9 @@ pub fn price(
         Price::Style(1) => "1 Стиль".into(),
         Price::Style(n) => format!("{n} Стиля"),
         Price::Claim(_) => "свою землю".into(),
+        Price::Cargo => "свою ношу".into(),
+        Price::Companion => "своего спутника".into(),
+        Price::Item(_) => "свою вещь".into(),
     }
 }
 

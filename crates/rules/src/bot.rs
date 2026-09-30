@@ -570,16 +570,20 @@ fn deed_wish(game: &Game, player: PlayerId) -> Option<Intent> {
         }
         // No undead to enlist: bodies near, to rise.
         (GreatDeed::Legion, LegionSize) if !game.mobs().iter().any(|m| m.is_undead()) => {
-            wish(God::Zaga, crate::Act::Dead)
+            wish(God::Zaga, crate::Act::Dead { target: None })
         }
         (GreatDeed::River, RiverLength | RiverSource | RiverMouth) => {
-            wish(God::Maya, crate::Act::River)
+            wish(God::Maya, crate::Act::River { target: None })
         }
-        (GreatDeed::FloodedTable, TableFlooded) => wish(God::Maya, crate::Act::Flood),
+        (GreatDeed::FloodedTable, TableFlooded) => {
+            wish(God::Maya, crate::Act::Flood { target: None })
+        }
         (GreatDeed::Roads, TemplesLinked) => wish(God::Ahamar, crate::Act::Road),
-        (GreatDeed::GreatFire, RegionsBurnt | FireBurning) => wish(God::Trishna, crate::Act::Fire),
+        (GreatDeed::GreatFire, RegionsBurnt | FireBurning) => {
+            wish(God::Trishna, crate::Act::Fire { target: None })
+        }
         (GreatDeed::Amazon, JungleWoods) => wish(God::Bhava, crate::Act::Land),
-        (GreatDeed::Amazon, JungleRiver) => wish(God::Maya, crate::Act::River),
+        (GreatDeed::Amazon, JungleRiver) => wish(God::Maya, crate::Act::River { target: None }),
         // Bhava's woods round where it stands.
         (GreatDeed::WorldTree, WoodsAround) => wish(God::Bhava, crate::Act::Land),
         // Groves round it to wake.

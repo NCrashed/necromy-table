@@ -2429,7 +2429,7 @@ fn a_wish_beyond_its_budget_is_cut_and_a_price_must_be_payable() {
     g.champ_mut(me).hp = hp;
     // Three acts are too many; two at grade 0 are cut to one.
     let too_many = Wish {
-        acts: vec![Act::Peace, Act::Land, Act::Dead],
+        acts: vec![Act::Peace, Act::Land, Act::Dead { target: None }],
         price: None,
     };
     assert_eq!(
@@ -4092,13 +4092,16 @@ fn asking_for_the_dead_where_there_are_none_brings_bodies_in() {
         g.board.tile_mut(h).unwrap().corpse = None;
     }
     // Trishna loves a feast of the dead: 3, enough for a new rule.
-    assert_eq!(g.act_cost(Act::Dead), crate::game::wish::AWAKEN_COST);
+    assert_eq!(
+        g.act_cost(Act::Dead { target: None }),
+        crate::game::wish::AWAKEN_COST
+    );
     let events = g
         .wishes(
             me,
             Intent::Wish {
                 god: God::Trishna,
-                wish: Wish::one(Act::Dead),
+                wish: Wish::one(Act::Dead { target: None }),
                 said: None,
             },
         )
@@ -4107,7 +4110,7 @@ fn asking_for_the_dead_where_there_are_none_brings_bodies_in() {
     assert!(g.has(Feature::Bodies));
     assert!(g.board().corpses().count() > 0);
     // Now bodies are a thing of this world: the next asking is cheap.
-    assert_eq!(g.act_cost(Act::Dead), 1);
+    assert_eq!(g.act_cost(Act::Dead { target: None }), 1);
 }
 
 #[test]
@@ -6225,5 +6228,287 @@ fn the_god_pressed_hardest_acts_at_dusk_after_its_stage() {
                 "{god:?} at {stage} did nothing"
             );
         }
+    }
+}
+
+/// Crowns `me` and grants `wish` from `god` as the model judged it.
+fn wish_said(g: &mut Game, me: PlayerId, god: God, wish: Wish, grade: u8) -> Vec<Event> {
+    crown(g, me);
+    g.wishes(
+        me,
+        Intent::Wish {
+            god,
+            wish,
+            said: Some(Said {
+                text: "…".into(),
+                grade,
+                speech: String::new(),
+                reason: String::new(),
+                forged: None,
+            }),
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn wishes_poison_hunt_mark_and_indebt_a_rival() {
+    let (mut g, me, foe) = duel(3);
+    let events = wish_said(
+        &mut g,
+        me,
+        God::Zaga,
+        Wish::one(Act::Poison { target: foe }),
+        3,
+    );
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::Poisoned { player, element: Element::Earth, .. } if *player == foe
+    )));
+
+    let (mut g, me, foe) = duel(3);
+    let there = g.champion(foe).unwrap().hex;
+    let events = wish_said(
+        &mut g,
+        me,
+        God::Maya,
+        Wish::one(Act::Undead { target: foe }),
+        3,
+    );
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::MobAppeared { mob } if mob.kind == MobKind::Undead && mob.hex.unsigned_distance_to(there) == 1
+    )));
+
+    let (mut g, me, foe) = duel(3);
+    let there = g.champion(foe).unwrap().hex;
+    let events = wish_said(
+        &mut g,
+        me,
+        God::Bhava,
+        Wish::one(Act::Beast { target: Some(foe) }),
+        3,
+    );
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::MobAppeared { mob } if mob.kind.is_beast() && mob.hex.unsigned_distance_to(there) == 1
+    )));
+
+    let (mut g, me, foe) = duel(3);
+    let before = g.threat(foe);
+    wish_said(
+        &mut g,
+        me,
+        God::Ahamar,
+        Wish::one(Act::Guard { target: foe }),
+        3,
+    );
+    assert!(g.threat(foe) > before);
+
+    let (mut g, me, foe) = duel(3);
+    wish_said(
+        &mut g,
+        me,
+        God::Ahamar,
+        Wish::one(Act::Debt { target: foe }),
+        3,
+    );
+    assert!(
+        g.debts()
+            .iter()
+            .any(|d| d.debtor == foe && d.creditor == me && d.amount > 0)
+    );
+}
+
+#[test]
+fn a_beast_asked_for_oneself_follows_as_a_companion() {
+    let (mut g, me, _) = duel(3);
+    assert!(g.has(Feature::Companions));
+    wish_said(
+        &mut g,
+        me,
+        God::Bhava,
+        Wish::one(Act::Beast { target: None }),
+        3,
+    );
+    assert_eq!(g.companions(me), &[Companion::Beast(Element::Wood)]);
+}
+
+#[test]
+fn wishes_build_open_a_fair_and_harvest_on_ones_own_settlement() {
+    let (mut g, me, _) = duel(3);
+    let town = Hex::new(0, 1);
+    settled(&mut g, me, town);
+    let events = wish_said(
+        &mut g,
+        me,
+        God::Ahamar,
+        Wish::one(Act::Build { building: None }),
+        3,
+    );
+    assert!(events.iter().any(|e| matches!(e, Event::Built { .. })));
+    assert_eq!(g.building(town), Some(Building::Forge));
+
+    let (mut g, me, _) = duel(3);
+    settled(&mut g, me, town);
+    let events = wish_said(
+        &mut g,
+        me,
+        God::Trishna,
+        Wish::one(Act::Build {
+            building: Some(Building::Wall),
+        }),
+        3,
+    );
+    assert!(events.iter().any(|e| matches!(e, Event::Built { .. })));
+    assert_eq!(g.building(town), Some(Building::Wall));
+
+    let (mut g, me, _) = duel(3);
+    settled(&mut g, me, town);
+    wish_said(&mut g, me, God::Trishna, Wish::one(Act::Fair), 3);
+    assert!(g.fair(town).is_some_and(|f| f.host == me));
+
+    let (mut g, me, _) = duel(3);
+    settled(&mut g, me, town);
+    set_terrain(&mut g, Hex::new(1, 1), Terrain::Fields);
+    g.loads.clear();
+    let events = wish_said(&mut g, me, God::Trishna, Wish::one(Act::Harvest), 3);
+    assert!(g.loads().contains(&(Hex::new(1, 1), Cargo::Food)));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::FoodStored { hex, .. } if *hex == town))
+    );
+}
+
+#[test]
+fn a_wish_sways_the_nearest_ruler_and_wakes_the_nearest_grove() {
+    let (mut g, me, _) = duel(4);
+    let courts = three_courts(&mut g);
+    let me_at = g.champion(me).unwrap().hex;
+    let court = *courts
+        .iter()
+        .min_by_key(|h| (h.unsigned_distance_to(me_at), h.x(), h.y()))
+        .unwrap();
+    let before = g.rulers().find(|(h, _)| *h == court).unwrap().1.regard[me.0 as usize];
+    wish_said(&mut g, me, God::Ahamar, Wish::one(Act::Sway), 3);
+    let after = g.rulers().find(|(h, _)| *h == court).unwrap().1.regard[me.0 as usize];
+    assert!(after > before, "{before} -> {after}");
+
+    let (mut g, me, _) = duel(3);
+    let grove = g.champion(me).unwrap().hex + Hex::new(2, 0);
+    set_terrain(&mut g, grove, Terrain::Grove);
+    let events = wish_said(&mut g, me, God::Bhava, Wish::one(Act::WakeGrove), 3);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::GroveWoke { hex, .. } if *hex == grove))
+    );
+}
+
+#[test]
+fn a_wish_for_a_missing_mechanic_brings_it_in() {
+    let (mut g, me, foe) = duel(3);
+    without(&mut g, &[Feature::Poison]);
+    let events = wish_said(
+        &mut g,
+        me,
+        God::Zaga,
+        Wish::one(Act::Poison { target: foe }),
+        3,
+    );
+    assert_eq!(grew(&events), vec![Feature::Poison]);
+}
+
+#[test]
+fn fire_can_be_wished_upon_a_rival() {
+    let (mut g, me, foe) = duel(3);
+    let there = g.champion(foe).unwrap().hex;
+    let wood = there + Hex::new(1, 0);
+    set_terrain(&mut g, wood, Terrain::Forest);
+    let events = wish_said(
+        &mut g,
+        me,
+        God::Trishna,
+        Wish::one(Act::Fire { target: Some(foe) }),
+        3,
+    );
+    assert!(
+        g.fires().any(|(h, _)| h.unsigned_distance_to(there) <= 2),
+        "{events:?}"
+    );
+}
+
+#[test]
+fn a_poor_wish_spills_the_gods_nature_beside_the_asker() {
+    let (mut g, me, _) = duel(3);
+    let events = wish_said(&mut g, me, God::Bhava, Wish::one(Act::Strength), 1);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::WishGranted { grade: 1, .. }))
+    );
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::GodActed { god: God::Bhava, near, .. } if *near == me
+    )));
+    // A fine wish is granted as asked.
+    let (mut g, me, _) = duel(3);
+    let events = wish_said(&mut g, me, God::Bhava, Wish::one(Act::Strength), 3);
+    assert!(!events.iter().any(|e| matches!(e, Event::GodActed { .. })));
+}
+
+#[test]
+fn a_wish_can_be_paid_with_a_burden_a_companion_or_a_thing_worn() {
+    let (mut g, me, _) = duel(3);
+    g.champ_mut(me).cargo = Some(Cargo::Food);
+    let wish = Wish {
+        acts: vec![Act::Peace],
+        price: Some(Price::Cargo),
+    };
+    wish_said(&mut g, me, God::Zaga, wish, 3);
+    assert_eq!(g.cargo(me), None);
+
+    let (mut g, me, _) = duel(3);
+    g.champ_mut(me).companions = vec![Companion::Beast(Element::Wood)];
+    let wish = Wish {
+        acts: vec![Act::Peace],
+        price: Some(Price::Companion),
+    };
+    wish_said(&mut g, me, God::Zaga, wish, 3);
+    assert!(g.companions(me).is_empty());
+
+    let (mut g, me, _) = duel(3);
+    let bow = wear(&mut g, me, "Тисовый лук");
+    let slot = bow.def().slot;
+    let wish = Wish {
+        acts: vec![Act::Peace],
+        price: Some(Price::Item(slot)),
+    };
+    wish_said(&mut g, me, God::Zaga, wish, 3);
+    assert_eq!(g.gear(me)[slot.index()], None);
+    assert!(g.loot.contains(&bow));
+
+    // Nothing to give, nothing to pay with.
+    let (mut g, me, _) = duel(3);
+    crown(&mut g, me);
+    for price in [Price::Cargo, Price::Companion, Price::Item(slot)] {
+        g.champ_mut(me).companions.clear();
+        let wish = Wish {
+            acts: vec![Act::Peace],
+            price: Some(price),
+        };
+        assert_eq!(
+            g.wishes(
+                me,
+                Intent::Wish {
+                    god: God::Zaga,
+                    wish,
+                    said: None,
+                },
+            ),
+            Err(RuleError::InvalidWish),
+            "{price:?}"
+        );
     }
 }

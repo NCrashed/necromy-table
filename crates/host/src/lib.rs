@@ -831,7 +831,7 @@ impl Table {
                         result
                             .map_err(|_| "бог не ответил".to_string())
                             .and_then(|reply| {
-                                prompt::read_wish(&self.game, seat, &text, &reply)
+                                prompt::read_wish(&self.game, seat, god, &text, &reply)
                                     .map_err(|_| "бог ответил невнятно".to_string())
                             });
                     let outcome = heard.and_then(|(wish, said)| {
