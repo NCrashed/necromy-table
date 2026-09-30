@@ -142,6 +142,10 @@ impl Game {
             _ => return false,
         }
         events.push(Event::Buried { player, hex });
+        // The militia think well of whoever buries the dead (§21.8).
+        if self.has(Feature::Militia) {
+            self.shift_standing(player, 1, events);
+        }
         // Zaga's Stillness: a burial is an offering, and it quiets.
         if self.law_active(super::Law::Stillness) {
             self.offer(Some(player), God::Zaga, 1, events);

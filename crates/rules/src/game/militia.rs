@@ -93,7 +93,9 @@ impl Game {
     /// The militia on `hex` would let `player` through: a step onto them
     /// trades places instead of attacking.
     pub fn lets_pass(&self, player: PlayerId, hex: Hex) -> bool {
-        self.militia_at(hex).is_some() && self.standing(player) >= MILITIA_PASS
+        self.militia_at(hex).is_some_and(|home| {
+            self.standing(player) >= MILITIA_PASS || self.sworn_militia(player, home)
+        })
     }
 
     /// What the militia think of `player`, −3..=3.

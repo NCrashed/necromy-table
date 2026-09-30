@@ -161,6 +161,7 @@ impl Game {
         if !self.catches(hex) {
             return;
         }
+        self.fire_at_fair(hex, events);
         self.fires.insert((hex.x(), hex.y()), Fire { by });
         events.push(Event::FireStarted { hex, by });
     }
@@ -194,7 +195,7 @@ impl Game {
 
     /// A champion walking into a fire is burnt.
     pub(super) fn scorch(&mut self, player: PlayerId, at: Hex, events: &mut Vec<Event>) {
-        if self.fire(at).is_none() {
+        if self.fire(at).is_none() || self.companions(player).contains(&super::Companion::Dragon) {
             return;
         }
         let champ = self.champ_mut(player);

@@ -6097,3 +6097,78 @@ fn a_wound_from_a_beast_or_the_dead_festers() {
     g.settle_mob_fight(undead, me, &hits, &shields, false, &mut events);
     assert!(g.champion(me).unwrap().poison.is_none());
 }
+
+// ---- Where the mechanics meet (§21.8) ----
+
+#[test]
+fn stores_feed_and_roads_carry() {
+    let (mut g, me, _) = duel(4);
+    let town = Hex::new(0, 2);
+    settled(&mut g, me, town);
+    g.stores.insert((town.x(), town.y()), 2);
+    g.champ_mut(me).hp = 1;
+    g.champ_mut(me).spirit_points = 0;
+    let mut ev = Vec::new();
+    g.stores_at_dawn(&mut ev);
+    assert_eq!(g.food_at(town), 1);
+    assert_eq!(g.champion(me).unwrap().hp, 2);
+    assert_eq!(g.champion(me).unwrap().spirit_points, 1);
+    // On a road a burden weighs nothing.
+    g.lay_road(town, &mut ev);
+    assert!(g.carried_by_road(me));
+}
+
+#[test]
+fn a_caravan_on_a_road_is_waylaid_from_hiding() {
+    let (mut g, me, foe) = duel(2);
+    let road = Hex::new(1, 0);
+    let mut ev = Vec::new();
+    g.lay_road(road, &mut ev);
+    g.champ_mut(me).cargo = Some(Cargo::Goods(God::Maya));
+    g.champ_mut(foe).hidden = true;
+    g.waylay(me, road, &mut ev);
+    assert_eq!(g.cargo(foe), Some(Cargo::Goods(God::Maya)));
+    assert!(g.cargo(me).is_none());
+    assert!(!g.is_hidden(foe));
+}
+
+#[test]
+fn fire_ends_a_fair_and_a_dragon_keeps_its_champion_from_burning() {
+    let (mut g, me, _) = duel(4);
+    let town = Hex::new(0, 2);
+    settled(&mut g, me, town);
+    g.fairs.insert(
+        (town.x(), town.y()),
+        Fair {
+            host: me,
+            goods: 0,
+            until: 99,
+        },
+    );
+    let mut ev = Vec::new();
+    g.set_fire(town, None, &mut ev);
+    assert!(g.fair(town).is_none());
+    g.champ_mut(me).companions.push(Companion::Dragon);
+    g.champ_mut(me).hp = 3;
+    g.scorch(me, town, &mut ev);
+    assert_eq!(g.champion(me).unwrap().hp, 3);
+}
+
+#[test]
+fn a_sworn_rulers_militia_let_their_lord_pass() {
+    let (mut g, me, _) = duel(4);
+    let town = Hex::new(0, 2);
+    g.board.tile_mut(town).unwrap().terrain = Terrain::Settlement;
+    g.militia.insert(
+        (town.x(), town.y()),
+        Militia {
+            men: 2,
+            at: Some(town),
+        },
+    );
+    g.seat_rulers();
+    g.standing[me.0 as usize] = -3;
+    assert!(!g.lets_pass(me, town));
+    g.rulers.get_mut(&(town.x(), town.y())).unwrap().sworn = Some(me);
+    assert!(g.lets_pass(me, town));
+}

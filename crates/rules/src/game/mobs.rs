@@ -297,7 +297,9 @@ impl Game {
                 .filter(|&p| !self.is_hidden(p))
                 .map(|p| self.hex_of(p)),
         );
-        let Some(goal) = fair.or(settlement).or(champion) else {
+        // Blood spilt in a feud draws them next (§21.8).
+        let feud = self.feud_in_sight(u.hex, UNDEAD_SIGHT);
+        let Some(goal) = fair.or(feud).or(settlement).or(champion) else {
             return;
         };
         let here = u.hex.unsigned_distance_to(goal);

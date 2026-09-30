@@ -1899,6 +1899,147 @@ impl Match {
             Event::Feasted { player, guests, .. } => {
                 format!("{} устраивает пир: гостей {guests}.", self.name(*player))
             }
+            Event::Ate { player, .. } => format!(
+                "{} подкрепляется из запасов: +1 здоровья, +1 Духа.",
+                self.name(*player)
+            ),
+            Event::Waylaid { robber, victim, .. } => format!(
+                "{} выходит из засады у дороги и отнимает ношу у {}!",
+                self.name(*robber),
+                self.name_genitive(*victim)
+            ),
+            Event::FairOpened { player, .. } => {
+                format!("{} открывает ярмарку.", self.name(*player))
+            }
+            Event::GoodsSold {
+                player, god, kinds, ..
+            } => format!(
+                "{} продаёт на ярмарке: {} (товаров там: {kinds}).",
+                self.name(*player),
+                names::goods(*god)
+            ),
+            Event::FairDevoured { host, .. } => format!(
+                "Мертвецы пришли на ярмарку {} и съели пир.",
+                self.name_genitive(*host)
+            ),
+            Event::Sworn { player, .. } => {
+                format!("Правитель присягает {}.", self.name(*player))
+            }
+            Event::Wedding { player, .. } => {
+                format!("Свадьба правителей — сосватал {}.", self.name(*player))
+            }
+            Event::MatchBroken { player, .. } => {
+                format!("Помолвка, устроенная {}, расстроена.", self.name(*player))
+            }
+            Event::Emperor { player } => {
+                format!("{} коронуется на Столе Ахамара.", self.name(*player))
+            }
+            Event::Discord { player, feuding } => format!(
+                "{} сеет раздор: {feuding} бывших вассалов в распре.",
+                self.name(*player)
+            ),
+            Event::Buried { player, .. } => format!("{} хоронит тело.", self.name(*player)),
+            Event::PitSettled { player, raised, .. } => format!(
+                "{} {} чумную яму.",
+                self.name(*player),
+                if *raised {
+                    "поднимает мертвецов из"
+                } else {
+                    "упокаивает"
+                }
+            ),
+            Event::GateOpened { summoner, .. } => format!(
+                "Врата круга {} открываются: выходит чудовище!",
+                self.name_genitive(*summoner)
+            ),
+            Event::MonsterSlain { by, own } => format!(
+                "{} сражает чудовище{}.",
+                self.name(*by),
+                if *own {
+                    " — своё, призванное"
+                } else {
+                    ""
+                }
+            ),
+            Event::EggFound { player, .. } => {
+                format!("{} находит драконье яйцо.", self.name(*player))
+            }
+            Event::DragonHatched { player, .. } => match player {
+                Some(p) => format!(
+                    "Из яйца вылупляется дракон: теперь он спутник — {}.",
+                    self.name(*p)
+                ),
+                None => "Из яйца вылупляется дракон.".into(),
+            },
+            Event::GuestHome { player } => {
+                format!("{} доводит гостя из-за мглы до Стола.", self.name(*player))
+            }
+            Event::GroveWoke { player, .. } => {
+                format!("{} будит рощу: она пойдёт к Столу.", self.name(*player))
+            }
+            Event::GroveRooted { player, .. } => format!(
+                "Шагающая роща ({}) укореняется у Стола.",
+                self.name(*player)
+            ),
+            Event::Challenged { host, rival, .. } => format!(
+                "{} вызывает {} на дуэль: не придёшь — проиграешь.",
+                self.name(*host),
+                self.name_accusative(*rival)
+            ),
+            Event::DuelWon { winner, loser, .. } => format!(
+                "Дуэль: {} побеждает {}.",
+                self.name(*winner),
+                self.name_accusative(*loser)
+            ),
+            Event::DuelForfeit { host, rival } => format!(
+                "{} не явился на дуэль — победа хозяина арены: {}.",
+                self.name(*rival),
+                self.name(*host)
+            ),
+            Event::BetSettled { by, on, won, .. } => format!(
+                "Пари {} на {}: {}.",
+                self.name_genitive(*by),
+                self.name_accusative(*on),
+                if *won {
+                    "выиграно — долг за проигравшим"
+                } else {
+                    "проиграно — спорщик в долгу"
+                }
+            ),
+            Event::DebtPaid {
+                debtor,
+                creditor,
+                amount,
+            } => format!(
+                "{} отдаёт долг {}: {amount} Стиля.",
+                self.name(*debtor),
+                self.name_genitive(*creditor)
+            ),
+            Event::BallBegun { host } => format!(
+                "Бал мёртвых у {}: до рассвета никто не должен драться.",
+                self.name_genitive(*host)
+            ),
+            Event::BallEnded { host, kept } => format!(
+                "Бал мёртвых у {} {}.",
+                self.name_genitive(*host),
+                if *kept {
+                    "прошёл мирно"
+                } else {
+                    "сорван дракой"
+                }
+            ),
+            Event::Raided {
+                player, owner, won, ..
+            } => format!(
+                "{} совершает набег на сокровищницу {}: {}.",
+                self.name(*player),
+                self.name_genitive(*owner),
+                if *won {
+                    "взята"
+                } else {
+                    "охрана отбилась"
+                }
+            ),
             Event::FoodStored { player, food, .. } => {
                 format!("{} несёт еду в запасы: теперь {food}.", self.name(*player))
             }

@@ -174,6 +174,10 @@ impl Game {
         for d in due {
             self.arena_wins[d.host.0 as usize] += 1;
             self.add_style(d.rival, -1, StyleReason::Battle, events);
+            // The militia think less of one who never came (§21.8).
+            if self.has(crate::features::Feature::Militia) {
+                self.shift_standing(d.rival, -1, events);
+            }
             // Ahamar's Exposure: the register names who never came.
             if self.law_active(super::Law::Exposure) {
                 self.add_threat(d.rival, 2, events);

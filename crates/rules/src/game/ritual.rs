@@ -196,17 +196,20 @@ impl Game {
                 self.ruin(m.hex, events);
                 continue;
             }
-            let goal = self
-                .players()
-                .filter(|&p| !self.is_hidden(p))
-                .map(|p| self.hex_of(p))
-                .chain(
-                    self.board
-                        .land()
-                        .filter(|(_, t)| t.terrain == Terrain::Settlement)
-                        .map(|(h, _)| h),
-                )
-                .min_by_key(|h| (h.unsigned_distance_to(m.hex), h.x(), h.y()));
+            // The noise of a fair draws it first (§21.8).
+            let fair = self.fair_in_sight(m.hex, 8);
+            let goal = fair.or_else(|| {
+                self.players()
+                    .filter(|&p| !self.is_hidden(p))
+                    .map(|p| self.hex_of(p))
+                    .chain(
+                        self.board
+                            .land()
+                            .filter(|(_, t)| t.terrain == Terrain::Settlement)
+                            .map(|(h, _)| h),
+                    )
+                    .min_by_key(|h| (h.unsigned_distance_to(m.hex), h.x(), h.y()))
+            });
             let Some(goal) = goal else {
                 continue;
             };

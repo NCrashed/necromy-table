@@ -999,6 +999,17 @@ pub enum Event {
     FeudStruck {
         home: Hex,
     },
+    /// `player` ate from the stores on `hex` at dawn (§21.8).
+    Ate {
+        player: PlayerId,
+        hex: Hex,
+    },
+    /// A burden carried onto a road was taken by `robber` from hiding.
+    Waylaid {
+        robber: PlayerId,
+        victim: PlayerId,
+        hex: Hex,
+    },
     /// A settlement made its region's goods (§21.8).
     GoodsMade {
         hex: Hex,
@@ -2617,6 +2628,7 @@ impl Game {
         self.piranhas(player, to, events);
         self.scorch(player, to, events);
         self.guest_arrives(player, to, events);
+        self.waylay(player, to, events);
         self.spring_traps(player, to, events);
 
         // The champion may have fallen to a trap and woken at home.
@@ -3615,6 +3627,7 @@ impl Game {
             if self.scripted.is_none_or(|s| s.dawn) {
                 self.dawn(events);
                 self.mechanic_laws_at_dawn(events);
+                self.stores_at_dawn(events);
             }
         }
         // Everyone takes their turn at once (§11.2).
@@ -3660,7 +3673,7 @@ impl Game {
         }
         // A burden makes the road longer (§21.8).
         let weight = self.burden_weight();
-        if self.champions[player.0 as usize].cargo.is_some() {
+        if self.champions[player.0 as usize].cargo.is_some() && !self.carried_by_road(player) {
             let turn = &mut self.turns[player.0 as usize];
             turn.move_points = turn.move_points.saturating_sub(weight);
         }
@@ -3761,6 +3774,7 @@ impl Game {
 
 mod battle;
 mod beasts;
+mod bonds;
 mod buildings;
 mod burial;
 mod cargo;

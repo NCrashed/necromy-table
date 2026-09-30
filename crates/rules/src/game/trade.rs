@@ -147,7 +147,9 @@ impl Game {
             god,
             kinds,
         });
-        self.add_style(player, 1, StyleReason::Fair, events);
+        // Brought from another land, it sells for more (§21.8).
+        let worth = 1 + i16::from(self.foreign_goods(hex, god));
+        self.add_style(player, worth, StyleReason::Fair, events);
         self.draw(player, 1, events);
         // Trishna's Thirst: the market pays in Spirit too.
         if self.law_active(super::Law::Thirst) {
