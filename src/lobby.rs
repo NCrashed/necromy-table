@@ -636,8 +636,26 @@ fn rebuild(
     if let Some(e) = &front.error {
         rows.push(text(&mut commands, &font, e, 13.0, BAD));
     }
+    // Which build this is, and which tables it can sit at.
+    let version = text(&mut commands, &font, &version_line(), 11.0, DIM);
+    commands.entity(version).insert(Node {
+        align_self: AlignSelf::FlexEnd,
+        margin: UiRect::top(px(4.0)),
+        ..default()
+    });
+    rows.push(version);
     commands.entity(frame).add_children(&rows);
     commands.entity(root).add_child(frame);
+}
+
+/// The protocol and the build, at the foot of the menu: which build someone
+/// plays, and whether it can meet the server.
+pub fn version_line() -> String {
+    format!(
+        "протокол {} · сборка {}",
+        necromy_net::PROTOCOL,
+        env!("NECROMY_BUILD")
+    )
 }
 
 fn menu(commands: &mut Commands, font: &UiFont, front: &Front, rows: &mut Vec<Entity>) {
