@@ -401,3 +401,27 @@ fn old_kept_matches_are_swept() {
     assert!(!dir.join(&code).exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_owner_can_play_without_clocks() {
+    let mut rig = Rig::new();
+    let anna = rig.client("Аня");
+    anna.send(ClientMsg::Create);
+    rig.until(&anna, lobby);
+    anna.send(ClientMsg::Pace(necromy_net::Pace::Untimed));
+    let info = rig.until(&anna, |m| {
+        lobby(m).filter(|l| l.pace == necromy_net::Pace::Untimed)
+    });
+    assert_eq!(info.pace, necromy_net::Pace::Untimed);
+    anna.send(ClientMsg::Start);
+    // No clock ever shows for her seat.
+    for _ in 0..200 {
+        rig.server.step(0.5);
+        while let Some(m) = anna.poll() {
+            if let ServerMsg::Table(FromTable::Clock(c)) = m {
+                assert!(c.is_none(), "a clock runs: {c:?}");
+            }
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}

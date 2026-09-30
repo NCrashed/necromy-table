@@ -33,9 +33,12 @@ pub fn render_plugin() -> RenderPlugin {
     {
         use bevy::render::settings::{Backends, Dx12Compiler};
 
-        // No GL: a fallback that draws slower and differently is worse than
-        // a clear failure, and every machine this ships to has DX12.
-        settings.backends = Backends::from_env().or(Some(Backends::VULKAN | Backends::DX12));
+        // DX12 only: with Vulkan allowed too wgpu may pick it, and on the
+        // artist's 1920×1080 machine it hung after the first log line. No GL:
+        // a fallback that draws slower and differently is worse than a clear
+        // failure, and every machine this ships to has DX12.
+        // `WGPU_BACKEND=vulkan` still tries Vulkan.
+        settings.backends = Backends::from_env().or(Some(Backends::DX12));
 
         let beside_exe = std::env::current_exe()
             .ok()

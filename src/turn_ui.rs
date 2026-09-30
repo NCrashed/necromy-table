@@ -26,16 +26,31 @@ pub struct TurnUiPlugin;
 
 impl Plugin for TurnUiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (spawn, spawn_clock))
+        app.init_resource::<PlaceMenu>()
+            .add_systems(Startup, (spawn, spawn_clock))
             .add_systems(
                 crate::InGame,
-                (rebuild_status, rebuild_action)
-                    .run_if(resource_changed::<Match>.or_else(resource_changed::<Selection>)),
+                (rebuild_status, rebuild_action).run_if(
+                    resource_changed::<Match>
+                        .or_else(resource_changed::<Selection>)
+                        .or_else(resource_changed::<PlaceMenu>),
+                ),
             )
             .add_systems(
                 crate::InGame,
                 (taste_tip, action_buttons, splash, show_clock),
             );
+    }
+}
+
+/// Whether the list of what this spot offers is open under the bar
+/// (`NECROMY_PLACE_MENU=open` opens it from the start, for screenshots).
+#[derive(Resource)]
+struct PlaceMenu(bool);
+
+impl Default for PlaceMenu {
+    fn default() -> Self {
+        PlaceMenu(std::env::var("NECROMY_PLACE_MENU").is_ok_and(|v| v == "open"))
     }
 }
 
@@ -69,6 +84,8 @@ enum ActionButton {
     /// Take the burden underfoot, lay down the one carried (§21.8).
     Take,
     Lay,
+    /// Open or close the list of what this spot offers.
+    PlaceMenu,
     /// Build on the settlement underfoot, or grow its city (§21.8).
     Build(necromy_rules::Building),
     /// Tame the beast or enlist the undead next to you (§21.8).
@@ -143,6 +160,10 @@ fn spawn(mut commands: Commands, font: Res<UiFont>) {
             left: px(345.0),
             right: px(425.0),
             justify_content: JustifyContent::Center,
+            // The bar, and under it what this spot offers.
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: px(6.0),
             ..default()
         },
         Visibility::Hidden,
@@ -300,6 +321,7 @@ fn rebuild_action(
     mut commands: Commands,
     game: Res<Match>,
     selection: Res<Selection>,
+    place: Res<PlaceMenu>,
     art: Res<StatArt>,
     font: Res<UiFont>,
     bar: Single<(Entity, &mut Visibility), With<ActionBar>>,
@@ -489,12 +511,16 @@ fn rebuild_action(
     commands.entity(texts).add_children(&[main, hint]);
     commands.entity(panel).add_child(texts);
 
-    // What this spot offers besides (§21.8): a burden to take or lay down.
-    let mut buttons: Vec<(ActionButton, String)> = button
-        .map(|(a, l)| (a, l.to_string()))
-        .into_iter()
-        .collect();
-    if game.is_human_turn() && selection.card.is_none() && selection.sift.is_none() {
+    // What this spot offers besides (§21.8): a burden to take or lay down,
+    // a building, a gift... A row of their own under the bar, so the bar
+    // keeps its size. Not in the tutorial: it lets only its step through.
+    let primary = button.map(|(a, l)| (a, l.to_string()));
+    let mut buttons: Vec<(ActionButton, String)> = Vec::new();
+    if game.is_human_turn()
+        && selection.card.is_none()
+        && selection.sift.is_none()
+        && game.gate.is_none()
+    {
         if let Some(cargo) = g.takeable(human) {
             buttons.push((
                 ActionButton::Take,
@@ -653,7 +679,17 @@ fn rebuild_action(
             ));
         }
     }
-    for (action, label) in buttons {
+    // What this spot offers stays behind one button; the list opens under
+    // the bar, over what lies there, until an action or the button again.
+    let mut in_bar: Vec<(ActionButton, String)> = primary.into_iter().collect();
+    if !buttons.is_empty() {
+        let arrow = if place.0 { "▴" } else { "▾" };
+        in_bar.push((
+            ActionButton::PlaceMenu,
+            format!("Здесь: {} {arrow}\nдействия клетки", buttons.len()),
+        ));
+    }
+    for (action, label) in in_bar {
         let b = commands
             .spawn((
                 action,
@@ -678,16 +714,68 @@ fn rebuild_action(
         commands.entity(panel).add_child(b);
     }
     commands.entity(bar).add_child(panel);
+    if buttons.is_empty() || !place.0 {
+        return;
+    }
+    let extras = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Stretch,
+                row_gap: px(4.0),
+                padding: UiRect::all(px(10.0)),
+                ..default()
+            },
+            Frame::Panel,
+            // Over the wish strip and the deed cards while open.
+            GlobalZIndex(30),
+        ))
+        .id();
+    for (action, label) in buttons {
+        let b = commands
+            .spawn((
+                action,
+                Button,
+                Node {
+                    padding: UiRect::axes(px(10.0), px(5.0)),
+                    // Wrap to the next line rather than squeeze.
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                Frame::Button,
+            ))
+            .id();
+        // One line, small: many may stand here at once.
+        let t = commands
+            .spawn((
+                Text::new(label.replace('\n', " · ")),
+                font.bold(12.0),
+                TextColor(INK),
+                TextLayout::new(Justify::Center, LineBreak::NoWrap),
+            ))
+            .id();
+        commands.entity(b).add_child(t);
+        commands.entity(extras).add_child(b);
+    }
+    commands.entity(bar).add_child(extras);
 }
 
 fn action_buttons(
     pressed: Query<(&Interaction, &ActionButton), Changed<Interaction>>,
     mut game: ResMut<Match>,
     mut selection: ResMut<Selection>,
+    mut place: ResMut<PlaceMenu>,
 ) {
     for (interaction, button) in &pressed {
         if *interaction != Interaction::Pressed {
             continue;
+        }
+        if let ActionButton::PlaceMenu = button {
+            place.0 = !place.0;
+            continue;
+        }
+        if place.0 {
+            place.0 = false;
         }
         let human = game.human;
         let intent = match button {
@@ -732,6 +820,7 @@ fn action_buttons(
                 selection.card = None;
                 Intent::Pass
             }
+            ActionButton::PlaceMenu => continue,
         };
         if let Err(err) = game.act(human, intent) {
             warn!("action rejected: {err}");

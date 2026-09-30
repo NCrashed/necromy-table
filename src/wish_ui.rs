@@ -63,7 +63,7 @@ impl Plugin for WishUiPlugin {
                         .run_if(resource_changed::<Match>.or_else(resource_changed::<WishDraft>)),
                 ),
             )
-            .add_systems(crate::InGame, (expire_reply, listening_dots));
+            .add_systems(crate::InGame, (expire_reply, reply_buttons, listening_dots));
     }
 }
 
@@ -90,6 +90,14 @@ struct WishPanel;
 
 #[derive(Component)]
 struct ReplyPanel;
+
+/// A button under the gods' answers: leaf back or on, or put them away.
+#[derive(Component, Clone, Copy)]
+enum ReplyButton {
+    Back,
+    On,
+    Close,
+}
 
 /// Another seat's wish as they write it.
 #[derive(Component)]
@@ -797,12 +805,62 @@ fn rebuild_reply(
     for line in &reply.lines {
         rows.push(block(&mut commands, format!("→ {line}"), 12.0, INK));
     }
+    // Leaf through this dusk's answers, one's own first; put them away.
+    let nav = commands
+        .spawn(Node {
+            column_gap: px(8.0),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::FlexEnd,
+            margin: UiRect::top(px(6.0)),
+            ..default()
+        })
+        .id();
+    let count = game.wish_replies.len();
+    let small = |commands: &mut Commands, what: ReplyButton, label: &str, on: bool| {
+        let b = commands
+            .spawn((
+                what,
+                Button,
+                Node {
+                    padding: UiRect::axes(px(12.0), px(5.0)),
+                    ..default()
+                },
+                if on { Frame::Button } else { Frame::ButtonOff },
+            ))
+            .id();
+        let t = commands
+            .spawn((Text::new(label), font.bold(13.0), TextColor(INK)))
+            .id();
+        commands.entity(b).add_child(t);
+        b
+    };
+    if count > 1 {
+        let back = small(&mut commands, ReplyButton::Back, "◀", game.wish_page > 0);
+        let page = stats::label(
+            &mut commands,
+            &font,
+            &format!("{} из {count}", game.wish_page + 1),
+            13.0,
+            true,
+        );
+        let on = small(
+            &mut commands,
+            ReplyButton::On,
+            "▶",
+            game.wish_page + 1 < count,
+        );
+        commands.entity(nav).add_children(&[back, page, on]);
+    }
+    let close = small(&mut commands, ReplyButton::Close, "Понятно", true);
+    commands.entity(nav).add_child(close);
+    rows.push(nav);
     commands.entity(frame).add_children(&rows);
     commands.entity(panel).add_child(frame);
 }
 
+/// Autoplay leafs through the answers by itself; a person does it by hand.
 fn expire_reply(time: Res<Time>, mut shown: Local<(u32, f32)>, mut game: ResMut<Match>) {
-    if game.wish_reply.is_none() {
+    if game.wish_reply.is_none() || !game.autoplay {
         return;
     }
     let now = time.elapsed_secs();
@@ -958,4 +1016,28 @@ fn rebuild_watch(
     }
     commands.entity(frame).add_children(&rows);
     commands.entity(panel).add_child(frame);
+}
+
+/// The buttons under the gods' answers.
+fn reply_buttons(
+    pressed: Query<(&Interaction, &ReplyButton), Changed<Interaction>>,
+    mut game: ResMut<Match>,
+) {
+    for (interaction, button) in &pressed {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        match button {
+            ReplyButton::Back if game.wish_page > 0 => {
+                let page = game.wish_page - 1;
+                game.show_wish_page(page);
+            }
+            ReplyButton::On if game.wish_page + 1 < game.wish_replies.len() => {
+                let page = game.wish_page + 1;
+                game.show_wish_page(page);
+            }
+            ReplyButton::Close => game.close_wish_replies(),
+            _ => {}
+        }
+    }
 }

@@ -223,6 +223,8 @@ enum FrontButton {
     Begin,
     /// Single player: the world to begin with.
     Mode(necromy_rules::Mode),
+    /// The clocks of a network match.
+    Pace(necromy_net::Pace),
     /// Back from the single player setup to the menu.
     Back,
     Open,
@@ -439,6 +441,11 @@ fn buttons(
                 Some(conn) if front.lobby.is_some() => conn.send(ClientMsg::Mode(mode)),
                 _ => front.alone_mode = mode,
             },
+            FrontButton::Pace(pace) => {
+                if let Some(conn) = &front.conn {
+                    conn.send(ClientMsg::Pace(pace));
+                }
+            }
             FrontButton::Back => {
                 front.alone = false;
                 front.tutorial = false;
@@ -735,6 +742,9 @@ fn menu(commands: &mut Commands, font: &UiFont, front: &Front, rows: &mut Vec<En
     rows.push(settings);
 }
 
+/// Width of a chapter's tile in the tutorial list.
+const CHAPTER_TILE: f32 = 250.0;
+
 /// The tutorial's chapters, the finished ones marked.
 fn tutorial_rows(commands: &mut Commands, font: &UiFont, rows: &mut Vec<Entity>) {
     rows.push(text(
@@ -746,18 +756,53 @@ fn tutorial_rows(commands: &mut Commands, font: &UiFont, rows: &mut Vec<Entity>)
     ));
     let done = crate::tutorial::done_chapters();
     let first_new = (0..crate::tutorial::chapters().len()).find(|n| !done.contains(n));
+    // Tiles two to a row, the blurb inside: a list of titles and blurbs
+    // did not fit a 1080-line screen.
+    let grid = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
+            justify_content: JustifyContent::Center,
+            column_gap: px(10.0),
+            row_gap: px(10.0),
+            width: px(2.0 * CHAPTER_TILE + 10.0),
+            ..default()
+        })
+        .id();
     for (n, chapter) in crate::tutorial::chapters().iter().enumerate() {
         let mark = if done.contains(&n) { "  ✓" } else { "" };
-        let b = button(
-            commands,
-            font,
-            FrontButton::Chapter(n),
-            &format!("{}. {}{mark}", n + 1, chapter.title),
-            first_new == Some(n),
-        );
-        rows.push(b);
-        rows.push(text(commands, font, chapter.blurb, 12.0, DIM));
+        let tile = commands
+            .spawn((
+                FrontButton::Chapter(n),
+                Button,
+                Node {
+                    width: px(CHAPTER_TILE),
+                    min_height: px(84.0),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(6.0),
+                    padding: UiRect::axes(px(14.0), px(12.0)),
+                    ..default()
+                },
+                Frame::Button,
+                Accent(if first_new == Some(n) {
+                    GOLD
+                } else {
+                    BRONZE_RIM
+                }),
+            ))
+            .id();
+        let title = commands
+            .spawn((
+                Text::new(format!("{}. {}{mark}", n + 1, chapter.title)),
+                font.bold(15.0),
+                TextColor(INK),
+            ))
+            .id();
+        let blurb = text(commands, font, chapter.blurb, 12.0, DIM);
+        commands.entity(tile).add_children(&[title, blurb]);
+        commands.entity(grid).add_child(tile);
     }
+    rows.push(grid);
     let back = button(commands, font, FrontButton::Back, "Назад", false);
     rows.push(back);
 }
@@ -834,6 +879,12 @@ fn lobby_rows(
         commands,
         font,
         lobby.mode,
+        lobby.you == lobby.owner,
+    ));
+    rows.push(pace_row(
+        commands,
+        font,
+        lobby.pace,
         lobby.you == lobby.owner,
     ));
 
@@ -1024,6 +1075,50 @@ fn mode_row(
             mode == Mode::Full,
         );
         commands.entity(row).add_children(&[creation, full]);
+        commands.entity(column).add_child(row);
+    }
+    let note = text(commands, font, what, 12.0, DIM);
+    commands.entity(column).add_child(note);
+    column
+}
+
+/// The clocks of a network match: the owner picks, the others read.
+fn pace_row(
+    commands: &mut Commands,
+    font: &UiFont,
+    pace: necromy_net::Pace,
+    choose: bool,
+) -> Entity {
+    use necromy_net::Pace;
+    let column = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: px(4.0),
+            ..default()
+        })
+        .id();
+    let what = match pace {
+        Pace::Timed => {
+            "Таймеры: на ход, ответ и желание есть время; вышло — стол решает за тебя (пас, конец хода, отказ)."
+        }
+        Pace::Slow => "Долгие таймеры: втрое больше времени на ход, ответ и желание.",
+        Pace::Untimed => "Без таймеров: думай сколько угодно — для вдумчивой игры и тестов.",
+    };
+    if choose {
+        let row = commands
+            .spawn(Node {
+                column_gap: px(10.0),
+                ..default()
+            })
+            .id();
+        for (p, label) in [
+            (Pace::Timed, "Таймеры"),
+            (Pace::Slow, "Долгие"),
+            (Pace::Untimed, "Без таймеров"),
+        ] {
+            let b = button(commands, font, FrontButton::Pace(p), label, pace == p);
+            commands.entity(row).add_child(b);
+        }
         commands.entity(column).add_child(row);
     }
     let note = text(commands, font, what, 12.0, DIM);

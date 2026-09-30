@@ -22,7 +22,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever a message changes shape; mismatched sides refuse.
-pub const PROTOCOL: u32 = 48;
+pub const PROTOCOL: u32 = 49;
 pub const DEFAULT_PORT: u16 = 7878;
 /// Our playtest server (aerospace, service/necromy-table.nix): where the
 /// menu points unless `NECROMY_SERVER` or the field says otherwise.
@@ -45,6 +45,8 @@ pub enum ClientMsg {
     Pick(Option<God>),
     /// The owner picks the world the match begins with (§21).
     Mode(necromy_rules::Mode),
+    /// The owner picks the clocks on people's decisions.
+    Pace(Pace),
     /// The owner starts the match; free seats go to bots.
     Start,
     /// Sit back down at a running match after losing the connection.
@@ -81,6 +83,20 @@ pub struct LobbyInfo {
     pub oracle: Option<String>,
     /// The world the match will begin with.
     pub mode: necromy_rules::Mode,
+    /// The clocks the match will run with.
+    pub pace: Pace,
+}
+
+/// How long people may think over a turn, a window and a wish.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Pace {
+    /// The server's clocks.
+    #[default]
+    Timed,
+    /// Three times as long.
+    Slow,
+    /// No clocks: for a thoughtful test.
+    Untimed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

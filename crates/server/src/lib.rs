@@ -59,6 +59,8 @@ struct Lobby {
     picks: BTreeMap<u64, God>,
     /// The world the match begins with (§21), the owner's choice.
     mode: necromy_rules::Mode,
+    /// The clocks, the owner's choice.
+    pace: necromy_net::Pace,
     running: Option<Running>,
 }
 
@@ -229,6 +231,7 @@ impl Server {
                         members: vec![id],
                         picks: BTreeMap::new(),
                         mode: necromy_rules::Mode::Creation,
+                        pace: necromy_net::Pace::default(),
                         running: None,
                     },
                 );
@@ -300,6 +303,23 @@ impl Server {
                 }
                 if lobby.running.is_none() {
                     lobby.mode = mode;
+                    self.tell_lobby(&code);
+                }
+            }
+            ClientMsg::Pace(pace) => {
+                let Some(code) = self.lobby_of(id) else {
+                    self.refuse(id, "ты не за столом");
+                    return;
+                };
+                let Some(lobby) = self.lobbies.get_mut(&code) else {
+                    return;
+                };
+                if lobby.owner != id {
+                    self.refuse(id, "таймеры выбирает тот, кто открыл стол");
+                    return;
+                }
+                if lobby.running.is_none() {
+                    lobby.pace = pace;
                     self.tell_lobby(&code);
                 }
             }
@@ -385,6 +405,7 @@ impl Server {
                     people: people.clone(),
                     oracle: self.oracle.as_ref().map(|_| "локальная модель".to_string()),
                     mode: lobby.mode,
+                    pace: lobby.pace,
                 }),
             );
         }
@@ -424,6 +445,16 @@ impl Server {
         for seat in seats_of.values() {
             seats[seat.0 as usize] = Seat::Human;
         }
+        // The owner's pace bends the server's clocks.
+        let timers = match lobby.pace {
+            necromy_net::Pace::Timed => timers,
+            necromy_net::Pace::Slow => timers.map(|t| Timers {
+                turn: t.turn * 3.0,
+                window: t.window * 3.0,
+                wish: t.wish * 3.0,
+            }),
+            necromy_net::Pace::Untimed => None,
+        };
         let mut table = Table::new(Config {
             seed,
             champions: God::ALL.to_vec(),
@@ -522,6 +553,7 @@ impl Server {
                 members: Vec::new(),
                 picks: BTreeMap::new(),
                 mode: necromy_rules::Mode::Creation,
+                pace: necromy_net::Pace::default(),
                 running: Some(Running {
                     table,
                     seats: BTreeMap::new(),

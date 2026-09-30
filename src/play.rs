@@ -158,8 +158,11 @@ pub struct Match {
     pub drafting: std::collections::BTreeMap<PlayerId, (Option<God>, String)>,
     /// The wish and the god's answer on screen now, shown for a moment (§7).
     pub wish_reply: Option<WishReply>,
-    /// Answers still to show: at dusk the gods answer everyone at once.
-    pub wish_queue: VecDeque<WishReply>,
+    /// This dusk's answers, the human's first; `wish_reply` is the one on
+    /// screen, `wish_page` its place. Leafed through by hand, closed with
+    /// «Понятно» or by playing on (§21.4).
+    pub wish_replies: Vec<WishReply>,
+    pub wish_page: usize,
     /// Bumped for every new `wish_reply`.
     pub wish_serial: u32,
     /// The last story line told to the human, for its voice popup (§8).
@@ -200,6 +203,7 @@ pub struct OracleState {
 }
 
 /// A wish and what came of it.
+#[derive(Clone)]
 pub struct WishReply {
     pub player: PlayerId,
     /// The table's update it came in; its god's words are keyed by it.
@@ -642,7 +646,8 @@ impl Match {
             stages_seen: God::ALL.map(|g| view.stage(g)),
             stage_shifts: 0,
             wish_reply: None,
-            wish_queue: VecDeque::new(),
+            wish_replies: Vec::new(),
+            wish_page: 0,
             wish_serial: 0,
             told: None,
             told_serial: 0,
@@ -674,11 +679,29 @@ impl Match {
         self.game.wishing().contains(&self.human) && wish_by_hand()
     }
 
-    /// The next god's answer from the queue goes on screen, if any.
+    /// The answer on page `page` goes on screen.
+    pub fn show_wish_page(&mut self, page: usize) {
+        self.wish_page = page.min(self.wish_replies.len().saturating_sub(1));
+        self.wish_reply = self.wish_replies.get(self.wish_page).cloned();
+        self.wish_serial += 1;
+    }
+
+    /// The answers are put away.
+    pub fn close_wish_replies(&mut self) {
+        if self.wish_reply.is_none() && self.wish_replies.is_empty() {
+            return;
+        }
+        self.wish_replies.clear();
+        self.wish_reply = None;
+        self.wish_serial += 1;
+    }
+
+    /// The next answer, or none past the last (autoplay leafs by itself).
     pub fn next_wish_reply(&mut self) {
-        self.wish_reply = self.wish_queue.pop_front();
-        if self.wish_reply.is_some() {
-            self.wish_serial += 1;
+        if self.wish_page + 1 < self.wish_replies.len() {
+            self.show_wish_page(self.wish_page + 1);
+        } else {
+            self.close_wish_replies();
         }
     }
 
@@ -702,6 +725,10 @@ impl Match {
             return Ok(());
         }
         self.game.clone().apply(player, intent.clone())?;
+        // Playing on puts the gods' answers away (§21.4).
+        if matches!(intent, Intent::Play { .. } | Intent::EndTurn) {
+            self.close_wish_replies();
+        }
         if self.answer_due {
             self.queued.push_back(intent);
             return Ok(());
@@ -1091,9 +1118,15 @@ impl Match {
         for show in self.shows.iter_mut().filter(|s| s.done) {
             show.closed = true;
         }
-        self.wish_queue.extend(wished);
-        if self.wish_reply.is_none() {
-            self.next_wish_reply();
+        if !wished.is_empty() {
+            // A new dusk's answers replace what was put away; one's own first.
+            let open = self.wish_reply.is_some();
+            self.wish_replies.extend(wished);
+            let human = self.human;
+            self.wish_replies.sort_by_key(|r| r.player != human);
+            if !open {
+                self.show_wish_page(0);
+            }
         }
         if let Some(mut h) = hit {
             if h.lines.is_empty() {

@@ -3,7 +3,8 @@
 //! Only people's seats have clocks. A turn has its own clock, which stands
 //! still while the seat waits (on a window, or held on a rival, §11.2); each window a seat may answer has one; the
 //! wish has one while dusk waits for it (§21.4), which stands still while
-//! a god thinks about words already sent. When a clock runs out the table does the plainest
+//! a god thinks about words already sent; so does the turn clock (the
+//! wish is written by day, in one's turn). When a clock runs out the table does the plainest
 //! thing for the seat: pass (in a battle, throw with nothing burned), end
 //! the turn, or refuse the wish. It never plays for them.
 
@@ -123,10 +124,13 @@ impl SeatClock {
         seat: PlayerId,
         thinking: bool,
     ) -> Option<Intent> {
+        // A god reading this seat's words: every clock of theirs waits, the
+        // turn's too (a wish is written by day, in one's turn, §21.4).
+        if thinking {
+            return None;
+        }
         if let Some(left) = self.wish.as_mut() {
-            if !thinking {
-                *left -= dt;
-            }
+            *left -= dt;
             return (*left <= 0.0).then_some(Intent::RefuseWish);
         }
         if let Some(left) = self.window.as_mut() {
@@ -147,5 +151,31 @@ impl SeatClock {
             }
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use necromy_rules::{God, Setup};
+
+    #[test]
+    fn every_clock_waits_while_a_god_reads_the_seats_words() {
+        let (game, _) = Game::new(Setup {
+            seed: 1,
+            champions: God::ALL.to_vec(),
+            mode: Default::default(),
+        });
+        let seat = game
+            .players()
+            .find(|&p| game.free_to_act(p))
+            .expect("someone acts");
+        let mut clock = SeatClock::default();
+        clock.follow(&Timers::default(), &game, seat, &[]);
+        let before = clock.shown(&game, seat).expect("the turn runs").left;
+        assert!(clock.run(10.0, &game, seat, true).is_none());
+        assert_eq!(clock.shown(&game, seat).unwrap().left, before);
+        clock.run(10.0, &game, seat, false);
+        assert_eq!(clock.shown(&game, seat).unwrap().left, before - 10.0);
     }
 }
