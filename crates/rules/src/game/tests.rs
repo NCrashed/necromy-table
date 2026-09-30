@@ -3589,7 +3589,7 @@ fn when_the_dead_rise() {
             g.round(),
             count(|e| matches!(e, Event::MobAppeared { mob } if mob.is_undead())),
             count(|e| matches!(e, Event::MobFell { .. })),
-            count(|e| matches!(e, Event::MilitiaStruck { .. })),
+            count(|e| matches!(e, Event::MilitiaStruck { fell: true, .. })),
             count(|e| matches!(e, Event::SettlementRuined { .. })),
             count(|e| matches!(e, Event::MobStruck { .. })),
         );

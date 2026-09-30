@@ -256,10 +256,15 @@ impl Game {
             u.hp = u.hp.saturating_sub(1);
             let hp = u.hp;
             events.push(Event::MobHurt { id, amount: 1, hp });
-            if hp == 0 {
+            let fell = hp == 0;
+            if fell {
                 self.mobs.retain(|u| u.id != id);
-                events.push(Event::MilitiaStruck { hex: at, mob: id });
             }
+            events.push(Event::MilitiaStruck {
+                hex: at,
+                mob: id,
+                fell,
+            });
         }
 
         self.militia_go_home(events);

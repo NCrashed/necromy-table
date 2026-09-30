@@ -6,6 +6,7 @@ mod camera;
 mod card_art;
 mod deck;
 mod dice;
+mod clash;
 mod effects;
 mod feed;
 mod fight;
@@ -100,7 +101,7 @@ fn main() {
             menu_stage::MenuStagePlugin,
             menu_world::MenuWorldPlugin,
         ))
-        .add_plugins(mobs_ui::MobsUiPlugin)
+        .add_plugins((mobs_ui::MobsUiPlugin, clash::ClashPlugin))
         .add_plugins(AutoScreenshotPlugin)
         .add_systems(Startup, setup_scene)
         .run();
@@ -271,6 +272,8 @@ fn auto_screenshot(
         (Some("undead"), Some(game)) => {
             game.game.mobs().iter().any(|m| m.is_undead()) && game.on_screen.is_none()
         }
+        // A fight between mobs, the militia or the guard (`clash.rs`).
+        (Some("clash"), Some(game)) => game.last_clash.is_some(),
         (Some("beast"), Some(game)) => {
             game.game.mobs().iter().any(|m| m.is_beast()) && game.on_screen.is_none()
         }

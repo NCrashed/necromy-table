@@ -24,6 +24,11 @@ const MOVE_SPEED: f32 = 6.0;
 
 pub struct TokenPlugin;
 
+/// The systems that place champion and guard tokens; a clash (`clash.rs`)
+/// moves the guard after.
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct Tokens;
+
 impl Plugin for TokenPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, load_sheets)
@@ -37,7 +42,8 @@ impl Plugin for TokenPlugin {
                     sync_dragons,
                     animate_tokens,
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(Tokens),
             )
             // Billboards face the camera where it is this frame.
             .add_systems(crate::InGame, face_camera.after(crate::camera::apply))
@@ -465,12 +471,19 @@ fn sync_guard(
     mut images: ResMut<Assets<Image>>,
     camera: Single<&Transform, (With<crate::TableCamera>, Without<GuardToken>)>,
     mut guards: Query<
-        (Entity, &mut Transform, Option<(&mut Animated, &mut Sprite)>),
+        (
+            Entity,
+            &mut Transform,
+            Option<(&mut Animated, &mut Sprite)>,
+            Has<crate::clash::Lunge>,
+        ),
         With<GuardToken>,
     >,
 ) {
     match (game.shown_guard(), guards.single_mut()) {
-        (Some(guard), Ok((_, mut transform, look))) => {
+        // A clash (`clash.rs`) moves it for now.
+        (Some(_), Ok((.., true))) => {}
+        (Some(guard), Ok((_, mut transform, look, _))) => {
             let target = board.hex_to_world(guard.hex);
             let delta = target - transform.translation;
             transform.translation += delta.clamp_length_max(MOVE_SPEED * 0.5 * time.delta_secs());

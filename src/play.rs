@@ -150,6 +150,10 @@ pub struct Match {
     pub heard: Vec<Event>,
     /// Events for `effects.rs` to show on the board, drained there.
     pub effects: Vec<Event>,
+    /// Fights between mobs, the militia and the guard, for `clash.rs`.
+    pub clashes: Vec<Event>,
+    /// Where the first clash took place (`NECROMY_SCREENSHOT_WHEN=clash`).
+    pub last_clash: Option<Hex>,
     /// Rivals' wishes as they write them: the god and the words (§21.4).
     pub drafting: std::collections::BTreeMap<PlayerId, (Option<God>, String)>,
     /// The wish and the god's answer on screen now, shown for a moment (§7).
@@ -632,6 +636,8 @@ impl Match {
             world_news: Vec::new(),
             heard: Vec::new(),
             effects: Vec::new(),
+            clashes: Vec::new(),
+            last_clash: None,
             drafting: Default::default(),
             stages_seen: God::ALL.map(|g| view.stage(g)),
             stage_shifts: 0,
@@ -867,6 +873,46 @@ impl Match {
     fn record(&mut self, events: &[Event]) {
         self.heard.extend_from_slice(events);
         self.effects.extend_from_slice(events);
+        for event in events {
+            match *event {
+                // Where a mob that leaves the board in this batch last stood.
+                Event::MobMoved { id, to, .. } => {
+                    if let Some(m) = self.seen_mobs.get_mut(&id) {
+                        m.hex = to;
+                    }
+                }
+                Event::MilitiaStruck { .. }
+                | Event::MilitiaHit { .. }
+                | Event::UndeadHitMilitia { .. }
+                | Event::BeastMauled { .. }
+                | Event::GuardHewed { .. } => {
+                    self.clashes.push(event.clone());
+                    // The first one: it plays at once. `NECROMY_CLASH=kill` waits for
+                    // one that fells a mob.
+                    let fatal = matches!(
+                        event,
+                        Event::MilitiaStruck { fell: true, .. }
+                            | Event::BeastMauled { .. }
+                            | Event::GuardHewed { .. }
+                    );
+                    let kill = std::env::var("NECROMY_CLASH").as_deref() == Ok("kill");
+                    if kill && !fatal {
+                        continue;
+                    }
+                    self.last_clash = self.last_clash.or(match *event {
+                        Event::MilitiaStruck { hex, .. } | Event::GuardHewed { hex, .. } => {
+                            Some(hex)
+                        }
+                        Event::MilitiaHit { home, .. } | Event::UndeadHitMilitia { home, .. } => {
+                            Some(home)
+                        }
+                        Event::BeastMauled { beast, .. } => self.seen_mob(beast).map(|m| m.hex),
+                        _ => None,
+                    });
+                }
+                _ => {}
+            }
+        }
         if let Some(seen) = self.lesson_events.as_mut() {
             seen.extend_from_slice(events);
         }
@@ -2219,8 +2265,13 @@ impl Match {
             Event::MobFell { by, .. } => {
                 format!("{} упокаивает неупокоенного.", self.name(*by))
             }
-            Event::MilitiaStruck { mob, .. } => {
+            Event::MilitiaStruck {
+                mob, fell: true, ..
+            } => {
                 format!("Ополчение поселения рубит {}.", self.mob_name(*mob).1)
+            }
+            Event::MilitiaStruck { mob, .. } => {
+                format!("Ополчение поселения ранит {}.", self.mob_name(*mob).1)
             }
             Event::MilitiaHit {
                 player,

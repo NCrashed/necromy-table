@@ -10,6 +10,7 @@ use bevy_sprite3d::prelude::*;
 use necromy_rules::Hex;
 
 use crate::board::{Board, TEXELS};
+use crate::clash::Lunge;
 use crate::play::Match;
 use crate::stats::StatArt;
 use crate::token::Billboard;
@@ -21,23 +22,30 @@ const POSTS: [Vec3; 2] = [Vec3::new(-0.5, 0.0, 0.45), Vec3::new(0.5, 0.0, 0.45)]
 
 pub struct MobsUiPlugin;
 
+/// The systems that place mob and militia figures; a clash
+/// (`clash.rs`) moves them after.
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct Figures;
+
 impl Plugin for MobsUiPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, make_pennants)
-            .add_systems(crate::InGame, (sync_mobs, sync_militia));
+            .add_systems(crate::InGame, (sync_mobs, sync_militia).in_set(Figures));
     }
 }
 
+/// A mob's figure, by its id.
 #[derive(Component)]
-struct UndeadToken(u32);
+pub(crate) struct UndeadToken(pub u32);
 
+/// One man of the militia of `hex` (their home).
 #[derive(Component)]
-struct MilitiaMan {
-    hex: Hex,
+pub(crate) struct MilitiaMan {
+    pub hex: Hex,
     post: usize,
 }
 
-fn figure(image: Handle<Image>, at: Vec3) -> impl Bundle {
+pub(crate) fn figure(image: Handle<Image>, at: Vec3) -> impl Bundle {
     (
         Billboard,
         NotShadowCaster,
@@ -63,20 +71,23 @@ fn sync_mobs(
     board: Res<Board>,
     art: Res<StatArt>,
     images: Res<Assets<Image>>,
-    mut tokens: Query<(Entity, &UndeadToken, &mut Transform)>,
+    mut tokens: Query<(Entity, &UndeadToken, &mut Transform, Has<Lunge>)>,
 ) {
     let shown = game.shown_mobs();
-    for (entity, token, mut transform) in &mut tokens {
+    for (entity, token, mut transform, lunging) in &mut tokens {
         let Some(u) = shown.iter().find(|u| u.id == token.0) else {
             commands.entity(entity).despawn();
             continue;
         };
+        if lunging {
+            continue;
+        }
         let goal = board.hex_to_world(u.hex);
         let delta = goal - transform.translation;
         transform.translation += delta.clamp_length_max(WALK * time.delta_secs());
     }
     for u in &shown {
-        if tokens.iter().any(|(_, t, _)| t.0 == u.id) {
+        if tokens.iter().any(|(_, t, ..)| t.0 == u.id) {
             continue;
         }
         let image = art.mob(u.kind, u.id);
@@ -100,7 +111,7 @@ fn sync_militia(
     art: Res<StatArt>,
     pennants: Res<Pennants>,
     images: Res<Assets<Image>>,
-    mut men: Query<(Entity, &MilitiaMan, &mut Transform), Without<Pennant>>,
+    mut men: Query<(Entity, &MilitiaMan, &mut Transform, Has<Lunge>), Without<Pennant>>,
     mut flags: Query<(Entity, &Pennant, &mut Transform), Without<MilitiaMan>>,
 ) {
     let g = &game.game;
@@ -115,7 +126,7 @@ fn sync_militia(
     let step = WALK * time.delta_secs();
 
     // The men: walk to where their militia stands; one figure a man.
-    for (entity, man, mut transform) in &mut men {
+    for (entity, man, mut transform, lunging) in &mut men {
         let Some(&(_, at, count)) = standing.iter().find(|(h, ..)| *h == man.hex) else {
             commands.entity(entity).despawn();
             continue;
@@ -124,13 +135,16 @@ fn sync_militia(
             commands.entity(entity).despawn();
             continue;
         }
+        if lunging {
+            continue;
+        }
         let goal = board.hex_to_world(at) + POSTS[man.post];
         let delta = goal - transform.translation;
         transform.translation += delta.clamp_length_max(step);
     }
     for &(home, at, count) in &standing {
         for (post, offset) in POSTS.iter().enumerate().take(count as usize) {
-            if men.iter().any(|(_, m, _)| m.hex == home && m.post == post) {
+            if men.iter().any(|(_, m, ..)| m.hex == home && m.post == post) {
                 continue;
             }
             // A different man at each post, the same on every client.

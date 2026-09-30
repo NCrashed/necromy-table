@@ -539,11 +539,12 @@ pub enum Event {
         hex: Hex,
         by: PlayerId,
     },
-    /// A settlement's militia standing on `hex` cut down mob `mob` next
-    /// to them.
+    /// A settlement's militia standing on `hex` wounded mob `mob` next
+    /// to them (its `MobHurt` comes first), and cut it down if it `fell`.
     MilitiaStruck {
         hex: Hex,
         mob: u32,
+        fell: bool,
     },
     /// The militia of `home` struck `player` next to them in the world
     /// phase, for `why`; a hit that never takes the last health follows.

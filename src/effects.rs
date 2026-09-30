@@ -44,17 +44,17 @@ impl Plugin for EffectsPlugin {
 }
 
 #[derive(Resource)]
-struct EffectSprites {
+pub(crate) struct EffectSprites {
     /// Per element (`Element::index`).
     drop: [Handle<Image>; 5],
     bubble: [Handle<Image>; 5],
     pop: [Handle<Image>; 5],
-    spark: Handle<Image>,
+    pub spark: Handle<Image>,
     steam: Handle<Image>,
 }
 
 #[derive(Component)]
-struct Particle {
+pub(crate) struct Particle {
     vel: Vec3,
     /// Pulls down (m/s²); negative lifts, like a bubble.
     gravity: f32,
@@ -67,7 +67,7 @@ struct Particle {
 }
 
 /// Sprite from rows of palette letters; `.` is transparent.
-fn pixels(rows: &[&str], palette: &[(u8, [u8; 4])]) -> Image {
+pub(crate) fn pixels(rows: &[&str], palette: &[(u8, [u8; 4])]) -> Image {
     let (w, h) = (rows[0].len() as u32, rows.len() as u32);
     let mut image = Image::new_fill(
         Extent3d {
@@ -103,7 +103,7 @@ fn mix([r, g, b]: [u8; 3], [r2, g2, b2]: [u8; 3], t: f32) -> [u8; 3] {
 }
 
 const VENOM: [u8; 3] = [150, 230, 90];
-const INK: [u8; 4] = [30, 24, 30, 255];
+pub(crate) const INK: [u8; 4] = [30, 24, 30, 255];
 
 // Rows of pixels read best one under another.
 #[rustfmt::skip]
@@ -181,7 +181,7 @@ fn make_sprites(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     });
 }
 
-fn sprite(image: Handle<Image>) -> impl Bundle {
+pub(crate) fn sprite(image: Handle<Image>) -> impl Bundle {
     (
         Billboard,
         NotShadowCaster,
@@ -198,11 +198,11 @@ fn sprite(image: Handle<Image>) -> impl Bundle {
 
 /// A small generator for looks only; the rules never see it.
 #[derive(Default)]
-struct Scatter(u32);
+pub(crate) struct Scatter(u32);
 
 impl Scatter {
     /// −1..1
-    fn next(&mut self) -> f32 {
+    pub fn next(&mut self) -> f32 {
         self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         (self.0 >> 8) as f32 / (1u32 << 23) as f32 - 1.0
     }
@@ -390,7 +390,7 @@ fn bubbles(
 }
 
 impl Particle {
-    fn new(vel: Vec3, gravity: f32, life: f32) -> Particle {
+    pub fn new(vel: Vec3, gravity: f32, life: f32) -> Particle {
         Particle {
             vel,
             gravity,
@@ -401,7 +401,7 @@ impl Particle {
         }
     }
 
-    fn floor(self, y: f32) -> Particle {
+    pub fn floor(self, y: f32) -> Particle {
         Particle {
             floor: Some(y),
             ..self

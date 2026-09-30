@@ -1369,6 +1369,9 @@ fn track_hover(
                 .find(|&h| game.game.is_ruined_settlement(h));
         }
         // The first undead or beast on the board (§20.4).
+        if s == "clash" {
+            return game.last_clash;
+        }
         if s == "undead" || s == "beast" {
             let beast = s == "beast";
             return game
