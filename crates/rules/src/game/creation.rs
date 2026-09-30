@@ -377,7 +377,7 @@ impl Game {
 
     /// The nearest land to `near`, `min` rings out or more, that passes
     /// `fits`, where nobody stands and nothing walks.
-    fn free_land_near(
+    pub(super) fn free_land_near(
         &self,
         near: Hex,
         min: u32,

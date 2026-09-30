@@ -71,6 +71,7 @@ fn art_file(name: &str) -> Option<&'static str> {
         "Пиранья" => "piranha",
         "Подать" => "levy",
         "Подкоп" => "undermine",
+        "Запруда" => "dam",
         "Цепкий корень" => "grasping-root",
         "Живица" => "resin",
         "Шипы чащи" => "thicket-thorns",

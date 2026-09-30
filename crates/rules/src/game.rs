@@ -999,6 +999,12 @@ pub enum Event {
     FeudStruck {
         home: Hex,
     },
+    /// At dusk `god` put its hand on the world near `near` (§21.6).
+    GodActed {
+        god: God,
+        act: gods_hand::GodAct,
+        near: PlayerId,
+    },
     /// `player` ate from the stores on `hex` at dawn (§21.8).
     Ate {
         player: PlayerId,
@@ -2198,6 +2204,7 @@ impl Game {
                             Effect::Kindle => t.terrain.burns() && self.fire(*h).is_none(),
                             Effect::Rain => h.range(1).any(|n| self.fire(n).is_some()),
                             Effect::Causeway => !self.road(*h),
+                            Effect::Dam => t.terrain == Terrain::River,
                             Effect::Trap(_) => !self.traps.iter().any(|tr| tr.hex == *h),
                             _ => true,
                         }
@@ -2562,6 +2569,7 @@ impl Game {
                 self.trials_at_dusk(events);
             }
             self.storyteller(events);
+            self.gods_hand(events);
         }
         self.start_round(events);
     }
@@ -3260,7 +3268,8 @@ impl Game {
             | Effect::Writ
             | Effect::Piranha(_)
             | Effect::Levy
-            | Effect::Tunnel) => {
+            | Effect::Tunnel
+            | Effect::Dam) => {
                 let effect = match effect {
                     Effect::Channel(x) => Effect::Channel(n(x)),
                     Effect::Deluge(x) => Effect::Deluge(n(x)),
@@ -3785,6 +3794,7 @@ mod dusk;
 mod fields;
 mod fire;
 mod gear;
+mod gods_hand;
 mod guard;
 mod laws;
 mod mechanic_cards;
@@ -3821,6 +3831,7 @@ pub use dusk::{DuskStep, Seal, SealedWish};
 pub use fields::{FEAST_FIELDS, FEAST_FOOD, FEAST_GUESTS, GUEST_RANGE, SOW_SPIRIT};
 pub use fire::{DOUSE_SPIRIT, Fire, GREAT_FIRE, KINDLE_SPIRIT};
 pub use gear::{Gain, SACRIFICE};
+pub use gods_hand::GodAct;
 pub use guard::{GUARD_DICE, GUARD_HEALTH, GUARD_RELIEF, GUARD_STEPS, Guard};
 pub use laws::{BURDEN_FREE, CHOSEN, CRACK_REACH, Law, Patronage, SENTENCE_THRESHOLD, SIGN, VOICE};
 pub use militia::{

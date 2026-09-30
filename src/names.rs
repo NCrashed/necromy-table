@@ -1295,3 +1295,26 @@ pub fn law_line(law: necromy_rules::Law, game: &necromy_rules::Game) -> String {
         law_text(law).to_string()
     }
 }
+
+/// What a god did to the world by itself at dusk (§21.6).
+pub fn god_act(act: necromy_rules::GodAct) -> &'static str {
+    use necromy_rules::GodAct::*;
+    match act {
+        Grove => "поднялась роща",
+        Woods => "равнина зарастает лесом",
+        Beast => "из чащи вышел зверь",
+        Settlement => "поселились люди",
+        Goods => "поселения дали товар",
+        Fire => "вспыхнул пожар",
+        Stones => "встали камни силы",
+        Mountains => "поднялись горы",
+        Dam => "река заилилась в болото, рядом легло тело",
+        Road => "пролегла дорога реестра",
+        Trial => "поставлено испытание",
+        Judgement => "реестр записал: +2 Угрозы",
+        Unveil => "мгла отступила",
+        River => "река потекла дальше",
+        Flood => "поднялись воды",
+        Land => "земля бога разрослась",
+    }
+}

@@ -858,6 +858,7 @@ fn hear_events(
             | Event::GoodsSold { hex, .. }
             | Event::Feasted { hex, .. } => (Sound::new("fair"), Heard::At(*hex)),
             Event::Wedding { a, .. } => (Sound::new("wedding"), Heard::At(*a)),
+            Event::GodActed { .. } => (Sound::new("dusk").at(0.5), Heard::Always),
             Event::Waylaid { hex, .. } => (Sound::new("hit"), Heard::At(*hex)),
             Event::GateOpened { hex, .. } => (Sound::new("gate"), Heard::At(*hex)),
             Event::DragonHatched { hex, .. } => (Sound::new("hatch"), Heard::At(*hex)),

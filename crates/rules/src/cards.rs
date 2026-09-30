@@ -142,6 +142,8 @@ pub enum Effect {
     Levy,
     /// A tunnel dug, or a way opened, under the caster.
     Tunnel,
+    /// The river hex silts up into a marsh: the river is cut.
+    Dam,
 }
 
 impl Effect {
@@ -171,6 +173,7 @@ impl Effect {
                 | Effect::Writ
                 | Effect::Levy
                 | Effect::Tunnel
+                | Effect::Dam
         )
     }
 
@@ -247,7 +250,7 @@ impl CardDef {
             Effect::Grow => Some(Feature::Groves),
             Effect::Ent => Some(Feature::WalkingGroves),
             Effect::Kindle | Effect::Rain => Some(Feature::Fires),
-            Effect::Channel(_) => Some(Feature::Rivers),
+            Effect::Channel(_) | Effect::Dam => Some(Feature::Rivers),
             Effect::Deluge(_) => Some(Feature::Lakes),
             Effect::Causeway => Some(Feature::Roads),
             Effect::Rob => Some(Feature::Cargo),
@@ -459,7 +462,8 @@ pub const POOL: &[CardDef] = &[
     card("Дикий энт", "Роща рядом оживает: каждую ночь она шагает к Столу.", Some(Wood), Rite, Own, 2, EmptyHex { range: 1 }, Ent),
     card("Искра в сухостой", "Подожги лес, рощу, поле или поселение в 2 шагах.", Some(Fire), Trick, Own, 0, EmptyHex { range: 2 }, Kindle),
     card("Ливень", "Потуши огонь на клетке в 3 шагах и вокруг неё.", Some(Water), Rite, Instant, 1, EmptyHex { range: 3 }, Rain),
-    card("Новое русло", "Река рядом течёт дальше на 2 клетки, а нет реки — берёт начало у ближних гор.", Some(Water), Rite, Own, 1, Caster, Channel(2)),
+    card("Новое русло", "Река рядом течёт дальше на 2 клетки, а нет реки — берёт начало у ближних гор.", Some(Water), Rite, Own, 2, Caster, Channel(2)),
+    card("Запруда", "Клетка реки в 3 шагах заиливается в болото: река рвётся.", Some(Earth), Trick, Instant, 0, EmptyHex { range: 3 }, Dam),
     card("Разлив", "Вода рядом разливается озером на 2 клетки, к Столу.", Some(Water), Rite, Own, 2, Caster, Deluge(2)),
     card("Гать", "Дорога на клетке рядом; через реку — мост.", Some(Metal), Trick, Own, 0, EmptyHex { range: 1 }, Causeway),
     card("Набег на обоз", "Отними ношу у соперника рядом.", Some(Fire), Trick, Instant, 0, Enemy { range: 1 }, Rob),

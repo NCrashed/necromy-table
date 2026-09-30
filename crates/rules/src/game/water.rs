@@ -6,7 +6,10 @@
 //! rivers bite whoever steps in, never taking the last health.
 //!
 //! A river runs from the mountains (or a swamp) nearest the asker out to
-//! the rim of the world. A flood spreads the water nearest the asker, drawn
+//! the rim of the world, winding: each hex it takes out or aside, never
+//! back towards the Table, as the land will have it. At the rim it has its
+//! mouth and runs no further; a river runs on from its end short of the
+//! rim. A flood spreads the water nearest the asker, drawn
 //! towards Ahamar's Table: Maya's water against his fire.
 
 use hexx::Hex;
@@ -121,14 +124,15 @@ impl Game {
         events.push(Event::TerrainChanged { hex, terrain });
     }
 
-    /// The end of the river nearest `near`, within three hexes: a river hex
-    /// with at most one river beside it.
+    /// The end of a river within three hexes of `near` that can still run: a
+    /// river hex with at most one river beside it, short of the rim.
     fn river_end(&self, near: Hex) -> Option<Hex> {
         self.board
             .tiles()
             .filter(|(h, t)| {
                 t.terrain == Terrain::River
                     && h.unsigned_distance_to(near) <= 3
+                    && !self.at_rim(*h)
                     && h.all_neighbors()
                         .iter()
                         .filter(|&&n| {
@@ -140,7 +144,7 @@ impl Game {
                         <= 1
             })
             .map(|(h, _)| h)
-            .min_by_key(|h| (std::cmp::Reverse(h.ulength()), h.x(), h.y()))
+            .min_by_key(|h| (h.unsigned_distance_to(near), h.x(), h.y()))
     }
 
     /// The end of the river nearest `near` that could run on, anywhere.
@@ -149,6 +153,7 @@ impl Game {
             .tiles()
             .filter(|(h, t)| {
                 t.terrain == Terrain::River
+                    && !self.at_rim(*h)
                     && h.all_neighbors()
                         .iter()
                         .filter(|&&n| {
@@ -198,27 +203,17 @@ impl Game {
         };
         let mut run = Vec::new();
         for _ in 0..count {
-            // At the rim the river pushes the world out: new land, flowing.
+            // At the rim the river has its mouth: it runs no further.
             let river_here = self
                 .board
                 .tile(at)
                 .is_some_and(|t| t.terrain == Terrain::River);
             if river_here && self.at_rim(at) {
-                let out = at
-                    .all_neighbors()
-                    .into_iter()
-                    .filter(|&n| self.board.tile(n).is_none())
-                    .max_by_key(|n| (n.ulength(), -n.x(), -n.y()));
-                match out {
-                    Some(n) if self.raise_land(n, Terrain::River, events) => {
-                        run.push(n);
-                        at = n;
-                        continue;
-                    }
-                    _ => break,
-                }
+                break;
             }
-            let next = at
+            // Out or aside, never back towards the Table; which way is the
+            // land's whim, so rivers wind.
+            let ways: Vec<Hex> = at
                 .all_neighbors()
                 .into_iter()
                 .filter(|&n| {
@@ -232,8 +227,8 @@ impl Game {
                             m != at && self.board.tile(m).is_some_and(|t| t.terrain == Terrain::River)
                         })
                 })
-                .max_by_key(|n| (n.ulength(), n.unsigned_distance_to(near) == 0, -n.x(), -n.y()));
-            let Some(next) = next else {
+                .collect();
+            let Some(&next) = self.rng.pick(&ways) else {
                 break;
             };
             self.water(next, Terrain::River, events);

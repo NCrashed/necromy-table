@@ -1119,14 +1119,12 @@ impl Match {
             show.closed = true;
         }
         if !wished.is_empty() {
-            // A new dusk's answers replace what was put away; one's own first.
-            let open = self.wish_reply.is_some();
-            self.wish_replies.extend(wished);
+            // A dusk's answers come together and replace the last dusk's, read
+            // or not; one's own first.
+            self.wish_replies = wished;
             let human = self.human;
             self.wish_replies.sort_by_key(|r| r.player != human);
-            if !open {
-                self.show_wish_page(0);
-            }
+            self.show_wish_page(0);
         }
         if let Some(mut h) = hit {
             if h.lines.is_empty() {
@@ -1932,6 +1930,12 @@ impl Match {
             Event::Feasted { player, guests, .. } => {
                 format!("{} устраивает пир: гостей {guests}.", self.name(*player))
             }
+            Event::GodActed { god, act, near } => format!(
+                "{} сам меняет мир у {}: {}.",
+                names::god(*god),
+                self.name_genitive(*near),
+                names::god_act(*act)
+            ),
             Event::Ate { player, .. } => format!(
                 "{} подкрепляется из запасов: +1 здоровья, +1 Духа.",
                 self.name(*player)

@@ -351,7 +351,7 @@ pub const EARLIEST_EVE: u32 = 10;
 /// Undead in a legion for the Legion.
 pub const LEGION: usize = 5;
 /// Hexes of a river for the River.
-pub const RIVER: usize = 12;
+pub const RIVER: usize = 9;
 /// Woods round a river for the Amazon.
 pub const JUNGLE: usize = 10;
 /// River hexes in the woods for the Amazon.

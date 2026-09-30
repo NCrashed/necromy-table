@@ -344,6 +344,19 @@ fn walk(game: &Game, player: PlayerId) -> Intent {
                 .find(|(_, d)| d.owner != player && d.treasury && game.on_eve(d.owner))
                 .map(|(h, _)| h)
         })
+        // A rival's river on its eve: to the river, to dam it.
+        .or_else(|| {
+            game.players()
+                .any(|r| r != player && game.on_eve(r) && game.deed(r) == Some(GreatDeed::River))
+                .then(|| {
+                    game.board()
+                        .land()
+                        .filter(|(_, t)| t.terrain == crate::Terrain::River)
+                        .map(|(h, _)| h)
+                        .min_by_key(|h| (h.unsigned_distance_to(me.hex), h.x(), h.y()))
+                })
+                .flatten()
+        })
         // Called to a duel: to the one who called.
         .or_else(|| {
             game.duels()
@@ -1555,6 +1568,20 @@ fn mechanic_play(game: &Game, player: PlayerId) -> Option<Intent> {
                     .is_some_and(|x| x.terrain == crate::Terrain::River),
                 _ => false,
             }),
+            // A rival's river grown long, or on its eve: cut it.
+            Effect::Dam
+                if game.players().any(|r| {
+                    r != player
+                        && game.deed(r) == Some(GreatDeed::River)
+                        && (game.on_eve(r)
+                            || game
+                                .checks(r, GreatDeed::River)
+                                .first()
+                                .is_some_and(|c| c.have * 2 >= c.need))
+                }) =>
+            {
+                targets.first().copied()
+            }
             Effect::Levy => targets.first().copied(),
             Effect::Tunnel if deed == Some(GreatDeed::Treasury) => targets.first().copied(),
             _ => None,

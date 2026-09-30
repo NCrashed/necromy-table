@@ -95,6 +95,11 @@ impl Game {
                     self.lay_road(h, events);
                 }
             }
+            Effect::Dam => {
+                if let Some(h) = hex {
+                    self.dam(h, events);
+                }
+            }
             Effect::Rob => {
                 if let Some(t) = aimed {
                     self.seize_cargo(caster, t, events);

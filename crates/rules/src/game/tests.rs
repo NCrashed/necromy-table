@@ -5085,20 +5085,24 @@ fn a_lake_is_not_walked_and_does_not_lift() {
 }
 
 #[test]
-fn a_river_runs_from_the_mountains_to_the_rim_and_beyond() {
-    let (mut g, me, _) = duel(4);
-    g.chosen[me.0 as usize] = Some(GreatDeed::River);
-    let mut ev = Vec::new();
-    let near = g.champion(me).unwrap().hex;
-    let run = g.run_river(near, 20, &mut ev);
-    assert!(run.len() >= RIVER, "ran {}", run.len());
-    assert!(
-        but_dusks(&g, me, GreatDeed::River),
-        "{:?}",
-        g.checks(me, GreatDeed::River)
-    );
-    // Past the old rim: the world grew with it.
-    assert!(run.iter().any(|h| h.ulength() > crate::board::BOARD_RADIUS));
+fn a_river_winds_out_to_the_rim_and_stops_there() {
+    let mut turned = false;
+    for seed in 0..8 {
+        let (mut g, me, _) = duel(4);
+        g.rng = crate::rng::Rng::new(seed);
+        let extent = g.board().extent();
+        let mut ev = Vec::new();
+        let near = g.champion(me).unwrap().hex;
+        let run = g.run_river(near, 40, &mut ev);
+        assert!(!run.is_empty());
+        // The world did not grow for it, now or when it is run again.
+        assert_eq!(g.board().extent(), extent);
+        let more = g.run_river(*run.last().unwrap(), 5, &mut ev);
+        assert!(more.iter().all(|h| h.ulength() <= extent));
+        assert_eq!(g.board().extent(), extent);
+        turned |= run.windows(2).any(|w| w[0].ulength() == w[1].ulength());
+    }
+    assert!(turned, "no river ever turned aside");
 }
 
 #[test]
@@ -6171,4 +6175,55 @@ fn a_sworn_rulers_militia_let_their_lord_pass() {
     assert!(!g.lets_pass(me, town));
     g.rulers.get_mut(&(town.x(), town.y())).unwrap().sworn = Some(me);
     assert!(g.lets_pass(me, town));
+}
+
+// ---- Dams and the gods' hand (§21.6, §21.8) ----
+
+#[test]
+fn a_dam_cuts_a_river_short_of_its_deed() {
+    let (mut g, me, foe) = duel(3);
+    g.chosen[foe.0 as usize] = Some(GreatDeed::River);
+    let mut ev = Vec::new();
+    let start = g.champion(foe).unwrap().hex;
+    let run = g.run_river(start, 20, &mut ev);
+    let before = g.checks(foe, GreatDeed::River)[0].have;
+    let middle = run[run.len() / 2];
+    // Beside the river, the dam in hand.
+    let dam = g.give(me, "Запруда");
+    let spot = middle
+        .all_neighbors()
+        .into_iter()
+        .find(|&h| g.board.contains(h) && g.champion_at(h).is_none())
+        .unwrap();
+    g.place(me, spot);
+    g.apply(
+        me,
+        Intent::Play {
+            card: dam,
+            target: Target::Hex(middle),
+        },
+    )
+    .unwrap();
+    g.pass_all();
+    assert_eq!(g.board().tile(middle).unwrap().terrain, Terrain::Swamp);
+    assert!(g.checks(foe, GreatDeed::River)[0].have < before);
+}
+
+#[test]
+fn the_god_pressed_hardest_acts_at_dusk_after_its_stage() {
+    for god in God::ALL {
+        for stage in 0..3 {
+            let (mut g, _, _) = duel(3);
+            g.pantheon.pressure = [0; 5];
+            g.pantheon.pressure[god.index()] = 3;
+            g.pantheon.stages[god.index()] = stage;
+            let mut ev = Vec::new();
+            g.gods_hand(&mut ev);
+            assert!(
+                ev.iter()
+                    .any(|e| matches!(e, Event::GodActed { god: g2, .. } if *g2 == god)),
+                "{god:?} at {stage} did nothing"
+            );
+        }
+    }
 }
