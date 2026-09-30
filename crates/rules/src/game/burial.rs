@@ -82,7 +82,7 @@ impl Game {
         events.push(Event::SpiritChanged { player, spirit });
     }
 
-    fn set_ground(&mut self, hex: Hex, terrain: Terrain, events: &mut Vec<Event>) {
+    pub(super) fn set_ground(&mut self, hex: Hex, terrain: Terrain, events: &mut Vec<Event>) {
         let key = (hex.x(), hex.y());
         self.ruins.remove(&key);
         if let Some(t) = self.board.tile_mut(hex) {
@@ -142,6 +142,13 @@ impl Game {
             _ => return false,
         }
         events.push(Event::Buried { player, hex });
+        // Zaga's Stillness: a burial is an offering, and it quiets.
+        if self.law_active(super::Law::Stillness) {
+            self.offer(Some(player), God::Zaga, 1, events);
+            if self.threat(player) > 0 {
+                self.add_threat(player, -1, events);
+            }
+        }
         self.first(player, super::Novelty::Buried, events);
         true
     }
@@ -153,7 +160,8 @@ impl Game {
             .pits()
             .any(|(h, p)| p.bodies > 0 && h.unsigned_distance_to(at) <= 1);
         if near {
-            self.poison(player, Element::Earth, 1, events);
+            let stacks = self.pit_stacks();
+            self.poison(player, Element::Earth, stacks, events);
         }
     }
 

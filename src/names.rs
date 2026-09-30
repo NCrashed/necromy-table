@@ -1238,3 +1238,58 @@ pub fn delve_work(w: necromy_rules::DelveWork) -> &'static str {
         DelveWork::Raid => "Набег на\nсокровищницу",
     }
 }
+
+/// A law's second rule, over a mechanic of its god's domain (§21.8), and
+/// the mechanic it needs.
+pub fn law_world_text(law: necromy_rules::Law) -> (necromy_rules::Feature, &'static str) {
+    use necromy_rules::Feature;
+    use necromy_rules::Law::*;
+    match law {
+        Sprout => (
+            Feature::WalkingGroves,
+            "бродячие рощи шагают дважды за ночь",
+        ),
+        Thicket => (
+            Feature::Companions,
+            "звери доверчивы: приручить стоит на Дух меньше",
+        ),
+        Wildgrowth => (Feature::Fields, "на закате поле в его краю дичает в лес"),
+        Generosity => (Feature::Fields, "пир нужен уже из трёх еды"),
+        Thirst => (Feature::Fairs, "товар на ярмарке приносит ещё и Дух"),
+        Devouring => (
+            Feature::Fires,
+            "огонь перекидывается всегда; на закате в её краю вспыхивает пожар",
+        ),
+        Stillness => (
+            Feature::Burial,
+            "погребение — подношение Заге и −1 Угрозы хоронящему",
+        ),
+        Burden => (Feature::Cargo, "ноша отнимает два шага, а не один"),
+        Sentence => (Feature::Burial, "чумная яма травит вдвое"),
+        Mask => (
+            Feature::Rulers,
+            "у кого есть присягнувшие правители, тому +1 Стиль на рассвете",
+        ),
+        Crack => (Feature::Debts, "неотданные долги на закате растут на 1"),
+        Exposure => (Feature::Arena, "неявившийся на дуэль получает +2 Угрозы"),
+        Rest => (
+            Feature::Rivers,
+            "на закате река, не дошедшая до края мира, течёт дальше на клетку",
+        ),
+        Manipulation => (Feature::Rivers, "скрытые переходят реку за один шаг"),
+        Wrath => (
+            Feature::Lakes,
+            "на закате самое малое озеро разливается на клетку, до 7",
+        ),
+    }
+}
+
+/// A law in words, with its second rule where the world has its mechanic.
+pub fn law_line(law: necromy_rules::Law, game: &necromy_rules::Game) -> String {
+    let (feature, more) = law_world_text(law);
+    if game.has(feature) {
+        format!("{}; {more}", law_text(law))
+    } else {
+        law_text(law).to_string()
+    }
+}

@@ -174,6 +174,10 @@ impl Game {
         for d in due {
             self.arena_wins[d.host.0 as usize] += 1;
             self.add_style(d.rival, -1, StyleReason::Battle, events);
+            // Ahamar's Exposure: the register names who never came.
+            if self.law_active(super::Law::Exposure) {
+                self.add_threat(d.rival, 2, events);
+            }
             events.push(Event::DuelForfeit {
                 host: d.host,
                 rival: d.rival,
@@ -258,7 +262,7 @@ impl Game {
         }
     }
 
-    fn owe(&mut self, debtor: PlayerId, creditor: PlayerId, amount: u8) {
+    pub(super) fn owe(&mut self, debtor: PlayerId, creditor: PlayerId, amount: u8) {
         match self
             .debts
             .iter_mut()

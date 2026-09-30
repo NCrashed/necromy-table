@@ -90,6 +90,9 @@ fn own_turn(game: &Game, player: PlayerId) -> Intent {
     if let Some(intent) = deed_work(game, player) {
         return intent;
     }
+    if let Some(intent) = mechanic_play(game, player) {
+        return intent;
+    }
     let cards = game.playable(player);
     // Bodies first: they only work while standing on one.
     if let Some(&card) = cards.iter().find(|&&c| {
@@ -1481,4 +1484,84 @@ fn companions_worth(game: &Game, player: PlayerId) -> u8 {
         .map(|&c| if c == crate::Companion::Dragon { 2 } else { 1 })
         .sum();
     worth.min(crate::COMPANION_DICE)
+}
+
+/// A card of the world's mechanics (§21.8), when it helps the bot's deed,
+/// or robs or bites a rival where it can.
+fn mechanic_play(game: &Game, player: PlayerId) -> Option<Intent> {
+    let deed = game.deed(player);
+    let me = game.champion(player)?.hex;
+    let near_table = |t: &Target| matches!(t, Target::Hex(h) if h.ulength() <= 2);
+    for card in game.playable(player) {
+        let targets = game.targets(player, card);
+        let pick = |f: &dyn Fn(&Target) -> bool| targets.iter().copied().find(|t| f(t));
+        let target = match game.def(card).effect {
+            Effect::Kindle if deed == Some(GreatDeed::GreatFire) => pick(&|t| match t {
+                Target::Hex(h) => game
+                    .board()
+                    .tile(*h)
+                    .and_then(|x| x.region)
+                    .is_some_and(|g| !game.burnt_by(player, g)),
+                _ => false,
+            }),
+            // Fire at a settlement of its own, or a rival's Great Fire.
+            Effect::Rain => pick(&|t| match t {
+                Target::Hex(h) => h.range(1).any(|n| {
+                    game.fire(n).is_some_and(|f| {
+                        game.owner(n) == Some(player)
+                            || f.by.is_some_and(|by| by != player && game.on_eve(by))
+                    })
+                }),
+                _ => false,
+            }),
+            Effect::Channel(_) if matches!(deed, Some(GreatDeed::River | GreatDeed::Amazon)) => {
+                targets.first().copied()
+            }
+            Effect::Deluge(_) if deed == Some(GreatDeed::FloodedTable) && me.ulength() <= 3 => {
+                targets.first().copied()
+            }
+            Effect::Causeway if deed == Some(GreatDeed::Roads) => pick(&near_table),
+            Effect::Rob => pick(&|t| match t {
+                Target::Champion(p) => game.cargo(*p).is_some() && game.cargo(player).is_none(),
+                _ => false,
+            }),
+            Effect::Court
+                if matches!(deed, Some(GreatDeed::TripleUnion | GreatDeed::FallenEmpire)) =>
+            {
+                pick(&|t| match t {
+                    Target::Hex(h) => game.ruler(*h).is_some_and(|r| r.sworn != Some(player)),
+                    _ => false,
+                })
+            }
+            Effect::Lure => targets.first().copied(),
+            Effect::Harvest if matches!(deed, Some(GreatDeed::Feast | GreatDeed::DeadBall)) => {
+                targets.first().copied()
+            }
+            Effect::Spade if deed == Some(GreatDeed::Necropolis) => targets.first().copied(),
+            Effect::Offering if deed == Some(GreatDeed::Summoning) => targets.first().copied(),
+            Effect::Gauntlet if deed == Some(GreatDeed::Arena) => targets.first().copied(),
+            Effect::Writ if deed == Some(GreatDeed::DebtBondage) => pick(&|t| match t {
+                Target::Champion(p) => !game
+                    .debts()
+                    .iter()
+                    .any(|d| d.debtor == *p && d.creditor == player),
+                _ => false,
+            }),
+            // A rival standing in a river is prey.
+            Effect::Piranha(_) => pick(&|t| match t {
+                Target::Champion(p) => game
+                    .board()
+                    .tile(hex_of(game, *p))
+                    .is_some_and(|x| x.terrain == crate::Terrain::River),
+                _ => false,
+            }),
+            Effect::Levy => targets.first().copied(),
+            Effect::Tunnel if deed == Some(GreatDeed::Treasury) => targets.first().copied(),
+            _ => None,
+        };
+        if let Some(target) = target {
+            return Some(Intent::Play { card, target });
+        }
+    }
+    None
 }

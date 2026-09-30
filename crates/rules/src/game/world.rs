@@ -133,6 +133,7 @@ impl Game {
             }
         }
         self.dusk_laws(events);
+        self.mechanic_laws_at_dusk(events);
     }
 }
 

@@ -193,7 +193,7 @@ impl Game {
 
     /// The ruler on `hex` swears to their favourite, if they favour them
     /// enough; an oath to anyone else is broken.
-    fn settle_oath(&mut self, hex: Hex, events: &mut Vec<Event>) {
+    pub(super) fn settle_oath(&mut self, hex: Hex, events: &mut Vec<Event>) {
         let Some(ruler) = self.rulers.get_mut(&(hex.x(), hex.y())) else {
             return;
         };

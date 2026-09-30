@@ -36,6 +36,12 @@ impl Game {
             .is_some_and(|t| t.terrain == Terrain::River);
         match terrain {
             Terrain::River if along => 1,
+            // Maya's Manipulation: the hidden ford where they like.
+            Terrain::River
+                if self.is_hidden(player) && self.law_active(super::Law::Manipulation) =>
+            {
+                1
+            }
             Terrain::River => points.max(1),
             _ => self.terrain_cost(player, terrain),
         }

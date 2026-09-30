@@ -149,6 +149,10 @@ impl Game {
         });
         self.add_style(player, 1, StyleReason::Fair, events);
         self.draw(player, 1, events);
+        // Trishna's Thirst: the market pays in Spirit too.
+        if self.law_active(super::Law::Thirst) {
+            self.gain_spirit(player, 1, events);
+        }
         true
     }
 

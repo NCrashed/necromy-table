@@ -59,6 +59,10 @@ pub enum TargetRule {
     EmptyHex { range: u32 },
     /// The corpse under the caster.
     Corpse,
+    /// A settlement with a ruler within range.
+    Ruler { range: u32 },
+    /// A beast within range.
+    Beast { range: u32 },
     /// The card that opened the Target window.
     Pending,
 }
@@ -105,6 +109,39 @@ pub enum Effect {
     Feast,
     /// Stacks of poison of the card's element (docs/design.md §20.1).
     Poison(u8),
+    // The world's mechanics (§21.8), one card family each.
+    /// Set the woods, a field or a settlement alight.
+    Kindle,
+    /// Put out the fires on and round the target hex.
+    Rain,
+    /// The river near the caster runs on by this many hexes.
+    Channel(u8),
+    /// The water near the caster spreads by this many hexes.
+    Deluge(u8),
+    /// A road on the target hex; over a river, a bridge.
+    Causeway,
+    /// Take the target's burden.
+    Rob,
+    /// The ruler on the target hex regards the caster two more.
+    Court,
+    /// The beast on the target hex follows the caster.
+    Lure,
+    /// Fields near the caster bear food at once.
+    Harvest,
+    /// The ground underfoot is consecrated.
+    Spade,
+    /// A circle near the caster is fed as with a body.
+    Offering,
+    /// The target is called to a duel.
+    Gauntlet,
+    /// The target owes the caster a Style.
+    Writ,
+    /// Damage, three more in a river.
+    Piranha(u8),
+    /// The caster's settlement underfoot makes its goods at once.
+    Levy,
+    /// A tunnel dug, or a way opened, under the caster.
+    Tunnel,
 }
 
 impl Effect {
@@ -121,6 +158,19 @@ impl Effect {
                 | Effect::Cancel
                 | Effect::BodyLegion
                 | Effect::Trap(TrapEffect::Root)
+                | Effect::Kindle
+                | Effect::Rain
+                | Effect::Causeway
+                | Effect::Rob
+                | Effect::Court
+                | Effect::Lure
+                | Effect::Harvest
+                | Effect::Spade
+                | Effect::Offering
+                | Effect::Gauntlet
+                | Effect::Writ
+                | Effect::Levy
+                | Effect::Tunnel
         )
     }
 
@@ -131,6 +181,9 @@ impl Effect {
             Effect::Damage(_)
                 | Effect::Drain(_)
                 | Effect::Finish(_)
+                | Effect::Rob
+                | Effect::Writ
+                | Effect::Piranha(_)
                 | Effect::Root
                 | Effect::Trap(_)
                 | Effect::Poison(_)
@@ -174,6 +227,18 @@ impl CardDef {
     /// The mechanic this card plays with, which the world must have for it
     /// to be in the deck (§21.2): bodies for a card on a body, poison,
     /// hiding, groves.
+    /// A card of one of the mechanics a world grows (§21.8), not of the
+    /// core: those stay out of the core slice.
+    pub fn is_mechanic(&self) -> bool {
+        matches!(
+            self.needs(),
+            Some(f) if !matches!(
+                f,
+                Feature::Bodies | Feature::Poison | Feature::Stealth | Feature::Groves
+            )
+        )
+    }
+
     pub fn needs(&self) -> Option<Feature> {
         match self.effect {
             _ if self.kind == CardKind::Body => Some(Feature::Bodies),
@@ -181,6 +246,21 @@ impl CardDef {
             Effect::Hide => Some(Feature::Stealth),
             Effect::Grow => Some(Feature::Groves),
             Effect::Ent => Some(Feature::WalkingGroves),
+            Effect::Kindle | Effect::Rain => Some(Feature::Fires),
+            Effect::Channel(_) => Some(Feature::Rivers),
+            Effect::Deluge(_) => Some(Feature::Lakes),
+            Effect::Causeway => Some(Feature::Roads),
+            Effect::Rob => Some(Feature::Cargo),
+            Effect::Court => Some(Feature::Rulers),
+            Effect::Lure => Some(Feature::Companions),
+            Effect::Harvest => Some(Feature::Fields),
+            Effect::Spade => Some(Feature::Burial),
+            Effect::Offering => Some(Feature::Ritual),
+            Effect::Gauntlet => Some(Feature::Arena),
+            Effect::Writ => Some(Feature::Debts),
+            Effect::Piranha(_) => Some(Feature::Piranhas),
+            Effect::Levy => Some(Feature::Goods),
+            Effect::Tunnel => Some(Feature::Underworld),
             _ => None,
         }
     }
@@ -377,6 +457,22 @@ pub const POOL: &[CardDef] = &[
     // Brought in by their mechanics (§21.8); kept last so the slices of
     // matches that never meet them stay as they were.
     card("Дикий энт", "Роща рядом оживает: каждую ночь она шагает к Столу.", Some(Wood), Rite, Own, 2, EmptyHex { range: 1 }, Ent),
+    card("Искра в сухостой", "Подожги лес, рощу, поле или поселение в 2 шагах.", Some(Fire), Trick, Own, 0, EmptyHex { range: 2 }, Kindle),
+    card("Ливень", "Потуши огонь на клетке в 3 шагах и вокруг неё.", Some(Water), Rite, Instant, 1, EmptyHex { range: 3 }, Rain),
+    card("Новое русло", "Река рядом течёт дальше на 2 клетки, а нет реки — берёт начало у ближних гор.", Some(Water), Rite, Own, 1, Caster, Channel(2)),
+    card("Разлив", "Вода рядом разливается озером на 2 клетки, к Столу.", Some(Water), Rite, Own, 2, Caster, Deluge(2)),
+    card("Гать", "Дорога на клетке рядом; через реку — мост.", Some(Metal), Trick, Own, 0, EmptyHex { range: 1 }, Causeway),
+    card("Набег на обоз", "Отними ношу у соперника рядом.", Some(Fire), Trick, Instant, 0, Enemy { range: 1 }, Rob),
+    card("Сватовство", "Правитель в 2 шагах: +2 к отношению к тебе.", Some(Metal), Rite, Own, 1, Ruler { range: 2 }, Court),
+    card("Приманка", "Зверь в 2 шагах идёт за тобой без Духа.", Some(Wood), Rite, Own, 1, Beast { range: 2 }, Lure),
+    card("Урожайная луна", "Поля в 2 шагах сразу рождают еду.", Some(Wood), Rite, Own, 1, Caster, Harvest),
+    card("Заступ", "Освяти землю под собой под кладбище.", Some(Earth), Trick, Own, 0, Caster, Spade),
+    card("Кровавый круг", "Круг на камнях в 2 шагах напоён, как телом.", Some(Metal), Rite, Own, 1, Caster, Offering),
+    card("Перчатка", "Вызови соперника в 3 шагах на дуэль.", Some(Metal), Trick, Own, 0, Enemy { range: 3 }, Gauntlet),
+    card("Расписка", "Соперник в 2 шагах должен тебе 1 Стиль.", Some(Metal), Trick, Instant, 0, Enemy { range: 2 }, Writ),
+    card("Пиранья", "1 урона сопернику в 3 шагах; стоящему в реке — 4.", Some(Wood), Trick, Instant, 0, Enemy { range: 3 }, Piranha(1)),
+    card("Подать", "Твоё поселение под тобой сразу даёт товар своего края.", Some(Fire), Trick, Own, 0, Caster, Levy),
+    card("Подкоп", "Туннель в твоём ходе вниз без Духа, а под руинами — новый ход.", Some(Earth), Rite, Own, 1, Caster, Tunnel),
 ];
 
 /// Distinct cards in a match and copies of each.
@@ -387,8 +483,20 @@ pub const COPIES: u32 = 2;
 /// every poison in it has an answer (§2, §20.1): a harmful card, or a heal,
 /// of the one element that quenches it.
 pub fn match_slice(rng: &mut Rng) -> Vec<DefId> {
-    slice_of(rng, SLICE_SIZE, |d| d.effect != Effect::Ent)
+    // The core as it always was, then the world's mechanics on top.
+    let mut slice = slice_of(rng, SLICE_SIZE, |d| !d.is_mechanic());
+    let mut more: Vec<DefId> = (0..POOL.len() as u16)
+        .map(DefId)
+        .filter(|d| d.def().is_mechanic() && d.def().effect != Effect::Ent)
+        .collect();
+    rng.shuffle(&mut more);
+    slice.extend(more.into_iter().take(MECHANIC_SLICE));
+    slice.sort();
+    slice
 }
+
+/// Distinct cards of the world's mechanics a full world's slice adds.
+pub const MECHANIC_SLICE: usize = 8;
 
 /// `size` cards of those `allowed`, then the answers they need.
 pub fn slice_of(rng: &mut Rng, size: usize, allowed: impl Fn(&CardDef) -> bool) -> Vec<DefId> {

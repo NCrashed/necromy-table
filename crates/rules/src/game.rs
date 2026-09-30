@@ -2142,7 +2142,22 @@ impl Game {
         let def = self.def(card);
         let me = self.hex_of(player);
         match def.target {
+            // A card on oneself for the world's mechanics only when it would do
+            // something there.
+            TargetRule::Caster if !self.caster_card_useful(player, def.effect) => Vec::new(),
             TargetRule::Caster => vec![Target::Champion(player)],
+            TargetRule::Ruler { range } => self
+                .rulers()
+                .map(|(h, _)| h)
+                .filter(|h| h.unsigned_distance_to(me) <= range)
+                .map(Target::Hex)
+                .collect(),
+            TargetRule::Beast { range } => self
+                .mobs
+                .iter()
+                .filter(|m| m.is_beast() && m.hex.unsigned_distance_to(me) <= range)
+                .map(|m| Target::Hex(m.hex))
+                .collect(),
             TargetRule::Champion { range } => self
                 .players()
                 // A hidden rival is not there to aim at (§11.6).
@@ -2169,6 +2184,9 @@ impl Game {
                                 t.terrain.can_grow_grove() && t.terrain != Terrain::Grove
                             }
                             Effect::Ent => t.terrain == Terrain::Grove,
+                            Effect::Kindle => t.terrain.burns() && self.fire(*h).is_none(),
+                            Effect::Rain => h.range(1).any(|n| self.fire(n).is_some()),
+                            Effect::Causeway => !self.road(*h),
                             Effect::Trap(_) => !self.traps.iter().any(|tr| tr.hex == *h),
                             _ => true,
                         }
@@ -3215,6 +3233,37 @@ impl Game {
                     self.wake_grove(caster, hex, events);
                 }
             }
+            effect @ (Effect::Kindle
+            | Effect::Rain
+            | Effect::Channel(_)
+            | Effect::Deluge(_)
+            | Effect::Causeway
+            | Effect::Rob
+            | Effect::Court
+            | Effect::Lure
+            | Effect::Harvest
+            | Effect::Spade
+            | Effect::Offering
+            | Effect::Gauntlet
+            | Effect::Writ
+            | Effect::Piranha(_)
+            | Effect::Levy
+            | Effect::Tunnel) => {
+                let effect = match effect {
+                    Effect::Channel(x) => Effect::Channel(n(x)),
+                    Effect::Deluge(x) => Effect::Deluge(n(x)),
+                    Effect::Piranha(x) => Effect::Piranha(n(x)),
+                    e => e,
+                };
+                // A ward stops what would hurt or rob its bearer.
+                let through = match aimed {
+                    Some(t) if effect.is_harmful() => self.pierce(t, def.element, events),
+                    _ => true,
+                };
+                if through {
+                    self.mechanic_card(caster, effect, target, events);
+                }
+            }
             Effect::Blink => {
                 // Fog drops the caster onto someone hiding there: the step
                 // fails and the one in hiding is seen.
@@ -3559,6 +3608,7 @@ impl Game {
             self.ball_at_dawn(events);
             if self.scripted.is_none_or(|s| s.dawn) {
                 self.dawn(events);
+                self.mechanic_laws_at_dawn(events);
             }
         }
         // Everyone takes their turn at once (§11.2).
@@ -3603,9 +3653,10 @@ impl Game {
             self.turns[player.0 as usize].move_points = 0;
         }
         // A burden makes the road longer (§21.8).
+        let weight = self.burden_weight();
         if self.champions[player.0 as usize].cargo.is_some() {
             let turn = &mut self.turns[player.0 as usize];
-            turn.move_points = turn.move_points.saturating_sub(1);
+            turn.move_points = turn.move_points.saturating_sub(weight);
         }
         events.push(Event::TurnStarted {
             player,
@@ -3660,7 +3711,9 @@ impl Game {
             self.mob_phase(events);
         }
         if self.scripted.is_none() && self.time == TimeOfDay::Night {
-            self.walk_groves(events);
+            for _ in 0..self.grove_strides() {
+                self.walk_groves(events);
+            }
         }
         if self.scripted.is_none() && self.has(Feature::Rulers) {
             self.seat_rulers();
@@ -3714,6 +3767,8 @@ mod fire;
 mod gear;
 mod guard;
 mod laws;
+mod mechanic_cards;
+mod mechanic_laws;
 mod militia;
 mod mobs;
 mod novelty;

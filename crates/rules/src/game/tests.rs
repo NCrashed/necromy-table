@@ -4740,7 +4740,7 @@ fn a_body_is_carried_a_step_shorter_and_laid_down_again() {
     while g.phase(me) != &Phase::Acting {
         g.end_turn_and_settle();
     }
-    assert_eq!(g.move_points(me), MOVE_POINTS - 1);
+    assert_eq!(g.move_points(me), MOVE_POINTS - g.burden_weight());
     let there = g.champion(me).unwrap().hex;
     g.apply(me, Intent::Lay).unwrap();
     assert!(g.cargo(me).is_none());
@@ -4957,7 +4957,7 @@ fn a_beast_is_tamed_for_spirit() {
     g.mobs.iter_mut().find(|m| m.id == id).unwrap().kind = MobKind::Beast { lair };
     g.apply(me, Intent::Recruit { mob: id }).unwrap();
     assert!(matches!(g.companions(me), [Companion::Beast(_)]));
-    assert_eq!(g.champion(me).unwrap().spirit_points, 5 - TAME_SPIRIT);
+    assert_eq!(g.champion(me).unwrap().spirit_points, 5 - g.tame_cost());
 }
 
 #[test]
@@ -5878,4 +5878,97 @@ fn a_god_turning_light_gifts_the_one_it_favours_most() {
             .iter()
             .any(|e| matches!(e, Event::ItemGained { .. }))
     );
+}
+
+// ---- The gods' laws over the mechanics (§5.3, §21.8) ----
+
+#[test]
+fn the_gods_stages_bend_the_mechanics() {
+    let (mut g, me, _) = duel(4);
+    // Bhava's Thicket: taming is cheaper; his light, not.
+    g.pantheon.stages[God::Bhava.index()] = 1;
+    assert_eq!(g.tame_cost(), TAME_SPIRIT - 1);
+    g.pantheon.stages[God::Bhava.index()] = 0;
+    assert_eq!(g.tame_cost(), TAME_SPIRIT);
+    // Trishna's Generosity: a feast of three.
+    g.pantheon.stages[God::Trishna.index()] = 0;
+    assert_eq!(g.feast_food(), 3);
+    // Zaga's Burden: burdens weigh two.
+    g.pantheon.stages[God::Zaga.index()] = 1;
+    assert_eq!(g.burden_weight(), 2);
+    // Ahamar's Crack: debts grow at dusk.
+    g.pantheon.stages[God::Ahamar.index()] = 1;
+    let foe = g.players().find(|&p| p != me).unwrap();
+    g.owe(foe, me, 1);
+    let mut ev = Vec::new();
+    g.mechanic_laws_at_dusk(&mut ev);
+    assert_eq!(g.debts()[0].amount, 2);
+    // Maya's Wrath: a lake spreads at dusk.
+    g.pantheon.stages[God::Maya.index()] = 2;
+    set_terrain(&mut g, Hex::new(2, -2), Terrain::Lake);
+    let lakes = |g: &Game| {
+        g.board()
+            .tiles()
+            .filter(|(_, t)| t.terrain == Terrain::Lake)
+            .count()
+    };
+    let before = lakes(&g);
+    g.mechanic_laws_at_dusk(&mut ev);
+    assert!(lakes(&g) > before);
+}
+
+// ---- Cards of the mechanics (§21.8) ----
+
+#[test]
+fn mechanic_cards_play_through_their_mechanics() {
+    let (mut g, me, foe) = duel(1);
+    // A spark in the brush.
+    set_terrain(&mut g, Hex::new(0, 1), Terrain::Forest);
+    let spark = g.give(me, "Искра в сухостой");
+    g.champ_mut(me).spirit_points = 5;
+    g.apply(
+        me,
+        Intent::Play {
+            card: spark,
+            target: Target::Hex(Hex::new(0, 1)),
+        },
+    )
+    .unwrap();
+    assert_eq!(g.fire(Hex::new(0, 1)).map(|f| f.by), Some(Some(me)));
+    // A caravan raided.
+    g.champ_mut(foe).cargo = Some(Cargo::Food);
+    let raid = g.give(me, "Набег на обоз");
+    g.apply(
+        me,
+        Intent::Play {
+            card: raid,
+            target: Target::Champion(foe),
+        },
+    )
+    .unwrap();
+    g.pass_all();
+    assert!(g.cargo(me).is_some() || g.champion(foe).unwrap().ward.is_some());
+    // A writ of debt.
+    let writ = g.give(me, "Расписка");
+    g.apply(
+        me,
+        Intent::Play {
+            card: writ,
+            target: Target::Champion(foe),
+        },
+    )
+    .unwrap();
+    g.pass_all();
+    assert!(g.debtors(me) == 1 || g.champion(foe).unwrap().ward.is_some());
+}
+
+#[test]
+fn a_full_world_deals_the_core_and_some_mechanic_cards() {
+    let (g, _) = Game::new(Setup {
+        seed: 3,
+        champions: God::ALL.to_vec(),
+        mode: Default::default(),
+    });
+    let mech = g.slice.iter().filter(|d| d.def().is_mechanic()).count();
+    assert!(mech >= crate::cards::MECHANIC_SLICE, "only {mech}");
 }

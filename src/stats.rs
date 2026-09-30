@@ -886,7 +886,7 @@ fn rebuild_gods(
         let law = necromy_rules::Law::of(god, stage);
         let law_line = commands
             .spawn((
-                Text::new(names::law_text(law)),
+                Text::new(names::law_line(law, g)),
                 font.text(11.0),
                 TextColor(Color::srgb(0.82, 0.80, 0.74)),
                 Node {
@@ -1221,7 +1221,7 @@ fn god_tip(
         s.push_str(&format!(
             "{mark} {}: {}\n",
             names::law_name(law),
-            names::law_text(law)
+            names::law_line(law, g)
         ));
     }
     s.push_str(&format!(

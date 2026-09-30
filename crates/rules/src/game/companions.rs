@@ -61,7 +61,7 @@ impl Game {
         }
         match mob.kind {
             MobKind::Beast { .. } if self.has(Feature::Companions) => {
-                Some((Companion::Beast(self.beast_element(mob)), TAME_SPIRIT))
+                Some((Companion::Beast(self.beast_element(mob)), self.tame_cost()))
             }
             MobKind::Guest if self.has(Feature::Guests) => Some((Companion::Guest, 0)),
             MobKind::Undead if self.has(Feature::Legion) => {

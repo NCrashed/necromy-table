@@ -218,7 +218,7 @@ impl Game {
                 if self.catches(n)
                     && !burning.iter().any(|(h, _)| *h == n)
                     && !caught.iter().any(|(h, _)| *h == n)
-                    && self.rng.below(2) == 0
+                    && self.fire_catches()
                 {
                     caught.push((n, fire));
                 }

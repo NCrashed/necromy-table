@@ -237,6 +237,7 @@ fn take_dusk_news(time: Res<Time>, mut game: ResMut<Match>, mut scene: ResMut<Du
 fn rebuild_dusk(
     mut commands: Commands,
     scene: Res<DuskScene>,
+    game: Res<crate::play::Match>,
     art: Res<StatArt>,
     font: Res<UiFont>,
     panel: Single<(Entity, &mut Visibility), With<DuskPanel>>,
@@ -303,7 +304,7 @@ fn rebuild_dusk(
                 Text::new(format!(
                     "Новый закон «{}»: {}.",
                     names::law_name(Law::of(god, to)),
-                    names::law_text(Law::of(god, to))
+                    names::law_line(Law::of(god, to), &game.game)
                 )),
                 font.text(12.0),
                 TextColor(INK),

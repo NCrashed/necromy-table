@@ -2354,7 +2354,7 @@ impl Match {
                 "{} переходит в стадию «{}»: {}.",
                 names::god(*god),
                 names::stage(*god, *stage),
-                names::law_text(necromy_rules::Law::of(*god, *stage))
+                names::law_line(necromy_rules::Law::of(*god, *stage), &self.game)
             ),
             // A law of the world acted (§5.3).
             Event::Law { law, player, .. } => {
@@ -2362,7 +2362,7 @@ impl Match {
                 format!(
                     "Закон «{}»{whom}: {}.",
                     names::law_name(*law),
-                    names::law_text(*law)
+                    names::law_line(*law, &self.game)
                 )
             }
             Event::BattleStarted { attacker, defender } => {

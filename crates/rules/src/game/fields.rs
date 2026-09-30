@@ -154,7 +154,7 @@ impl Game {
 
     pub fn may_feast(&self, player: PlayerId) -> bool {
         let at = self.hex_of(player);
-        self.own_settlement(player, at) && self.food_at(at) >= FEAST_FOOD
+        self.own_settlement(player, at) && self.food_at(at) >= self.feast_food()
     }
 
     pub(super) fn check_feast(&self, player: PlayerId) -> Result<(), RuleError> {
@@ -173,8 +173,9 @@ impl Game {
     ) -> Result<(), RuleError> {
         self.check_feast(player)?;
         let at = self.hex_of(player);
+        let self_food = self.feast_food();
         if let Some(food) = self.stores.get_mut(&(at.x(), at.y())) {
-            *food -= FEAST_FOOD;
+            *food -= self_food;
         }
         let guests = self.guests(player);
         for &g in &guests {
@@ -230,7 +231,7 @@ impl Game {
         self.stores
             .iter()
             .map(|(&(x, y), &f)| (Hex::new(x, y), f))
-            .filter(|&(h, f)| f >= FEAST_FOOD && self.own_settlement(player, h))
+            .filter(|&(h, f)| f >= self.feast_food() && self.own_settlement(player, h))
             .map(|(h, _)| h)
             .next()
     }
