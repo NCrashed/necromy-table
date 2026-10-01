@@ -917,6 +917,7 @@ fn line_ask(kind: LineKind) -> &'static str {
         LineKind::Bring => "принести в мир то, чего его деянию не хватает",
         LineKind::Thwart => "сорвать чужое Великое деяние, пока не наступил закат",
         LineKind::Invitation => "прийти на чужой пир",
+        LineKind::Errand => "исполнить твою просьбу",
     }
 }
 

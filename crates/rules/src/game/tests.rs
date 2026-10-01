@@ -1798,6 +1798,9 @@ fn line(g: &mut Game, owner: PlayerId, kind: LineKind, goal: Goal, stake: u8) ->
         deadline: g.round + 4,
         style: 2,
         stake,
+        fork: None,
+        at: None,
+        letter: false,
     });
     id
 }
@@ -1917,6 +1920,7 @@ fn bots_live_their_lines() {
             .filter(|e| matches!(e, Event::LineDone { .. }))
             .count();
     }
+    println!("lines: {done} of {told} done: {kinds:?}");
     assert!(told > 20, "only {told} lines told");
     assert!(
         done * 5 >= told,
@@ -2963,6 +2967,9 @@ fn passing_the_trial_of_a_line_closes_it() {
         deadline: g.round() + 4,
         style: 3,
         stake: 0,
+        fork: None,
+        at: None,
+        letter: false,
     });
     let cards = burn_all(&mut g, me, "Упокоить");
     g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
@@ -3239,6 +3246,9 @@ fn trials_and_story_lines_give_loot() {
         deadline: g.round() + 4,
         style: 2,
         stake: 0,
+        fork: None,
+        at: None,
+        letter: false,
     });
     let loot = g.loot_len();
     g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
@@ -4660,26 +4670,6 @@ fn a_champions_body_grows_into_the_grove_of_a_world_tree() {
 }
 
 // ---- The storyteller in a world being made (§21.6) ----
-
-#[test]
-fn one_lagging_is_told_to_bring_in_what_their_deed_needs() {
-    let (mut g, me, _) = duel(3);
-    without(
-        &mut g,
-        &[Feature::Settlements, Feature::Militia, Feature::Ruins],
-    );
-    g.chosen[me.0 as usize] = Some(GreatDeed::Island);
-    let mut ev = Vec::new();
-    g.opportunity(me, &mut ev);
-    let line = *g.lines_of(me).next().expect("a line");
-    assert_eq!(line.goal, Goal::Bring(Feature::Settlements));
-    assert_eq!(line.god, God::Trishna);
-    // Whoever brings it in, the line is done.
-    let at = g.champion(me).unwrap().hex;
-    g.awaken(None, God::Trishna, Feature::Settlements, at, &mut ev);
-    g.check_lines(&mut ev);
-    assert!(ev.iter().any(|e| matches!(e, Event::LineDone { .. })));
-}
 
 #[test]
 fn a_deed_on_its_eve_sets_everyone_else_to_break_it() {
@@ -6528,6 +6518,7 @@ fn path_in_bot_games() {
         let mut done = 0u32;
         let mut turns = 0u32;
         let mut longest_dry = 0u32;
+        let mut lines_done = 0u32;
         let mut waits: std::collections::BTreeMap<(GreatDeed, String), u32> = Default::default();
         for seed in 0..20 {
             let (mut g, _) = Game::new(Setup {
@@ -6578,11 +6569,15 @@ fn path_in_bot_games() {
                         done += 1;
                         last_done[player.0 as usize] = g.round();
                     }
+                    if let Event::LineDone { line } = e {
+                        lines_done += 1;
+                        last_done[line.owner.0 as usize] = g.round();
+                    }
                 }
             }
         }
         println!(
-            "{mode:?}: {turns} turns with a deed, {done} steps done ({:.2} a turn), \
+            "{mode:?}: {turns} turns with a deed, {done} steps done ({:.2} a turn), {lines_done} lines done, \
              walks {:.1} hexes, longest dry {longest_dry} rounds",
             f64::from(done) / f64::from(turns.max(1)),
             far as f64 / gos.max(1) as f64
@@ -6665,4 +6660,97 @@ fn a_shrine_of_a_quenching_pair_stands_within_two_of_both_lands() {
         !g.may_build(me)
             .contains(&Building::Shrine([God::Bhava, God::Trishna]))
     );
+}
+
+// ---- Letters from the gods (docs/storyteller-plan.md) ----
+
+#[test]
+fn letters_come_at_dusk_from_two_gods_and_one_is_taken() {
+    let (mut g, me, foe) = duel(3);
+    let mut ev = Vec::new();
+    g.storyteller(&mut ev);
+    let letters = g.letters(me).to_vec();
+    assert_eq!(letters.len(), LETTERS, "{letters:?}");
+    assert_ne!(letters[0].god, letters[1].god);
+    assert!(letters.iter().all(|l| l.letter && l.owner == me));
+    // Only their reader sees them.
+    let came = ev
+        .iter()
+        .find(|e| matches!(e, Event::LettersCame { player, .. } if *player == me))
+        .unwrap();
+    let view = g.view_for(Some(foe), 1);
+    assert!(view.letters(me).is_empty());
+    assert!(matches!(
+        Game::event_for(&view, Some(foe), came),
+        Some(Event::LettersCame { letters, .. }) if letters.is_empty()
+    ));
+    // One is taken: its line opens, the other fades.
+    let events = g.apply(me, Intent::TakeLetter { index: 1 }).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::LineTold { line } if line.id == letters[1].id))
+    );
+    let line = *g.lines_of(me).find(|l| l.letter).unwrap();
+    assert_eq!(line.deadline, g.round() + LINE_ROUNDS);
+    assert!(g.letters(me).is_empty());
+    assert!(g.apply(me, Intent::TakeLetter { index: 0 }).is_err());
+    // With a letter's line open, no new letters come.
+    g.storyteller(&mut ev);
+    assert!(g.letters(me).is_empty());
+}
+
+#[test]
+fn letters_may_be_let_lie() {
+    let (mut g, me, _) = duel(3);
+    g.storyteller(&mut Vec::new());
+    assert!(!g.letters(me).is_empty());
+    let events = g.apply(me, Intent::DeclineLetters).unwrap();
+    assert!(matches!(
+        events.as_slice(),
+        [Event::LettersSetAside { .. }, ..]
+    ));
+    assert!(g.letters(me).is_empty());
+    assert!(g.lines_of(me).all(|l| !l.letter));
+}
+
+#[test]
+fn a_thing_done_closes_its_line_and_a_fork_closes_it_for_its_own_god() {
+    let (mut g, me, _) = duel(3);
+    let tame = line(&mut g, me, LineKind::Errand, Goal::Do(Doing::Tame), 0);
+    if let Some(l) = g.lines.iter_mut().find(|l| l.id == tame) {
+        l.god = God::Bhava;
+        l.fork = Some(Fork {
+            goal: Goal::Do(Doing::FellMob),
+            god: God::Trishna,
+        });
+    }
+    let build = line(&mut g, me, LineKind::Errand, Goal::Do(Doing::Build), 0);
+    // A beast felled: the fork, Trishna's.
+    let mut ev = vec![Event::MobFell {
+        id: 1,
+        hex: Hex::ZERO,
+        by: me,
+    }];
+    g.story_events(&mut ev);
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::LineDone { line } if line.id == tame && line.god == God::Trishna
+    )));
+    // Something built by someone else is not theirs.
+    let foe = PlayerId(1 - me.0);
+    let mut ev = vec![Event::Built {
+        player: foe,
+        hex: Hex::ZERO,
+        building: Building::Tavern,
+    }];
+    g.story_events(&mut ev);
+    assert!(g.lines.iter().any(|l| l.id == build));
+    let mut ev = vec![Event::Built {
+        player: me,
+        hex: Hex::ZERO,
+        building: Building::Tavern,
+    }];
+    g.story_events(&mut ev);
+    assert!(!g.lines.iter().any(|l| l.id == build));
 }

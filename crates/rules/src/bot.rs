@@ -38,6 +38,9 @@ pub fn choose(game: &Game, player: PlayerId) -> Intent {
 /// Like `choose`, but leaves tonight's wish to someone else: a person
 /// writes it while the bot plays their turn.
 pub fn choose_turn(game: &Game, player: PlayerId) -> Intent {
+    if let Some(index) = letter_pick(game, player) {
+        return Intent::TakeLetter { index };
+    }
     match game.to_answer(player) {
         Some(window) => respond(game, player, window.kind),
         None if game.free_to_act(player) => own_turn(game, player),
@@ -89,6 +92,9 @@ fn own_turn(game: &Game, player: PlayerId) -> Intent {
         return Intent::Rebuild;
     }
     if let Some(intent) = deed_work(game, player) {
+        return intent;
+    }
+    if let Some(intent) = letter_work(game, player) {
         return intent;
     }
     if let Some(intent) = mechanic_play(game, player) {
@@ -337,7 +343,8 @@ fn walk(game: &Game, player: PlayerId) -> Intent {
                 .map(|(hex, _)| hex)
                 .filter(|&hex| game.occupant(hex).is_none_or(|p| p == player))
                 .min_by_key(|&hex| (me.hex.unsigned_distance_to(hex), hex.x(), hex.y())),
-            _ => None,
+            // A letter's place, when near: the deed comes first.
+            _ => l.at.filter(|h| h.unsigned_distance_to(me.hex) <= 3),
         })
         // A rival's treasury on its eve: to raid it.
         .or_else(|| {
@@ -1037,6 +1044,104 @@ pub(crate) fn mechanic_play(game: &Game, player: PlayerId) -> Option<Intent> {
         };
         if let Some(target) = target {
             return Some(Intent::Play { card, target });
+        }
+    }
+    None
+}
+
+/// The letter to take: its deed's patron's, else the one to be done
+/// nearest; none when there are none.
+fn letter_pick(game: &Game, player: PlayerId) -> Option<u8> {
+    let letters = game.letters(player);
+    if letters.is_empty() {
+        return None;
+    }
+    let me = hex_of(game, player);
+    let patron = game.deed(player).map(|d| d.patron());
+    letters
+        .iter()
+        .enumerate()
+        .min_by_key(|(i, l)| {
+            (
+                Some(l.god) != patron,
+                l.at.map_or(0, |h| h.unsigned_distance_to(me)),
+                *i,
+            )
+        })
+        .map(|(i, _)| i as u8)
+}
+
+/// A move that does what a letter it took asks, where it stands.
+fn letter_work(game: &Game, player: PlayerId) -> Option<Intent> {
+    use crate::game::Doing;
+    let spirit = game.champion(player)?.spirit_points;
+    let here = hex_of(game, player);
+    let wants: Vec<Doing> = game
+        .lines_of(player)
+        .filter(|l| l.letter)
+        .flat_map(|l| [Some(l.goal), l.fork.map(|f| f.goal)])
+        .flatten()
+        .filter_map(|g| match g {
+            Goal::Do(d) => Some(d),
+            _ => None,
+        })
+        .collect();
+    let body = |effect: Effect| {
+        game.playable(player).into_iter().find_map(|card| {
+            (game.def(card).effect == effect
+                && game.targets(player, card).contains(&Target::Hex(here)))
+            .then_some(Intent::Play {
+                card,
+                target: Target::Hex(here),
+            })
+        })
+    };
+    for want in wants {
+        let intent = match want {
+            Doing::Tame if spirit >= crate::TAME_SPIRIT => game
+                .recruitable(player)
+                .first()
+                .map(|&mob| Intent::Recruit { mob }),
+            Doing::Kindle if spirit >= crate::KINDLE_SPIRIT => game
+                .kindleable(player)
+                .into_iter()
+                .find(|&h| game.owner(h) != Some(player))
+                .map(|hex| Intent::Kindle { hex }),
+            Doing::Gift if spirit >= 1 => game
+                .giftable(player)
+                .first()
+                .map(|&hex| Intent::Gift { hex }),
+            Doing::Build if spirit >= crate::BUILD_SPIRIT => game
+                .may_build(player)
+                .first()
+                .map(|&building| Intent::Build { building }),
+            Doing::OpenFair if spirit >= crate::FAIR_SPIRIT && game.may_open_fair(player) => {
+                Some(Intent::Fair)
+            }
+            Doing::StoreFood => match game.cargo(player) {
+                Some(crate::Cargo::Food) if game.owner(here) == Some(player) => Some(Intent::Lay),
+                None if game.takeable(player) == Some(crate::Cargo::Food) => Some(Intent::Take),
+                _ => None,
+            },
+            Doing::Hide => game.playable(player).into_iter().find_map(|card| {
+                (game.def(card).effect == Effect::Hide
+                    && game
+                        .targets(player, card)
+                        .contains(&Target::Champion(player)))
+                .then_some(Intent::Play {
+                    card,
+                    target: Target::Champion(player),
+                })
+            }),
+            Doing::Seed => body(Effect::BodySeed),
+            Doing::Fuel => body(Effect::BodyFuel),
+            Doing::Rest => body(Effect::BodyRest),
+            Doing::Dissolve => body(Effect::BodyDissolve),
+            Doing::Raise => body(Effect::BodyLegion),
+            _ => None,
+        };
+        if intent.is_some() {
+            return intent;
         }
     }
     None

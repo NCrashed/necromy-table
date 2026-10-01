@@ -172,6 +172,12 @@ pub enum Intent {
     ChooseDeed {
         deed: victory::GreatDeed,
     },
+    /// Any time: take one of the letters the gods sent at dusk (its line
+    /// opens), or let them all lie.
+    TakeLetter {
+        index: u8,
+    },
+    DeclineLetters,
     /// On your turn, on a settlement of yours: build on it (§21.8).
     Build {
         building: buildings::Building,
@@ -1219,6 +1225,15 @@ pub enum Event {
         player: PlayerId,
         deed: victory::GreatDeed,
     },
+    /// Letters from the gods for `player`, one to take (their lines).
+    LettersCame {
+        player: PlayerId,
+        letters: Vec<story::Line>,
+    },
+    /// `player` let tonight's letters lie.
+    LettersSetAside {
+        player: PlayerId,
+    },
     /// `player`'s own move took their deed a step on: +1 Style, once a
     /// round (the path).
     StepDone {
@@ -1560,6 +1575,8 @@ pub struct Game {
     /// Open story lines (§8).
     lines: Vec<story::Line>,
     next_line: u32,
+    /// Letters waiting for each player (docs/storyteller-plan.md).
+    letters: Vec<Vec<story::Line>>,
     /// Trials on the board (§20.2), the last id and throws so far.
     trials: Vec<trial::Trial>,
     /// The loot deck, top last, and items lying on the board (§20.3).
@@ -1754,6 +1771,7 @@ impl Game {
             curses: vec![Vec::new(); champions_len],
             lines: Vec::new(),
             next_line: 0,
+            letters: vec![Vec::new(); champions_len],
             trials: Vec::new(),
             loot: Self::loot_deck(setup.seed),
             ground: Vec::new(),
@@ -2276,6 +2294,10 @@ impl Game {
             self.seal_wish(player, dusk::Seal::Refused, &mut events)?;
         } else if let Intent::ChooseDeed { deed } = intent {
             self.choose_deed(player, deed, &mut events)?;
+        } else if let Intent::TakeLetter { index } = intent {
+            self.take_letter(player, index, &mut events)?;
+        } else if intent == Intent::DeclineLetters {
+            self.decline_letters(player, &mut events)?;
         } else if let Some(i) = self.answering(player) {
             self.apply_in_window(i, player, intent, &mut events)?;
         } else {
@@ -2909,6 +2931,9 @@ impl Game {
             }
             Intent::Wish { .. } | Intent::RefuseWish => return Err(RuleError::InvalidWish),
             Intent::ChooseDeed { .. } => return Err(RuleError::InvalidDeed),
+            Intent::TakeLetter { .. } | Intent::DeclineLetters => {
+                return Err(RuleError::InvalidTarget);
+            }
         };
         let window = &mut self.windows[i];
         window.choices.insert(player, choice);
@@ -3862,7 +3887,7 @@ pub use roads::{PAVE_SPIRIT, ROAD_RUN};
 pub use rulers::{CROWN_VASSALS, FEUDING, MATCH_REGARD, OATH_REGARD, Ruler, UNION_LANDS};
 pub use scenario::{Scenario, SceneSeat, SceneWorld};
 pub use stealth::RevealReason;
-pub use story::{Goal, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
+pub use story::{Doing, Fork, Goal, LETTERS, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
 pub use trade::{DEAD_FEASTS, FAIR_DUSKS, FAIR_SPIRIT, Fair};
 pub use trial::{Boon, TRIAL_ROUNDS, TRIALS_ON_BOARD, Trial, trial_face};
@@ -3889,6 +3914,7 @@ impl Game {
             self.story_deed(player, deed, events);
             self.standing_deed(player, deed, events);
         }
+        self.story_events(events);
         self.check_lines(events);
     }
 }

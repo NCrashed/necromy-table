@@ -31,15 +31,16 @@ pub use game::RIVER_RUN;
 pub use game::{ARENA_WINS, BET_STAKE, DEBTORS, DUEL_ROUNDS, Debt, Duel, PlayerBet};
 pub use game::{
     Act, BEAST_DICE, BEAST_HEALTH, BEAST_RANGE, Bet, BodyVerb, Boon, CHOSEN, Champion, Character,
-    Check, CheckKind, Cure, DISSOLVED, Deed, DuskStep, Event, FIRST_STYLE, FORESEE, FRIENDLY,
-    Fighter, GUARD_DICE, GUARD_HEALTH, GUARD_RELIEF, GUARD_STEPS, GUARD_THRESHOLD, Gain, Game,
-    Goal, GreatDeed, Guard, HOSTILE, ISLAND, Intent, Law, Line, LineKind, MAX_ACTS, MAX_UNDEAD,
-    MILITIA, MILITIA_PASS, Militia, MilitiaWhy, Mob, MobKind, Novelty, OFFERED, PURSUIT_ROUNDS,
-    Patronage, Phase, PlayerId, Poison, Price, REBUILD_SPIRIT, RevealReason, RuleError, SACRIFICE,
-    SIGN, STAGE_THRESHOLD, STAGES, Said, Scenario, SceneSeat, Score, Seal, SealedWish, Setup,
-    StyleReason, TRIAL_ROUNDS, TRIALS_ON_BOARD, TRIBUTE_THREAT, TRISHNA_DRIFT, Target, Taste,
-    TasteKind, TimeOfDay, Trap, Trial, Truce, UNDEAD_DICE, UNDEAD_HEALTH, VARIETY, VOICE,
-    WAGER_STAKE, Wager, Window, WindowKind, Wish, WishKind, WorldStir, trial_face,
+    Check, CheckKind, Cure, DISSOLVED, Deed, Doing, DuskStep, Event, FIRST_STYLE, FORESEE,
+    FRIENDLY, Fighter, Fork, GUARD_DICE, GUARD_HEALTH, GUARD_RELIEF, GUARD_STEPS, GUARD_THRESHOLD,
+    Gain, Game, Goal, GreatDeed, Guard, HOSTILE, ISLAND, Intent, LETTERS, LINE_ROUNDS, Law, Line,
+    LineKind, MAX_ACTS, MAX_UNDEAD, MILITIA, MILITIA_PASS, Militia, MilitiaWhy, Mob, MobKind,
+    Novelty, OFFERED, PURSUIT_ROUNDS, Patronage, Phase, PlayerId, Poison, Price, REBUILD_SPIRIT,
+    RevealReason, RuleError, SACRIFICE, SIGN, STAGE_THRESHOLD, STAGES, Said, Scenario, SceneSeat,
+    Score, Seal, SealedWish, Setup, StyleReason, TRIAL_ROUNDS, TRIALS_ON_BOARD, TRIBUTE_THREAT,
+    TRISHNA_DRIFT, Target, Taste, TasteKind, TimeOfDay, Trap, Trial, Truce, UNDEAD_DICE,
+    UNDEAD_HEALTH, VARIETY, VOICE, WAGER_STAKE, Wager, Window, WindowKind, Wish, WishKind,
+    WorldStir, trial_face,
 };
 pub use game::{BUILD_SPIRIT, Building, CITY, QUARTER_SPIRIT, WALLED_MILITIA};
 pub use game::{

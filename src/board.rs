@@ -591,7 +591,8 @@ fn sync_tiles(
         .lines_of(game.human)
         .filter_map(|l| match l.goal {
             necromy_rules::Goal::ReachHex(h) | necromy_rules::Goal::PassTrial(h) => Some(h),
-            _ => None,
+            // A letter's place.
+            _ => l.at,
         })
         .chain(focus.hexes.iter().copied())
         // And the place of the next step of the human's deed (the path).
@@ -742,7 +743,7 @@ fn sync_markers(
         .lines_of(game.human)
         .filter_map(|l| match l.goal {
             necromy_rules::Goal::ReachHex(h) | necromy_rules::Goal::PassTrial(h) => Some(h),
-            _ => None,
+            _ => l.at,
         })
         .chain(focus.hexes.iter().copied())
         .map(|h| {

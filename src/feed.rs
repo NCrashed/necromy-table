@@ -113,7 +113,15 @@ fn rebuild(
 ) {
     let feed = *feed;
     commands.entity(feed).despawn_related::<Children>();
-    let text = game.feed.join("\n");
+    // While letters wait in the quests below, the feed keeps to its last
+    // few lines and leaves them room.
+    let keep = if game.game.letters(game.human).is_empty() {
+        game.feed.len()
+    } else {
+        4
+    };
+    let from = game.feed.len().saturating_sub(keep);
+    let text = game.feed[from..].join("\n");
     let spans: Vec<Entity> = pieces(&text)
         .into_iter()
         .map(|(text, card)| match card {

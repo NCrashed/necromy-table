@@ -46,7 +46,7 @@ impl Plugin for StoryUiPlugin {
             (rebuild_lines, rebuild_voice, rebuild_journal)
                 .run_if(resource_changed::<Match>.or_else(resource_changed::<Journal>)),
         )
-        .add_systems(crate::InGame, (expire_voice, clicks));
+        .add_systems(crate::InGame, (expire_voice, clicks, above_the_sheet));
     }
 }
 
@@ -68,6 +68,10 @@ struct CloseJournal;
 
 #[derive(Component)]
 struct CloseVoice;
+
+/// Takes the letter at this index, or (`None`) lets them all lie.
+#[derive(Component, Clone, Copy)]
+struct LetterButton(Option<u8>);
 
 /// The quest journal is open.
 #[derive(Resource, Default, PartialEq)]
@@ -167,9 +171,10 @@ fn rebuild_lines(
 ) {
     commands.entity(*panel).despawn_related::<Children>();
     let g = &game.game;
+    let letters = g.letters(game.human).to_vec();
     let lines: Vec<_> = g.lines_of(game.human).collect();
     let deals = deals(&game);
-    if lines.is_empty() && deals.is_empty() {
+    if lines.is_empty() && deals.is_empty() && letters.is_empty() {
         return;
     }
     let sheet = commands
@@ -184,6 +189,76 @@ fn rebuild_lines(
             Frame::Panel,
         ))
         .id();
+    // Tonight's letters from the gods, one to take (docs/storyteller-plan.md).
+    if !letters.is_empty() {
+        let title = stats::label(
+            &mut commands,
+            &font,
+            "Письма богов: возьми одно",
+            14.0,
+            true,
+        );
+        commands.entity(sheet).add_child(title);
+        for (i, line) in letters.iter().enumerate() {
+            let card = commands
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: px(3.0),
+                        padding: UiRect::axes(px(8.0), px(6.0)),
+                        ..default()
+                    },
+                    Frame::Tip,
+                    Accent(crate::gods_ui::god_color(line.god)),
+                ))
+                .id();
+            let head = stats::row(&mut commands);
+            let icon = stats::icon_node(
+                &mut commands,
+                art.gods[line.god.index()].clone(),
+                18.0,
+                true,
+            );
+            let name = stats::label(
+                &mut commands,
+                &font,
+                &format!(
+                    "{} · {}",
+                    names::god(line.god),
+                    names::line_title(line.kind)
+                ),
+                13.0,
+                true,
+            );
+            commands.entity(head).add_children(&[icon, name]);
+            let at = line
+                .at
+                .zip(g.champion(game.human).map(|c| c.hex))
+                .map(|(a, h)| format!(" · {} кл.", a.unsigned_distance_to(h)))
+                .unwrap_or_default();
+            let what = text(
+                &mut commands,
+                font.text(11.0),
+                format!("{}{at}", names::line_goal(line, g)),
+                INK,
+                218.0,
+            );
+            let gain = text(
+                &mut commands,
+                font.text(11.0),
+                format!("{} · срок {} р.", reward(line), necromy_rules::LINE_ROUNDS),
+                DIM,
+                218.0,
+            );
+            let take = button(&mut commands, &font, "Взять", LetterButton(Some(i as u8)));
+            commands
+                .entity(card)
+                .add_children(&[head, what, gain, take]);
+            commands.entity(sheet).add_child(card);
+        }
+        let lie = button(&mut commands, &font, "Отложить", LetterButton(None));
+        commands.entity(sheet).add_child(lie);
+    }
     // The header opens the journal too.
     let header = commands
         .spawn((
@@ -540,6 +615,7 @@ fn rebuild_journal(
 #[allow(clippy::type_complexity)]
 fn clicks(
     open: Query<&Interaction, (Changed<Interaction>, With<OpenJournal>)>,
+    letter: Query<(&Interaction, &LetterButton), Changed<Interaction>>,
     close: Query<&Interaction, (Changed<Interaction>, With<CloseJournal>)>,
     ok: Query<&Interaction, (Changed<Interaction>, With<CloseVoice>)>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -560,6 +636,18 @@ fn clicks(
     }
     if hit(ok.iter()) {
         game.told = None;
+    }
+    for (i, b) in &letter {
+        if *i == Interaction::Pressed {
+            let human = game.human;
+            let intent = match b.0 {
+                Some(index) => necromy_rules::Intent::TakeLetter { index },
+                None => necromy_rules::Intent::DeclineLetters,
+            };
+            if let Err(err) = game.act(human, intent) {
+                warn!("letter: {err}");
+            }
+        }
     }
     // Reading the journal covers what the voice said.
     if journal.open && game.told.is_some() {
@@ -586,4 +674,19 @@ fn speech_key(serial: u32, words: &str) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     ("told", serial, words).hash(&mut h);
     h.finish()
+}
+
+/// The quests stand just above the human's sheet, however tall it grows
+/// (curses, items, an oath).
+fn above_the_sheet(
+    sheet: Query<&ComputedNode, With<stats::MyPanel>>,
+    mut panel: Query<&mut Node, With<StoryPanel>>,
+) {
+    let (Ok(sheet), Ok(mut panel)) = (sheet.single(), panel.single_mut()) else {
+        return;
+    };
+    let bottom = px(sheet.size().y * sheet.inverse_scale_factor() + 18.0);
+    if panel.bottom != bottom {
+        panel.bottom = bottom;
+    }
 }

@@ -221,6 +221,8 @@ fn auto_screenshot(
             game.told.is_some() && game.wish_reply.is_none() && !dice.busy()
         }
         (Some("wishpanel"), Some(game)) => game.game.wishing().contains(&game.human),
+        // Letters from the gods wait for the human (docs/storyteller-plan.md).
+        (Some("letters"), Some(game)) => !game.game.letters(game.human).is_empty(),
         // Another seat's wish is being written where the human can see it.
         (Some("drafting"), Some(game)) => game
             .drafting

@@ -21,6 +21,8 @@ use crate::gods::God;
 pub const MAX_OPEN: usize = 2;
 /// Rounds a line stays open.
 pub const LINE_ROUNDS: u32 = 4;
+/// Letters offered at once, from as many gods.
+pub const LETTERS: usize = 2;
 /// Rounds without a fight before the world stirs by itself.
 pub const CALM_ROUNDS: u32 = 3;
 
@@ -48,6 +50,8 @@ pub enum LineKind {
     Thwart,
     /// Come to a rival's feast (§21.8).
     Invitation,
+    /// A god's letter asking for a thing done (docs/storyteller-plan.md).
+    Errand,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,6 +74,38 @@ pub enum Goal {
     Bring(crate::features::Feature),
     /// This rival's deed is off its eve.
     Thwart(PlayerId),
+    /// A thing done by the line's owner.
+    Do(Doing),
+}
+
+/// A thing a line can ask to be done, read off the events of a move or the
+/// deeds the story hears (letters, docs/storyteller-plan.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Doing {
+    Build,
+    Kindle,
+    Bury,
+    Gift,
+    Tame,
+    Sell,
+    OpenFair,
+    Rebuild,
+    FellMob,
+    Hide,
+    StoreFood,
+    /// A card on a body, by its verb.
+    Seed,
+    Fuel,
+    Rest,
+    Dissolve,
+    Raise,
+}
+
+/// The other way to close a line, and the god it pleases.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Fork {
+    pub goal: Goal,
+    pub god: God,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +121,12 @@ pub struct Line {
     pub style: u8,
     /// Style lost on failure; only wagers carry one.
     pub stake: u8,
+    /// Another way to close it, for another god.
+    pub fork: Option<Fork>,
+    /// Where it is to be done, if one place.
+    pub at: Option<Hex>,
+    /// Taken from a god's letter (one open at a time).
+    pub letter: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,25 +164,58 @@ impl Game {
         (sum / checks.len().max(1) as u32) as u16
     }
 
-    /// A deed may move a line forward (called from `record_deed`).
-    pub(super) fn story_deed(&mut self, player: PlayerId, deed: Deed, events: &mut Vec<Event>) {
-        let hits: Vec<u32> = self
+    /// Lines (of `owner`, or anyone's) whose goal, or whose fork, `met`
+    /// says is reached: done, for the god of the way taken.
+    fn close_met(
+        &mut self,
+        owner: Option<PlayerId>,
+        met: impl Fn(&Game, &Line, Goal) -> bool,
+        events: &mut Vec<Event>,
+    ) {
+        let hits: Vec<(u32, bool)> = self
             .lines
             .iter()
-            .filter(|l| l.owner == player)
-            .filter(|l| {
+            .filter(|l| owner.is_none_or(|o| l.owner == o))
+            .filter_map(|l| {
+                if met(self, l, l.goal) {
+                    Some((l.id, false))
+                } else if l.fork.is_some_and(|f| met(self, l, f.goal)) {
+                    Some((l.id, true))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for (id, forked) in hits {
+            if forked && let Some(l) = self.lines.iter_mut().find(|l| l.id == id) {
+                let f = l.fork.take().expect("a fork");
+                l.goal = f.goal;
+                l.god = f.god;
+            }
+            self.finish_line(id, true, events);
+        }
+    }
+
+    /// A deed may move a line forward (called from `record_deed`).
+    pub(super) fn story_deed(&mut self, player: PlayerId, deed: Deed, events: &mut Vec<Event>) {
+        use super::style::BodyVerb;
+        self.close_met(
+            Some(player),
+            |_, _, goal| {
                 matches!(
-                    (l.goal, deed),
+                    (goal, deed),
                     (Goal::WinBattle, Deed::Won)
                         | (Goal::Claim, Deed::Claimed)
                         | (Goal::Body, Deed::Body(_))
+                        | (Goal::Do(Doing::Seed), Deed::Body(BodyVerb::Seed))
+                        | (Goal::Do(Doing::Fuel), Deed::Body(BodyVerb::Fuel))
+                        | (Goal::Do(Doing::Rest), Deed::Body(BodyVerb::Rest))
+                        | (Goal::Do(Doing::Dissolve), Deed::Body(BodyVerb::Dissolve))
+                        | (Goal::Do(Doing::Raise), Deed::Body(BodyVerb::Legion))
                 )
-            })
-            .map(|l| l.id)
-            .collect();
-        for id in hits {
-            self.finish_line(id, true, events);
-        }
+            },
+            events,
+        );
         // Any fight breaks a quiet-crown wager.
         if matches!(deed, Deed::Fought) {
             let broken: Vec<u32> = self
@@ -152,6 +227,14 @@ impl Game {
             for id in broken {
                 self.finish_line(id, false, events);
             }
+        }
+    }
+
+    /// What a move's events did that a line can ask for.
+    pub(super) fn story_events(&mut self, events: &mut Vec<Event>) {
+        let done: Vec<(PlayerId, Doing)> = events.iter().filter_map(doing).collect();
+        for (player, what) in done {
+            self.close_met(Some(player), |_, _, goal| goal == Goal::Do(what), events);
         }
     }
 
@@ -177,36 +260,28 @@ impl Game {
 
     /// A trial passed may close a line that asked for it.
     pub(super) fn story_trial(&mut self, player: PlayerId, hex: Hex, events: &mut Vec<Event>) {
-        let done: Vec<u32> = self
-            .lines
-            .iter()
-            .filter(|l| l.owner == player && l.goal == Goal::PassTrial(hex))
-            .map(|l| l.id)
-            .collect();
-        for id in done {
-            self.finish_line(id, true, events);
-        }
+        self.close_met(
+            Some(player),
+            |_, _, goal| goal == Goal::PassTrial(hex),
+            events,
+        );
     }
 
     /// Goals that are states, not deeds: standing somewhere, favour gained.
     pub(super) fn check_lines(&mut self, events: &mut Vec<Event>) {
-        let done: Vec<u32> = self
-            .lines
-            .iter()
-            .filter(|l| match l.goal {
-                Goal::ReachHex(hex) => self.hex_of(l.owner) == hex,
+        self.close_met(
+            None,
+            |g, l, goal| match goal {
+                Goal::ReachHex(hex) => g.hex_of(l.owner) == hex,
                 Goal::Offer { god, amount, from } => {
-                    self.favor(l.owner, god).saturating_sub(from) >= amount
+                    g.favor(l.owner, god).saturating_sub(from) >= amount
                 }
-                Goal::Bring(feature) => self.has(feature),
-                Goal::Thwart(rival) => !self.on_eve(rival),
+                Goal::Bring(feature) => g.has(feature),
+                Goal::Thwart(rival) => !g.on_eve(rival),
                 _ => false,
-            })
-            .map(|l| l.id)
-            .collect();
-        for id in done {
-            self.finish_line(id, true, events);
-        }
+            },
+            events,
+        );
     }
 
     fn finish_line(&mut self, id: u32, won: bool, events: &mut Vec<Event>) {
@@ -278,21 +353,6 @@ impl Game {
             }
         }
 
-        // Those lagging get an opportunity, most lagging first, one each.
-        let best = self.players().map(|p| self.nearness(p)).max().unwrap_or(0);
-        let mut lagging: Vec<PlayerId> = self
-            .players()
-            .filter(|&p| Some(p) != self.dominant)
-            .filter(|&p| self.nearness(p) + 25 <= best || self.nearness(p) == 0)
-            .collect();
-        lagging.sort_by_key(|&p| (self.nearness(p), p.0));
-        for p in lagging {
-            if self.lines_of(p).count() >= MAX_OPEN {
-                continue;
-            }
-            self.opportunity(p, events);
-        }
-
         // A deed on its eve: every rival is told how to break it (§21.6), by
         // the god whose element quenches the deed's patron.
         let eves: Vec<PlayerId> = self.players().filter(|&p| self.on_eve(p)).collect();
@@ -345,6 +405,9 @@ impl Game {
             }
         }
 
+        // Letters from the gods: two each, the one lagging most first.
+        self.deal_letters(events);
+
         // A board gone still stirs: no fight, nothing made, nobody near a
         // deed for a while (§21.6).
         if self.round.saturating_sub(self.last_fight) >= CALM_ROUNDS {
@@ -374,82 +437,336 @@ impl Game {
             deadline: self.round + LINE_ROUNDS,
             style,
             stake,
+            fork: None,
+            at: None,
+            letter: false,
         };
         self.lines.push(line);
         events.push(Event::LineTold { line });
     }
 
-    /// An opportunity from the library, told by a god who fits it. What the
-    /// one lagging's deed needs of the world comes first (§21.6).
-    pub(super) fn opportunity(&mut self, p: PlayerId, events: &mut Vec<Event>) {
-        let taken: Vec<LineKind> = self.lines_of(p).map(|l| l.kind).collect();
-        let missing = self
-            .deed(p)
-            .and_then(|d| d.needs().iter().copied().find(|&f| self.can_awaken(f)));
-        if let Some(feature) = missing
-            && !taken.contains(&LineKind::Bring)
-        {
-            self.tell(
-                p,
-                feature.domain(),
-                LineKind::Bring,
-                Goal::Bring(feature),
-                3,
-                0,
-                events,
-            );
-            return;
+    /// The letters waiting for `player`: lines offered, not yet taken.
+    pub fn letters(&self, player: PlayerId) -> &[Line] {
+        self.letters
+            .get(player.0 as usize)
+            .map_or(&[][..], Vec::as_slice)
+    }
+
+    /// Dusk: last night's letters fade; whoever has no letter's line open
+    /// gets two, from two gods, the one lagging most first
+    /// (docs/storyteller-plan.md).
+    fn deal_letters(&mut self, events: &mut Vec<Event>) {
+        for l in &mut self.letters {
+            l.clear();
         }
-        let choices: Vec<LineKind> = [
-            LineKind::Pilgrimage,
-            LineKind::Tithe,
-            LineKind::Spoils,
-            LineKind::NewLand,
-            LineKind::TheDeadCall,
-            LineKind::Ordeal,
-        ]
-        .into_iter()
-        .filter(|k| !taken.contains(k))
-        .filter(|k| match k {
-            LineKind::Ordeal => self.has(super::Feature::Trials),
-            LineKind::TheDeadCall => self.has(super::Feature::Bodies),
-            _ => true,
-        })
-        .collect();
-        let Some(&kind) = self.rng.pick(&choices) else {
-            return;
-        };
-        // A trial within reach, set for them by the god of its land.
-        if kind == LineKind::Ordeal {
-            let at = self.hex_of(p);
-            if let Some(hex) = self.trial_spot(Some((at, 2, 4)))
-                && let Some(god) = self.set_trial(hex, events)
-            {
-                self.tell(p, god, kind, Goal::PassTrial(hex), 3, 0, events);
+        let mut order: Vec<PlayerId> = self.players().collect();
+        order.sort_by_key(|&p| (self.nearness(p), p.0));
+        for p in order {
+            if self.lines_of(p).any(|l| l.letter) || self.lines_of(p).count() >= MAX_OPEN {
+                continue;
             }
-            return;
+            // The deed's patron writes first, the rest in an order of the
+            // table's choosing.
+            let mut gods: Vec<God> = God::ALL.to_vec();
+            let mut picked: Vec<God> = Vec::new();
+            if let Some(d) = self.deed(p) {
+                picked.push(d.patron());
+                gods.retain(|&g| g != d.patron());
+            }
+            while !gods.is_empty() {
+                let i = self.rng.below(gods.len() as u32) as usize;
+                picked.push(gods.remove(i));
+            }
+            let mut letters: Vec<Line> = Vec::new();
+            for god in picked {
+                if letters.len() >= LETTERS {
+                    break;
+                }
+                if let Some(line) = self.letter(p, god) {
+                    letters.push(line);
+                }
+            }
+            if !letters.is_empty() {
+                self.letters[p.0 as usize] = letters.clone();
+                events.push(Event::LettersCame { player: p, letters });
+            }
         }
-        // The god whose favour the player most lacks calls them.
-        let god = *God::ALL
-            .iter()
-            .min_by_key(|&&g| (self.favor(p, g), g.index()))
-            .expect("five gods");
-        let (goal, god, style) = match kind {
-            LineKind::Pilgrimage => (Goal::ReachHex(self.board.temple_of(god)), god, 2),
-            LineKind::Tithe => (
-                Goal::Offer {
-                    god,
-                    amount: 3,
-                    from: self.favor(p, god),
-                },
-                god,
-                2,
-            ),
-            LineKind::Spoils => (Goal::WinBattle, God::Trishna, 3),
-            LineKind::NewLand => (Goal::Claim, God::Ahamar, 2),
-            _ => (Goal::Body, God::Maya, 2),
+    }
+
+    /// A letter from `god` to `p`: one of the things the god likes done
+    /// that can be done near them now, maybe with another god's way out.
+    fn letter(&mut self, p: PlayerId, god: God) -> Option<Line> {
+        use super::Feature;
+        let me = self.hex_of(p);
+        let near = |hexes: Vec<Hex>, reach: u32| {
+            hexes
+                .into_iter()
+                .filter(|h| h.unsigned_distance_to(me) <= reach)
+                .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
         };
-        self.tell(p, god, kind, goal, style, 0, events);
+        let corpse = near(self.board.corpses().map(|(h, _)| h).collect(), 5);
+        let holds =
+            |g: &Game, e: crate::cards::Effect| g.hand(p).iter().any(|&c| g.def(c).effect == e);
+        let fork = |goal: Goal, god: God| Some(Fork { goal, god });
+        let mut options: Vec<(Goal, Option<Fork>, Option<Hex>)> = Vec::new();
+        use crate::cards::Effect;
+        match god {
+            God::Bhava => {
+                if self.has(Feature::Companions) {
+                    let beast = near(
+                        self.mobs
+                            .iter()
+                            .filter(|m| m.is_beast())
+                            .map(|m| m.hex)
+                            .collect(),
+                        6,
+                    );
+                    if let Some(h) = beast {
+                        options.push((
+                            Goal::Do(Doing::Tame),
+                            fork(Goal::Do(Doing::FellMob), God::Trishna),
+                            Some(h),
+                        ));
+                    }
+                }
+                if let Some(h) = corpse
+                    && holds(self, Effect::BodySeed)
+                {
+                    options.push((
+                        Goal::Do(Doing::Seed),
+                        fork(Goal::Do(Doing::Fuel), God::Trishna),
+                        Some(h),
+                    ));
+                }
+            }
+            God::Trishna => {
+                options.push((
+                    Goal::WinBattle,
+                    fork(Goal::Do(Doing::FellMob), God::Zaga),
+                    None,
+                ));
+                if self.has(Feature::Fires) {
+                    let fuel = near(
+                        self.board
+                            .land()
+                            .filter(|(h, t)| t.terrain.burns() && self.owner(*h) != Some(p))
+                            .map(|(h, _)| h)
+                            .collect(),
+                        4,
+                    );
+                    if let Some(h) = fuel {
+                        options.push((Goal::Do(Doing::Kindle), None, Some(h)));
+                    }
+                }
+                if let Some((h, _)) = self.fairs().next()
+                    && (self.has(Feature::Goods))
+                {
+                    let gift = self.has(Feature::Rulers).then_some(Fork {
+                        goal: Goal::Do(Doing::Gift),
+                        god: God::Ahamar,
+                    });
+                    options.push((Goal::Do(Doing::Sell), gift, Some(h)));
+                }
+                if self.has(Feature::Fields)
+                    && self
+                        .claims()
+                        .any(|(h, o)| o == p && self.own_settlement(p, h))
+                {
+                    let food = near(
+                        self.loads
+                            .iter()
+                            .filter(|(_, c)| *c == super::Cargo::Food)
+                            .map(|(h, _)| *h)
+                            .collect(),
+                        6,
+                    );
+                    if let Some(h) = food {
+                        options.push((Goal::Do(Doing::StoreFood), None, Some(h)));
+                    }
+                }
+            }
+            God::Zaga => {
+                let graveyard = self
+                    .board
+                    .land()
+                    .any(|(_, t)| t.terrain == Terrain::Graveyard);
+                if let Some(h) = corpse {
+                    if self.has(Feature::Burial) && graveyard {
+                        options.push((
+                            Goal::Do(Doing::Bury),
+                            fork(Goal::Do(Doing::Dissolve), God::Maya),
+                            Some(h),
+                        ));
+                    }
+                    if holds(self, Effect::BodyRest) {
+                        options.push((
+                            Goal::Do(Doing::Rest),
+                            fork(Goal::Do(Doing::Dissolve), God::Maya),
+                            Some(h),
+                        ));
+                    }
+                }
+                let trial = near(
+                    self.trials()
+                        .iter()
+                        .map(|t| t.hex)
+                        .filter(|&h| self.trial_for(p, h).is_some())
+                        .collect(),
+                    5,
+                );
+                if let Some(h) = trial {
+                    options.push((Goal::PassTrial(h), None, Some(h)));
+                }
+                let undead = near(
+                    self.mobs
+                        .iter()
+                        .filter(|m| m.is_undead())
+                        .map(|m| m.hex)
+                        .collect(),
+                    5,
+                );
+                if let Some(h) = undead {
+                    let raise = self.has(Feature::Legion).then_some(Fork {
+                        goal: Goal::Do(Doing::Tame),
+                        god: God::Maya,
+                    });
+                    options.push((Goal::Do(Doing::FellMob), raise, Some(h)));
+                }
+            }
+            God::Ahamar => {
+                let free = near(
+                    self.board
+                        .land()
+                        .filter(|(h, t)| {
+                            t.terrain == Terrain::Settlement && self.owner(*h).is_none()
+                        })
+                        .map(|(h, _)| h)
+                        .collect(),
+                    6,
+                );
+                if let Some(h) = free {
+                    options.push((Goal::Claim, None, Some(h)));
+                }
+                if self.has(Feature::Buildings) {
+                    let site = near(
+                        self.claims()
+                            .filter(|&(h, o)| {
+                                o == p && self.own_settlement(p, h) && self.building(h).is_none()
+                            })
+                            .map(|(h, _)| h)
+                            .collect(),
+                        6,
+                    );
+                    if let Some(h) = site {
+                        let fair = self.has(Feature::Fairs).then_some(Fork {
+                            goal: Goal::Do(Doing::OpenFair),
+                            god: God::Trishna,
+                        });
+                        options.push((Goal::Do(Doing::Build), fair, Some(h)));
+                    }
+                }
+                if self.has(Feature::Rulers) {
+                    let ruler = near(self.rulers().map(|(h, _)| h).collect(), 5);
+                    if let Some(h) = ruler {
+                        options.push((Goal::Do(Doing::Gift), None, Some(h)));
+                    }
+                }
+                let ruins = near(
+                    self.board
+                        .land()
+                        .filter(|(_, t)| t.terrain == Terrain::Ruins)
+                        .map(|(h, _)| h)
+                        .collect(),
+                    5,
+                );
+                if let Some(h) = ruins {
+                    options.push((Goal::Do(Doing::Rebuild), None, Some(h)));
+                }
+            }
+            God::Maya => {
+                if self.has(Feature::Stealth) {
+                    options.push((Goal::Do(Doing::Hide), None, None));
+                }
+                if let Some(h) = corpse {
+                    if holds(self, Effect::BodyDissolve) {
+                        let bury = self.has(Feature::Burial).then_some(Fork {
+                            goal: Goal::Do(Doing::Bury),
+                            god: God::Zaga,
+                        });
+                        options.push((Goal::Do(Doing::Dissolve), bury, Some(h)));
+                    }
+                    if holds(self, Effect::BodyLegion) {
+                        options.push((
+                            Goal::Do(Doing::Raise),
+                            fork(Goal::Do(Doing::Rest), God::Zaga),
+                            Some(h),
+                        ));
+                    }
+                }
+            }
+        }
+        // Every god can call one to its temple.
+        let temple = self.board.temple_of(god);
+        if options.is_empty() && temple.unsigned_distance_to(me) > 1 {
+            options.push((Goal::ReachHex(temple), None, Some(temple)));
+        }
+        if options.is_empty() {
+            return None;
+        }
+        let i = self.rng.below(options.len() as u32) as usize;
+        let &(goal, fork, at) = options.get(i)?;
+        let kind = match goal {
+            Goal::ReachHex(_) => LineKind::Pilgrimage,
+            Goal::WinBattle => LineKind::Spoils,
+            Goal::Claim => LineKind::NewLand,
+            Goal::PassTrial(_) => LineKind::Ordeal,
+            _ => LineKind::Errand,
+        };
+        self.next_line += 1;
+        Some(Line {
+            id: self.next_line,
+            owner: p,
+            god,
+            kind,
+            goal,
+            deadline: 0,
+            style: 2,
+            stake: 0,
+            fork,
+            at,
+            letter: true,
+        })
+    }
+
+    /// `player` takes the letter at `index`: its line opens now.
+    pub(super) fn take_letter(
+        &mut self,
+        player: PlayerId,
+        index: u8,
+        events: &mut Vec<Event>,
+    ) -> Result<(), super::RuleError> {
+        let Some(mut line) = self.letters(player).get(index as usize).copied() else {
+            return Err(super::RuleError::InvalidTarget);
+        };
+        line.deadline = self.round + LINE_ROUNDS;
+        self.letters[player.0 as usize].clear();
+        self.lines.push(line);
+        events.push(Event::LineTold { line });
+        Ok(())
+    }
+
+    /// `player` lets the letters lie: none taken tonight.
+    pub(super) fn decline_letters(
+        &mut self,
+        player: PlayerId,
+        events: &mut Vec<Event>,
+    ) -> Result<(), super::RuleError> {
+        if self.letters(player).is_empty() {
+            return Err(super::RuleError::InvalidTarget);
+        }
+        self.letters[player.0 as usize].clear();
+        events.push(Event::LettersSetAside { player });
+        Ok(())
     }
 
     /// The world moves by itself when nobody moves it. The darkest god makes
@@ -575,4 +892,22 @@ impl Game {
             self.last_fight = self.round;
         }
     }
+}
+
+/// Who did what of the things a line can ask for, by an event.
+fn doing(e: &Event) -> Option<(PlayerId, Doing)> {
+    Some(match *e {
+        Event::Built { player, .. } => (player, Doing::Build),
+        Event::FireStarted { by: Some(by), .. } => (by, Doing::Kindle),
+        Event::Buried { player, .. } => (player, Doing::Bury),
+        Event::Gifted { player, .. } => (player, Doing::Gift),
+        Event::CompanionJoined { player, .. } => (player, Doing::Tame),
+        Event::GoodsSold { player, .. } => (player, Doing::Sell),
+        Event::FairOpened { player, .. } => (player, Doing::OpenFair),
+        Event::SettlementRebuilt { player, .. } => (player, Doing::Rebuild),
+        Event::MobFell { by, .. } => (by, Doing::FellMob),
+        Event::Hid { player, .. } => (player, Doing::Hide),
+        Event::FoodStored { player, .. } => (player, Doing::StoreFood),
+        _ => return None,
+    })
 }

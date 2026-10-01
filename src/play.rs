@@ -1845,6 +1845,13 @@ impl Match {
                 )
             }
             Event::DeckReshuffled => "Колода перемешана.".into(),
+            Event::LettersCame { player, letters } if *player == self.human => {
+                let from: Vec<&str> = letters.iter().map(|l| names::god(l.god)).collect();
+                format!(
+                    "Письма богов ({}): возьми одно — они в заданиях слева.",
+                    from.join(", ")
+                )
+            }
             Event::LineTold { line } => format!(
                 "{} даёт {} линию «{}» до раунда {}.",
                 names::god(line.god),

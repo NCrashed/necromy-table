@@ -776,6 +776,7 @@ pub fn line_title(kind: necromy_rules::LineKind) -> &'static str {
         LineKind::Bring => "Недостающее",
         LineKind::Thwart => "Сорвать деяние",
         LineKind::Invitation => "Приглашение на пир",
+        LineKind::Errand => "Просьба",
     }
 }
 
@@ -793,13 +794,31 @@ pub fn line_voice(kind: necromy_rules::LineKind) -> &'static str {
         LineKind::Bring => "Твоему замыслу не хватает того, чего нет в мире. Принеси это.",
         LineKind::Thwart => "Чужое деяние вот-вот свершится. Не дай ему дожить до заката.",
         LineKind::Invitation => "В поселении готовят пир. Приходи — накормят и почтут.",
+        LineKind::Errand => "Сделай то, о чём прошу, — и я тебя запомню.",
     }
 }
 
-/// What a line asks, with progress where it has one.
+/// What a line asks, with progress where it has one, and the other way
+/// to close it, if it has one.
 pub fn line_goal(line: &necromy_rules::Line, g: &necromy_rules::Game) -> String {
+    let main = goal_text(line.goal, line, g);
+    match line.fork {
+        Some(f) => format!(
+            "{main} · или: {} (для {})",
+            goal_text(f.goal, line, g),
+            god_genitive(f.god)
+        ),
+        None => main,
+    }
+}
+
+fn goal_text(
+    goal: necromy_rules::Goal,
+    line: &necromy_rules::Line,
+    g: &necromy_rules::Game,
+) -> String {
     use necromy_rules::Goal;
-    match line.goal {
+    match goal {
         Goal::ReachHex(hex) => {
             let region = g
                 .board()
@@ -828,6 +847,7 @@ pub fn line_goal(line: &necromy_rules::Line, g: &necromy_rules::Game) -> String 
             "сорви деяние {} до заката",
             g.champion(rival).map_or("?", |c| god_genitive(c.god))
         ),
+        Goal::Do(d) => doing(d).into(),
     }
 }
 
@@ -1459,4 +1479,27 @@ pub fn step(
         },
     };
     (format!("{what}{far}"), why)
+}
+
+/// What a letter's line asks to be done (docs/storyteller-plan.md).
+pub fn doing(d: necromy_rules::Doing) -> &'static str {
+    use necromy_rules::Doing;
+    match d {
+        Doing::Build => "построй что-нибудь в своём поселении",
+        Doing::Kindle => "подожги лес или чужое поселение",
+        Doing::Bury => "похорони тело на кладбище",
+        Doing::Gift => "поднеси дар правителю",
+        Doing::Tame => "приручи зверя или возьми мертвеца в легион",
+        Doing::Sell => "продай товар на ярмарке",
+        Doing::OpenFair => "открой ярмарку в своём поселении",
+        Doing::Rebuild => "отстрой поселение из руин",
+        Doing::FellMob => "срази зверя, мертвеца или чудовище",
+        Doing::Hide => "скройся из виду",
+        Doing::StoreFood => "отнеси еду в закрома своего поселения",
+        Doing::Seed => "засей тело: сыграй на него карту «семя»",
+        Doing::Fuel => "сожги тело: сыграй на него карту «топливо»",
+        Doing::Rest => "упокой тело картой покоя",
+        Doing::Dissolve => "растворь тело картой Майи",
+        Doing::Raise => "подними тело в легион картой",
+    }
 }

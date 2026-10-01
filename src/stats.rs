@@ -118,7 +118,7 @@ enum HoverSource {
 }
 
 #[derive(Component)]
-struct MyPanel;
+pub struct MyPanel;
 
 #[derive(Component)]
 struct Seats;

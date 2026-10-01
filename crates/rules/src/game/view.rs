@@ -57,6 +57,12 @@ impl Game {
         v.rng.shuffle(&mut v.deck);
         // The loot deck's order too (§20.3).
         v.rng.shuffle(&mut v.loot);
+        // The gods' letters are for their reader (docs/storyteller-plan.md).
+        for (i, l) in v.letters.iter_mut().enumerate() {
+            if !mine(PlayerId(i as u8)) {
+                l.clear();
+            }
+        }
 
         // A hidden rival stands where they were last seen (§11.6).
         for (i, c) in v.champions.iter_mut().enumerate() {
@@ -126,6 +132,13 @@ impl Game {
                 card: *card,
                 def: view.def_id(*card),
             },
+            // Letters are for their reader.
+            Event::LettersCame { player, .. } if Some(*player) != viewer => {
+                Event::LettersCame {
+                    player: *player,
+                    letters: Vec::new(),
+                }
+            }
             // What a wish showed one player of the deck stays theirs.
             Event::Foreseen { player, .. } if Some(*player) != viewer => Event::Foreseen {
                 player: *player,
