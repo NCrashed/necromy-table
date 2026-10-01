@@ -80,7 +80,7 @@ impl Game {
             Effect::Rain => {
                 if let Some(h) = hex {
                     for n in h.range(1) {
-                        self.put_out(n, events);
+                        self.put_out(n, Some(caster), events);
                     }
                 }
             }

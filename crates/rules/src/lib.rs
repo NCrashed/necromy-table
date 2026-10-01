@@ -45,6 +45,7 @@ pub use game::{
     WindowKind, Wish, WishKind, WorldStir, trial_face,
 };
 pub use game::{BUILD_SPIRIT, Building, CITY, QUARTER_SPIRIT, WALLED_MILITIA};
+pub use game::{CASE_REACH, CASE_ROUNDS, Case, Hook};
 pub use game::{
     CIRCLE_SPIRIT, Circle, EGG_WARMTH, MONSTER_DICE, MONSTER_HEALTH, SUMMON_BODIES, Wonders,
 };

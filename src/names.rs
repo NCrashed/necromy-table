@@ -827,6 +827,7 @@ pub fn line_title(kind: necromy_rules::LineKind) -> &'static str {
         LineKind::Thwart => "Сорвать деяние",
         LineKind::Invitation => "Приглашение на пир",
         LineKind::Errand => "Просьба",
+        LineKind::Case(hook) => case_title(hook),
     }
 }
 
@@ -845,6 +846,7 @@ pub fn line_voice(kind: necromy_rules::LineKind) -> &'static str {
         LineKind::Thwart => "Чужое деяние вот-вот свершится. Не дай ему дожить до заката.",
         LineKind::Invitation => "В поселении готовят пир. Приходи — накормят и почтут.",
         LineKind::Errand => "Сделай то, о чём прошу, — и я тебя запомню.",
+        LineKind::Case(hook) => case_voice(hook),
     }
 }
 
@@ -915,7 +917,7 @@ pub fn god_dative(god: God) -> &'static str {
 pub fn world_stir(stir: necromy_rules::WorldStir) -> &'static str {
     use necromy_rules::WorldStir;
     match stir {
-        WorldStir::RisingDead => "На столе тихо — и мёртвые поднимаются у центра.",
+        WorldStir::RisingDead => "На столе тихо — и у отстающего ложатся мёртвые.",
         WorldStir::Overgrowth => "На столе тихо — и чаща разрастается сама.",
         WorldStir::Unrest => "На столе тихо — и по королевству ползёт тревога: всем +1 Угрозы.",
         WorldStir::Awakening => "На столе тихо — и самый тёмный бог сам приносит в мир своё.",
@@ -1546,6 +1548,9 @@ pub fn doing(d: necromy_rules::Doing) -> &'static str {
         Doing::FellMob => "срази зверя, мертвеца или чудовище",
         Doing::Hide => "скройся из виду",
         Doing::StoreFood => "отнеси еду в закрома своего поселения",
+        Doing::Douse => "потуши огонь",
+        Doing::Seize => "отними ношу у соперника в бою",
+        Doing::Delve => "открой ход под руинами",
         Doing::Seed => "засей тело: сыграй на него карту «семя»",
         Doing::Fuel => "сожги тело: сыграй на него карту «топливо»",
         Doing::Rest => "упокой тело картой покоя",
@@ -1593,5 +1598,35 @@ pub fn letter_head(line: &necromy_rules::Line) -> String {
         (Some(v), _) => format!("искушение: предать {}", god_accusative(v)),
         (None, 0) => line_title(line.kind).to_string(),
         (None, c) => format!("глава {c}/3 → {}", patronage(chapter_rung(c))),
+    }
+}
+
+/// A case's title: what the storyteller saw happening (stage 4).
+pub fn case_title(hook: necromy_rules::Hook) -> &'static str {
+    use necromy_rules::Hook;
+    match hook {
+        Hook::Blaze => "Пожар у поселения",
+        Hook::Prowler => "Зверь у ворот",
+        Hook::RestlessDead => "Неупокоенные тела",
+        Hook::Caravan => "Чужой обоз",
+        Hook::Masterless => "Поселение без хозяина",
+        Hook::Stranger => "Путник из-за мглы",
+        Hook::Marauder => "Мертвец у жилья",
+        Hook::Ruins => "Руины",
+    }
+}
+
+/// What the god says of a case when it tells it.
+pub fn case_voice(hook: necromy_rules::Hook) -> &'static str {
+    use necromy_rules::Hook;
+    match hook {
+        Hook::Blaze => "Огонь подбирается к жилью. Залей его — или дай ему поесть.",
+        Hook::Prowler => "Зверь бродит у ворот. Приручи его или сруби.",
+        Hook::RestlessDead => "Тела лежат кучей и скоро встанут. Упокой их или подними.",
+        Hook::Caravan => "Соперник несёт добро рядом с тобой. Возьми его.",
+        Hook::Masterless => "У поселения нет хозяина. Склони правителя дарами или возьми силой.",
+        Hook::Stranger => "Из мглы вышел путник. Поведи его.",
+        Hook::Marauder => "Мертвец бредёт к живым. Встреть его — или забери себе.",
+        Hook::Ruins => "Руины ждут. Отстрой их или открой под ними ход.",
     }
 }

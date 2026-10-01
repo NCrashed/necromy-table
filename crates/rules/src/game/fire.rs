@@ -151,7 +151,7 @@ impl Game {
     ) -> Result<(), RuleError> {
         self.check_douse(player, hex)?;
         self.spend(player, DOUSE_SPIRIT, events)?;
-        self.put_out(hex, events);
+        self.put_out(hex, Some(player), events);
         self.first(player, super::Novelty::Doused, events);
         Ok(())
     }
@@ -167,9 +167,9 @@ impl Game {
     }
 
     /// Water, the mist or a champion's hand: the fire on `hex` goes out.
-    pub(super) fn put_out(&mut self, hex: Hex, events: &mut Vec<Event>) {
+    pub(super) fn put_out(&mut self, hex: Hex, by: Option<PlayerId>, events: &mut Vec<Event>) {
         if self.fires.remove(&(hex.x(), hex.y())).is_some() {
-            events.push(Event::FireOut { hex });
+            events.push(Event::FireOut { hex, by });
         }
     }
 
@@ -272,6 +272,6 @@ impl Game {
                 terrain: Terrain::Ash,
             });
         }
-        events.push(Event::FireOut { hex });
+        events.push(Event::FireOut { hex, by: None });
     }
 }

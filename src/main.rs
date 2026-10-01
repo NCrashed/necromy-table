@@ -228,6 +228,11 @@ fn auto_screenshot(
         (Some("wishpanel"), Some(game)) => game.game.wishing().contains(&game.human),
         // Letters from the gods wait for the human (docs/storyteller-plan.md).
         (Some("letters"), Some(game)) => !game.game.letters(game.human).is_empty(),
+        // A case told to the human (stage 4).
+        (Some("case"), Some(game)) => game
+            .game
+            .lines_of(game.human)
+            .any(|l| matches!(l.kind, necromy_rules::LineKind::Case(_))),
         // Another seat's wish is being written where the human can see it.
         (Some("drafting"), Some(game)) => game
             .drafting

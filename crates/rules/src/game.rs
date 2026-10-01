@@ -1072,6 +1072,8 @@ pub enum Event {
     /// The fire on `hex` went out or burnt the hex out.
     FireOut {
         hex: Hex,
+        /// Who put it out, if a champion did.
+        by: Option<PlayerId>,
     },
     /// `player` was burnt by a fire.
     Scorched {
@@ -3845,6 +3847,7 @@ mod fire;
 mod gear;
 mod gods_hand;
 mod guard;
+pub mod hooks;
 mod laws;
 mod mechanic_cards;
 mod mechanic_laws;
@@ -3883,6 +3886,7 @@ pub use fire::{DOUSE_SPIRIT, Fire, GREAT_FIRE, KINDLE_SPIRIT};
 pub use gear::{Gain, SACRIFICE};
 pub use gods_hand::GodAct;
 pub use guard::{GUARD_DICE, GUARD_HEALTH, GUARD_RELIEF, GUARD_STEPS, Guard};
+pub use hooks::{CASE_REACH, CASE_ROUNDS, Case, Hook};
 pub use laws::{BURDEN_FREE, CHOSEN, CRACK_REACH, Law, Patronage, SENTENCE_THRESHOLD, SIGN, VOICE};
 pub use militia::{
     FRIENDLY, HOSTILE, MILITIA, MILITIA_PASS, Militia, MilitiaWhy, PURSUIT_ROUNDS, REBUILD_SPIRIT,

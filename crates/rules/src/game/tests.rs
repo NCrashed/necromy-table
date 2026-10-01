@@ -671,10 +671,17 @@ fn bots_never_stall_or_break_rules() {
             .iter()
             .filter(|e| matches!(e, Event::CardPlayed { .. }))
             .count();
+        // Lines done (letters, cases) are play too: a bot busy with them
+        // plays fewer cards.
+        let done = g
+            .log()
+            .iter()
+            .filter(|e| matches!(e, Event::LineDone { .. }))
+            .count();
         // A match won early (seed 5: round 7) has had little time for cards.
         let early = g.winner().is_some() && g.round() < 8;
         assert!(
-            played > 10 || early,
+            played + done > 10 || early,
             "seed {seed}: bots played only {played} cards"
         );
         poisoned += g
@@ -1821,7 +1828,7 @@ fn dusk_tells_lines_to_those_lagging_within_limits() {
     }
     assert!(g.log().iter().any(|e| matches!(e, Event::LineTold { .. })));
     for p in g.players() {
-        assert!(g.lines_of(p).count() <= MAX_OPEN);
+        assert!(g.open_lines(p) <= MAX_OPEN);
     }
 }
 
@@ -6878,4 +6885,89 @@ fn a_dark_god_asks_for_harsh_things() {
         let l = g.letter(me, God::Trishna).unwrap();
         assert!(super::story::harsh(l.goal), "{:?}", l.goal);
     }
+}
+
+// ---- Cases: the storyteller reads the world (stage 4) ----
+
+#[test]
+fn a_fire_by_a_settlement_is_a_case_for_one_near_with_two_ways() {
+    let (mut g, me, _) = duel(3);
+    g.lines.clear();
+    let at = g.champion(me).unwrap().hex;
+    let town = at + Hex::new(2, 0);
+    set_terrain(&mut g, town, Terrain::Settlement);
+    let wood = at + Hex::new(1, 0);
+    set_terrain(&mut g, wood, Terrain::Forest);
+    g.fires.insert((wood.x(), wood.y()), Fire { by: None });
+    assert!(
+        g.cases()
+            .iter()
+            .any(|c| c.hook == Hook::Blaze && c.at == wood)
+    );
+    let mut ev = Vec::new();
+    g.deal_cases(&mut ev);
+    let line = *g
+        .lines_of(me)
+        .find(|l| l.kind == LineKind::Case(Hook::Blaze))
+        .expect("a case");
+    assert_eq!(line.goal, Goal::Do(Doing::Douse));
+    assert_eq!(line.god, God::Maya);
+    assert_eq!(line.fork.map(|f| f.god), Some(God::Trishna));
+    assert_eq!(line.at, Some(wood));
+    assert_eq!(line.deadline, g.round() + CASE_ROUNDS);
+    // One case at a time: no second one at the next dusk.
+    g.deal_cases(&mut ev);
+    assert_eq!(
+        g.lines_of(me)
+            .filter(|l| matches!(l.kind, LineKind::Case(_)))
+            .count(),
+        1
+    );
+    // Put out by their hand: done, for Maya.
+    g.champ_mut(me).spirit_points = 9;
+    let events = g.apply(me, Intent::Douse { hex: wood }).unwrap();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::LineDone { line } if line.god == God::Maya
+    )));
+}
+
+#[test]
+fn a_case_far_away_is_nobodys() {
+    let (mut g, me, foe) = duel(3);
+    g.lines.clear();
+    let far = g
+        .board()
+        .land()
+        .map(|(h, _)| h)
+        .find(|&h| {
+            [me, foe]
+                .iter()
+                .all(|&p| g.hex_of(p).unsigned_distance_to(h) > CASE_REACH)
+        })
+        .unwrap();
+    set_terrain(&mut g, far, Terrain::Ruins);
+    for p in [me, foe] {
+        assert!(g.hex_of(p).unsigned_distance_to(far) > CASE_REACH);
+    }
+    g.deal_cases(&mut Vec::new());
+    assert!(!g.lines.iter().any(|l| l.at == Some(far)));
+}
+
+#[test]
+fn a_rivals_caravan_is_a_case_for_the_others_only() {
+    let (mut g, me, foe) = duel(3);
+    g.lines.clear();
+    g.champ_mut(foe).cargo = Some(Cargo::Food);
+    let near = g.hex_of(me) + Hex::new(2, 0);
+    g.place(foe, near);
+    g.deal_cases(&mut Vec::new());
+    assert!(
+        g.lines_of(me)
+            .any(|l| l.kind == LineKind::Case(Hook::Caravan))
+    );
+    assert!(
+        !g.lines_of(foe)
+            .any(|l| l.kind == LineKind::Case(Hook::Caravan))
+    );
 }

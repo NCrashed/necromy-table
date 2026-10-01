@@ -1084,7 +1084,7 @@ fn letter_work(game: &Game, player: PlayerId) -> Option<Intent> {
     let here = hex_of(game, player);
     let wants: Vec<Doing> = game
         .lines_of(player)
-        .filter(|l| l.letter)
+        .filter(|l| l.letter || matches!(l.kind, crate::game::LineKind::Case(_)))
         .flat_map(|l| [Some(l.goal), l.fork.map(|f| f.goal)])
         .flatten()
         .filter_map(|g| match g {
@@ -1139,6 +1139,14 @@ fn letter_work(game: &Game, player: PlayerId) -> Option<Intent> {
                     target: Target::Champion(player),
                 })
             }),
+            Doing::Douse if spirit >= crate::DOUSE_SPIRIT => game
+                .dousable(player)
+                .first()
+                .map(|&hex| Intent::Douse { hex }),
+            Doing::Delve => game
+                .delve_work(player)
+                .first()
+                .map(|&work| Intent::Delve { work }),
             Doing::Seed => body(Effect::BodySeed),
             Doing::Fuel => body(Effect::BodyFuel),
             Doing::Rest => body(Effect::BodyRest),

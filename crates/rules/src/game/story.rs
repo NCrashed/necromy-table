@@ -52,6 +52,9 @@ pub enum LineKind {
     Invitation,
     /// A god's letter asking for a thing done (docs/storyteller-plan.md).
     Errand,
+    /// A case: something happening near, with two ways to close it
+    /// (`hooks.rs`).
+    Case(super::hooks::Hook),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,6 +96,11 @@ pub enum Doing {
     FellMob,
     Hide,
     StoreFood,
+    Douse,
+    /// Cargo won off a rival.
+    Seize,
+    /// Work done under the ruins.
+    Delve,
     /// A card on a body, by its verb.
     Seed,
     Fuel,
@@ -153,6 +161,14 @@ impl Game {
 
     pub fn lines_of(&self, player: PlayerId) -> impl Iterator<Item = &Line> {
         self.lines.iter().filter(move |l| l.owner == player)
+    }
+
+    /// Lines open against the limit (`MAX_OPEN`): a case is a layer of
+    /// its own and does not count.
+    pub fn open_lines(&self, player: PlayerId) -> usize {
+        self.lines_of(player)
+            .filter(|l| !matches!(l.kind, LineKind::Case(_)))
+            .count()
     }
 
     /// How close a player is to winning, 0..=100: their deed, the average
@@ -347,7 +363,7 @@ impl Game {
             let has_wager = self
                 .lines_of(d)
                 .any(|l| matches!(l.kind, LineKind::QuietCrown | LineKind::Trial));
-            if streak >= 2 && !has_wager && self.lines_of(d).count() < MAX_OPEN {
+            if streak >= 2 && !has_wager && self.open_lines(d) < MAX_OPEN {
                 let kind = if self.rng.below(2) == 0 {
                     LineKind::QuietCrown
                 } else {
@@ -372,7 +388,7 @@ impl Game {
             let rivals: Vec<PlayerId> = self.players().filter(|&r| r != p).collect();
             for r in rivals {
                 let told = self.lines_of(r).any(|l| l.goal == Goal::Thwart(p));
-                if !told && self.lines_of(r).count() < MAX_OPEN {
+                if !told && self.open_lines(r) < MAX_OPEN {
                     self.tell(r, teller, LineKind::Thwart, Goal::Thwart(p), 3, 0, events);
                     // Until the dusk the deed would be done at.
                     if let Some(line) = self.lines.last_mut() {
@@ -399,7 +415,7 @@ impl Game {
                 let Some(&seat) = seats.get(i % seats.len().max(1)) else {
                     continue;
                 };
-                if !asked && self.lines_of(r).count() < MAX_OPEN {
+                if !asked && self.open_lines(r) < MAX_OPEN {
                     self.tell(
                         r,
                         God::Trishna,
@@ -415,6 +431,8 @@ impl Game {
 
         // Letters from the gods: two each, the one lagging most first.
         self.deal_letters(events);
+        // And what happens near: a case each (`hooks.rs`).
+        self.deal_cases(events);
 
         // A board gone still stirs: no fight, nothing made, nobody near a
         // deed for a while (§21.6).
@@ -472,7 +490,7 @@ impl Game {
         let mut order: Vec<PlayerId> = self.players().collect();
         order.sort_by_key(|&p| (self.nearness(p), p.0));
         for p in order {
-            if self.lines_of(p).any(|l| l.letter) || self.lines_of(p).count() >= MAX_OPEN {
+            if self.lines_of(p).any(|l| l.letter) || self.open_lines(p) >= MAX_OPEN {
                 continue;
             }
             // The deed's patron writes first, the rest in an order of the
@@ -940,8 +958,13 @@ impl Game {
         events.push(Event::WorldStirred { stir });
         match stir {
             WorldStir::RisingDead => {
+                // Near the one lagging most: a case for them to answer.
+                let centre = self
+                    .players()
+                    .min_by_key(|&p| (self.nearness(p), p.0))
+                    .map_or(Hex::ZERO, |p| self.hex_of(p));
                 let spots: Vec<Hex> = (1..=2)
-                    .flat_map(|r| Hex::ZERO.ring(r).collect::<Vec<_>>())
+                    .flat_map(|r| centre.ring(r).collect::<Vec<_>>())
                     .filter(|&h| {
                         self.board.contains(h)
                             && self.board.tile(h).is_some_and(|t| t.corpse.is_none())
@@ -1041,6 +1064,9 @@ fn doing(e: &Event) -> Option<(PlayerId, Doing)> {
         Event::MobFell { by, .. } => (by, Doing::FellMob),
         Event::Hid { player, .. } => (player, Doing::Hide),
         Event::FoodStored { player, .. } => (player, Doing::StoreFood),
+        Event::FireOut { by: Some(by), .. } => (by, Doing::Douse),
+        Event::CargoSeized { player, .. } => (player, Doing::Seize),
+        Event::Delved { player, .. } => (player, Doing::Delve),
         _ => return None,
     })
 }

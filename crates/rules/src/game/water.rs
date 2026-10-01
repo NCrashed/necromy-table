@@ -107,7 +107,7 @@ impl Game {
             self.mobs.retain(|m| m.id != id);
             events.push(Event::MobLeft { id });
         }
-        self.put_out(hex, events);
+        self.put_out(hex, None, events);
         if terrain == Terrain::Lake {
             self.graves.remove(&key);
             self.pits.remove(&key);

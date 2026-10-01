@@ -66,7 +66,7 @@ impl Game {
         self.ground.retain(|(h, _)| *h != hex);
         self.loads.retain(|(h, _)| *h != hex);
         self.wash_road(hex);
-        self.put_out(hex, events);
+        self.put_out(hex, None, events);
         self.graves.remove(&key);
         self.pits.remove(&key);
         self.buildings.remove(&key);
