@@ -458,22 +458,8 @@ fn centre_column(
     let vs = stats::label(commands, font, "против", 16.0, true);
     commands.entity(column).add_children(&[stage, vs]);
 
-    let burning = g.windows().iter().any(|w| {
-        matches!(
-            w.kind,
-            WindowKind::Battle { .. }
-                | WindowKind::GuardBattle { .. }
-                | WindowKind::MobBattle { .. }
-        )
-    });
-    let my_choice = matches!(
-        m.human_window(),
-        Some(
-            WindowKind::Battle { .. }
-                | WindowKind::GuardBattle { .. }
-                | WindowKind::MobBattle { .. }
-        )
-    );
+    let burning = g.windows().iter().any(|w| is_fight(&w.kind));
+    let my_choice = m.human_window().is_some_and(|k| is_fight(&k));
     let phase = if my_choice {
         let max = g.battle_dice(m.human).unwrap_or(0);
         format!(
@@ -606,4 +592,16 @@ fn debug_sizes(
             walk(*ch, 0, &nodes);
         }
     }
+}
+
+/// A window where dice are thrown against someone or something: a duel, the
+/// guard, a mob, a settlement's militia (trials have their own panel).
+pub fn is_fight(kind: &WindowKind) -> bool {
+    matches!(
+        kind,
+        WindowKind::Battle { .. }
+            | WindowKind::GuardBattle { .. }
+            | WindowKind::MobBattle { .. }
+            | WindowKind::MilitiaBattle { .. }
+    )
 }

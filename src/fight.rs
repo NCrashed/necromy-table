@@ -417,7 +417,7 @@ fn pose(
     art: Res<FightArt>,
     stats: Res<StatArt>,
     images: Res<Assets<Image>>,
-    mut fighters: Query<(&Fighter, &mut ImageNode, &mut UiTransform)>,
+    mut fighters: Query<(&Fighter, &mut ImageNode, &mut UiTransform, &mut Node)>,
     mut counts: Local<HashMap<AssetId<Image>, [usize; FIGHT_ROWS as usize]>>,
     mut drops: Local<HashMap<AssetId<Image>, Vec<f32>>>,
 ) {
@@ -427,7 +427,7 @@ fn pose(
     let now = time.elapsed_secs();
     let t = fight.start.map_or(-1.0, |s| now - s - LEAD_IN);
     let blows = blows(battle);
-    for (fighter, mut image, mut transform) in &mut fighters {
+    for (fighter, mut image, mut transform, mut node) in &mut fighters {
         let side = fighter.0;
         let who = battle.champion(side);
         // An undead stands still in its one picture (§20.4).
@@ -514,10 +514,35 @@ fn pose(
         if image.image != new_image {
             image.image = new_image;
         }
+        let atlas_none = atlas.is_none();
         if image.texture_atlas != atlas {
             image.texture_atlas = atlas;
         }
         image.flip_x = side == 1;
+        // A still picture (an undead, a beast, the militia) is cut to its
+        // figure, not a 96 px frame: drawn at the frames' pixel size, its
+        // feet on the same line, else it is stretched to twice its size.
+        let left = if side == 0 { 0.0 } else { STAGE_W - FIGHTER };
+        let top = STAGE_H - FIGHTER * 0.86;
+        let (l, tp, w, h) = match (atlas_none, images.get(&image.image)) {
+            (true, Some(picture)) => {
+                let size = picture.size().as_vec2() * FIGHTER / CELL as f32;
+                let feet = top + FIGHTER * 80.0 / CELL as f32;
+                (
+                    left + (FIGHTER - size.x) / 2.0,
+                    feet - size.y,
+                    size.x,
+                    size.y,
+                )
+            }
+            _ => (left, top, FIGHTER, FIGHTER),
+        };
+        if node.width != px(w) || node.top != px(tp) || node.left != px(l) {
+            node.left = px(l);
+            node.top = px(tp);
+            node.width = px(w);
+            node.height = px(h);
+        }
 
         // Movement and colour on top of the frames: a lunge into a swing,
         // a recoil and a red flash from a blow, a blue glint off a shield.

@@ -1145,6 +1145,7 @@ fn place(
             &ComputedNode,
             &UiGlobalTransform,
             &InheritedVisibility,
+            &Frame,
         ),
         With<Frame>,
     >,
@@ -1175,9 +1176,13 @@ fn place(
     let framed = |e: Entity| frames.contains(e);
     let busy: Vec<Rect> = frames
         .iter()
-        .filter(|(e, c, _, v)| v.get() && c.size().x > 0.0 && *e != lesson)
+        // Tooltips follow the mouse: dodging them, the lesson would run
+        // from the cursor on its way to the lesson's own buttons.
+        .filter(|(e, c, _, v, f)| {
+            v.get() && c.size().x > 0.0 && *e != lesson && !matches!(f, Frame::Tip)
+        })
         .filter(|(e, ..)| !parents.iter_ancestors(*e).any(|a| a == lesson || framed(a)))
-        .map(|(_, c, at, _)| {
+        .map(|(_, c, at, _, _)| {
             let k = c.inverse_scale_factor();
             Rect::from_center_size(at.affine().translation * k, c.size() * k)
         })
@@ -1237,7 +1242,13 @@ fn place(
         (Val::Px(x), Val::Px(y)) => Some(Vec2::new(x.min(max_x), y.min(max_y))),
         _ => None,
     };
-    let stay = here.is_some_and(|p| cost(p) <= best.0 + 6000.0);
+    // Never from under the mouse: it may be on its way to a button.
+    let pointed_at = here.is_some_and(|p| {
+        window
+            .cursor_position()
+            .is_some_and(|c| Rect::from_corners(p, p + size).inflate(40.0).contains(c))
+    });
+    let stay = here.is_some_and(|p| pointed_at || cost(p) <= best.0 + 6000.0);
     let to = if stay {
         here.expect("stay means placed")
     } else {
@@ -1323,12 +1334,19 @@ fn rebuild(
     let row = commands
         .spawn(Node {
             column_gap: px(10.0),
-            justify_content: JustifyContent::FlexEnd,
+            justify_content: if lesson.finished {
+                JustifyContent::FlexEnd
+            } else {
+                // Leaving apart on the left, what goes on on the right.
+                JustifyContent::SpaceBetween
+            },
+            align_items: AlignItems::Center,
             ..default()
         })
         .id();
     let add = |commands: &mut Commands, what: LessonButton, label: &str, lit: bool| {
-        let text = stats::label(commands, &font, label, 13.0, true);
+        // A lit button speaks up; leaving is small and quiet.
+        let text = stats::label(commands, &font, label, if lit { 13.0 } else { 12.0 }, lit);
         let b = commands
             .spawn((
                 what,
@@ -1340,7 +1358,11 @@ fn rebuild(
                     Color::srgb(0.55, 0.45, 0.3)
                 }),
                 Node {
-                    padding: UiRect::axes(px(14.0), px(7.0)),
+                    padding: if lit {
+                        UiRect::axes(px(14.0), px(7.0))
+                    } else {
+                        UiRect::axes(px(10.0), px(5.0))
+                    },
                     ..default()
                 },
             ))
@@ -1364,9 +1386,25 @@ fn rebuild(
             lesson.chapter + 1 == all.len(),
         );
     } else {
-        add(&mut commands, LessonButton::Chapters, "Выйти", false);
+        add(
+            &mut commands,
+            LessonButton::Chapters,
+            "Выйти из обучения",
+            false,
+        );
         if matches!(lesson.steps[lesson.step].until, Until::Next) {
             add(&mut commands, LessonButton::Next, "Далее", true);
+        } else {
+            // The step is done on the table, not here: say so, or the only
+            // button in the panel looks like the way on.
+            let hint = commands
+                .spawn((
+                    Text::new("Сделай это в игре — урок пойдёт дальше сам"),
+                    font.text(12.0),
+                    TextColor(GOLD),
+                ))
+                .id();
+            commands.entity(row).add_child(hint);
         }
     }
     commands.entity(frame).add_child(row);
@@ -1384,6 +1422,14 @@ fn buttons(
         .filter(|(i, _)| **i == Interaction::Pressed)
         .map(|(_, b)| *b)
         .collect();
+    // Dev aid: `NECROMY_TUTORIAL_NEXT=1` goes on to the next chapter once
+    // this one is done (with autoplay, the whole tutorial in a row).
+    if lesson.finished
+        && lesson.chapter + 1 < chapters().len()
+        && std::env::var_os("NECROMY_TUTORIAL_NEXT").is_some()
+    {
+        chosen.push(LessonButton::NextChapter);
+    }
     // Enter reads on, as «Далее» does.
     if keys.just_pressed(KeyCode::Enter)
         && !lesson.finished
@@ -1399,6 +1445,7 @@ fn buttons(
                 }
             }
             LessonButton::NextChapter => {
+                info!("tutorial: on to chapter {}", lesson.chapter + 2);
                 restart(&format!("tutorial:{}", lesson.chapter + 2), &mut exit);
             }
             LessonButton::Chapters => restart("tutorial", &mut exit),

@@ -56,7 +56,7 @@ impl Default for PlaceMenu {
 }
 
 #[derive(Component)]
-struct Status;
+pub(crate) struct Status;
 
 #[derive(Component)]
 struct TasteChip;
@@ -350,7 +350,7 @@ fn rebuild_action(
     } else {
         match kind {
             // The battle panel and the incoming card have the centre.
-            Some(WindowKind::Battle { .. }) => (String::new(), "", None, false),
+            Some(k) if crate::battle_ui::is_fight(&k) => (String::new(), "", None, false),
             Some(WindowKind::Target { target, .. }) if target == human => {
                 (String::new(), "", None, false)
             }

@@ -252,14 +252,26 @@ fn buttons(
 fn gear_shown(
     game: Option<Res<crate::play::Match>>,
     open: Res<SettingsOpen>,
-    mut gear: Single<&mut Visibility, With<Gear>>,
+    status: Query<(&ComputedNode, &UiGlobalTransform), With<crate::turn_ui::Status>>,
+    gear: Single<(&mut Visibility, &mut Node), With<Gear>>,
 ) {
+    let (mut visibility, mut node) = gear.into_inner();
     let shown = if game.is_some() && !open.0 {
         Visibility::Inherited
     } else {
         Visibility::Hidden
     };
-    gear.set_if_neq(shown);
+    visibility.set_if_neq(shown);
+    // Just right of the status panel, however wide its turn order and taste
+    // chip make it.
+    if let Some((computed, at)) = status.iter().next() {
+        let k = computed.inverse_scale_factor();
+        let right = (at.affine().translation.x + computed.size().x / 2.0) * k;
+        let left = px((right + 6.0).round().max(10.0));
+        if computed.size().x > 0.0 && node.left != left {
+            node.left = left;
+        }
+    }
 }
 
 /// Opens the settings from elsewhere (the menu's button).

@@ -35,6 +35,7 @@ impl Plugin for GodsUiPlugin {
                     fly,
                     take_dusk_news,
                     rebuild_dusk.run_if(resource_changed::<DuskScene>),
+                    dusk_behind_fight,
                     close_dusk,
                 )
                     .chain(),
@@ -404,4 +405,20 @@ fn capitalized(text: &str) -> String {
         .next()
         .map(|c| c.to_uppercase().chain(chars).collect())
         .unwrap_or_default()
+}
+
+/// A fight or a trial on screen owns the centre: the dusk scene waits under
+/// it, hidden.
+fn dusk_behind_fight(
+    game: Res<crate::play::Match>,
+    scene: Res<DuskScene>,
+    mut panel: Single<&mut Visibility, With<DuskPanel>>,
+) {
+    let news = !(scene.shifts.is_empty() && scene.grown.is_empty());
+    let up = news && game.battle.is_none() && game.trial.is_none();
+    panel.set_if_neq(if up {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    });
 }

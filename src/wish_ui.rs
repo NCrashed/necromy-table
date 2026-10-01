@@ -853,7 +853,12 @@ fn rebuild_reply(
 ) {
     let (panel, mut visibility) = panel.into_inner();
     commands.entity(panel).despawn_related::<Children>();
-    let Some(reply) = game.wish_reply.as_ref() else {
+    // A fight or a trial on screen owns the centre: the answers wait.
+    let Some(reply) = game
+        .wish_reply
+        .as_ref()
+        .filter(|_| game.battle.is_none() && game.trial.is_none())
+    else {
         visibility.set_if_neq(Visibility::Hidden);
         return;
     };
