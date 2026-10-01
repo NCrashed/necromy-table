@@ -1227,8 +1227,9 @@ fn reply_buttons(
     }
 }
 
-/// The strip of wishes stands just under the action bar and the clock,
-/// however tall they are (a waiting line, a clock in a network match).
+/// The wish panel, the gods' answers and the strip of wishes stand just
+/// under the action bar and the clock, however tall they are (a waiting
+/// line, a clock in a network match).
 #[allow(clippy::type_complexity)]
 fn place_watch(
     above: Query<
@@ -1238,7 +1239,7 @@ fn place_watch(
             With<crate::turn_ui::ClockChip>,
         )>,
     >,
-    mut watch: Single<&mut Node, With<WatchPanel>>,
+    mut panels: Query<&mut Node, Or<(With<WatchPanel>, With<WishPanel>, With<ReplyPanel>)>>,
 ) {
     let bottom = above
         .iter()
@@ -1249,7 +1250,9 @@ fn place_watch(
         })
         .fold(84.0_f32, f32::max);
     let top = px((bottom + 6.0).round());
-    if watch.top != top {
-        watch.top = top;
+    for mut node in &mut panels {
+        if node.top != top {
+            node.top = top;
+        }
     }
 }

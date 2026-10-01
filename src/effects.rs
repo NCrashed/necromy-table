@@ -204,6 +204,7 @@ fn harm_badge(amount: u8) -> Image {
         "....r....",
     ];
     const ARROW: [&str; 4] = ["aaaaaaa", ".aaaaa.", "..aaa..", "...a..."];
+    #[rustfmt::skip]
     const DIGITS: [[&str; 7]; 10] = [
         [".nnn.", "nn.nn", "nn.nn", "nn.nn", "nn.nn", "nn.nn", ".nnn."],
         ["..nn.", ".nnn.", "..nn.", "..nn.", "..nn.", "..nn.", ".nnnn"],
