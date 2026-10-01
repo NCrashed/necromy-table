@@ -64,7 +64,10 @@ impl Plugin for WishUiPlugin {
                         .run_if(resource_changed::<Match>.or_else(resource_changed::<WishDraft>)),
                 ),
             )
-            .add_systems(crate::InGame, (expire_reply, reply_buttons, listening_dots));
+            .add_systems(
+                crate::InGame,
+                (expire_reply, reply_buttons, listening_dots, place_watch),
+            );
     }
 }
 
@@ -1221,5 +1224,32 @@ fn reply_buttons(
             ReplyButton::Close => game.close_wish_replies(),
             _ => {}
         }
+    }
+}
+
+/// The strip of wishes stands just under the action bar and the clock,
+/// however tall they are (a waiting line, a clock in a network match).
+#[allow(clippy::type_complexity)]
+fn place_watch(
+    above: Query<
+        (&ComputedNode, &UiGlobalTransform, &InheritedVisibility),
+        Or<(
+            With<crate::turn_ui::ActionBar>,
+            With<crate::turn_ui::ClockChip>,
+        )>,
+    >,
+    mut watch: Single<&mut Node, With<WatchPanel>>,
+) {
+    let bottom = above
+        .iter()
+        .filter(|(c, _, v)| v.get() && c.size().y > 0.0)
+        .map(|(c, at, _)| {
+            let k = c.inverse_scale_factor();
+            (at.affine().translation.y + c.size().y / 2.0) * k
+        })
+        .fold(84.0_f32, f32::max);
+    let top = px((bottom + 6.0).round());
+    if watch.top != top {
+        watch.top = top;
     }
 }

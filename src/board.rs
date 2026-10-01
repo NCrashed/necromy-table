@@ -30,7 +30,7 @@ impl Plugin for BoardPlugin {
         })
         .init_resource::<Hovered>()
         .add_systems(crate::MatchBegins, spawn_board)
-        .add_systems(crate::InGame, track_hover)
+        .add_systems(crate::InGame, (track_hover, flicker))
         .add_systems(
             crate::InGame,
             spawn_new_tiles
@@ -218,8 +218,10 @@ struct MarkerSprites {
     pouch: Handle<Image>,
     /// A road on a hex (§21.8), drawn flat.
     road: Handle<Image>,
-    /// A fire burning on a hex (§21.8).
+    /// A fire burning on a hex (§21.8): a row of `FIRE_FRAMES` frames of
+    /// flames drawn in code (`fire_frames`), played by `flicker`.
     fire: Handle<Image>,
+    fire_layout: Handle<TextureAtlasLayout>,
     /// Food lying on a field, a sack drawn flat.
     sack: Handle<Image>,
     /// A fair's banner.
@@ -237,9 +239,9 @@ struct MarkerSprites {
     /// forge, wall, pen, arena, shrine; fair tent, way down, ritual circle.
     /// The drawn signs and marks stand in until they load.
     building_art: [Handle<Image>; 9],
-    /// Painted small things (`assets/props/item-<kind>.png`): food, an egg, a
-    /// fire, then goods by `God::index`.
-    item_art: [Handle<Image>; 8],
+    /// Painted small things (`assets/props/item-<kind>.png`): food, an egg,
+    /// then goods by `God::index`.
+    item_art: [Handle<Image>; 7],
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -259,6 +261,7 @@ enum Lit {
     Swap,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_board(
     mut commands: Commands,
     board: Res<Board>,
@@ -266,6 +269,7 @@ fn spawn_board(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     assets: Res<AssetServer>,
 ) {
     // One shared mesh for every tile, slightly inset so the grid reads.
@@ -356,7 +360,14 @@ fn spawn_board(
         step: images.add(pixel_sprite(&STEP_ROWS, [255, 196, 64])),
         pouch: assets.load("items/ground-pouch.png"),
         road: images.add(pixel_sprite(&ROAD_ROWS, [0; 3])),
-        fire: images.add(pixel_sprite(&FIRE_ROWS, [236, 110, 36])),
+        fire: images.add(fire_frames()),
+        fire_layout: layouts.add(TextureAtlasLayout::from_grid(
+            UVec2::new(FIRE_W, FIRE_H),
+            FIRE_FRAMES,
+            1,
+            None,
+            None,
+        )),
         sack: images.add(pixel_sprite(&SACK_ROWS, [196, 160, 96])),
         fair: images.add(pixel_sprite(&BANNER_ROWS, [210, 60, 120])),
         egg: images.add(pixel_sprite(&EGG_ROWS, [170, 60, 50])),
@@ -386,7 +397,6 @@ fn spawn_board(
         item_art: [
             "food",
             "egg",
-            "fire",
             "goods-bhava",
             "goods-trishna",
             "goods-zaga",
@@ -821,11 +831,7 @@ fn sync_markers(
         .map(|(hex, _)| {
             (
                 hex,
-                if images.contains(&sprites.item_art[2]) {
-                    sprites.item_art[2].clone()
-                } else {
-                    sprites.fire.clone()
-                },
+                sprites.fire.clone(),
                 Vec3::new(0.0, 0.0, 0.2),
                 TEXELS,
                 false,
@@ -841,7 +847,7 @@ fn sync_markers(
                 necromy_rules::Cargo::Food => (&sprites.item_art[0], &sprites.sack),
                 necromy_rules::Cargo::Egg { .. } => (&sprites.item_art[1], &sprites.egg),
                 necromy_rules::Cargo::Goods(g) => {
-                    (&sprites.item_art[3 + g.index()], &sprites.goods[g.index()])
+                    (&sprites.item_art[2 + g.index()], &sprites.goods[g.index()])
                 }
                 necromy_rules::Cargo::Body { .. } => return None,
             };
@@ -958,11 +964,24 @@ fn sync_markers(
             continue;
         }
         let pos = board.hex_to_world(hex) + offset;
+        // Flames play their frames; each fire from its own one.
+        let burning = image.id() == sprites.fire.id();
+        let sprite = if burning {
+            Sprite::from_atlas_image(
+                image,
+                TextureAtlas {
+                    layout: sprites.fire_layout.clone(),
+                    index: 0,
+                },
+            )
+        } else {
+            Sprite::from_image(image)
+        };
         let mut entity = commands.spawn((
             marker,
             NotShadowCaster,
             NotShadowReceiver,
-            Sprite::from_image(image),
+            sprite,
             Sprite3d {
                 pixels_per_metre,
                 pivot: Some(if flat {
@@ -987,7 +1006,138 @@ fn sync_markers(
         } else {
             entity.insert((Billboard, Transform::from_translation(pos)));
         }
+        if burning {
+            entity.insert(Flames(crate::props::hex_seed(hex, 17) as usize));
+        }
     }
+}
+
+/// A fire on the board, playing its frames from its own offset.
+#[derive(Component)]
+struct Flames(usize);
+
+const FIRE_W: u32 = 34;
+const FIRE_H: u32 = 36;
+const FIRE_FRAMES: u32 = 8;
+/// Frames a second.
+const FIRE_FPS: f32 = 10.0;
+
+fn flicker(time: Res<Time>, mut fires: Query<(&Flames, &mut Sprite)>) {
+    let tick = (time.elapsed_secs() * FIRE_FPS) as usize;
+    for (flames, mut sprite) in &mut fires {
+        let frame = (tick + flames.0) % FIRE_FRAMES as usize;
+        if let Some(atlas) = sprite.texture_atlas.as_mut()
+            && atlas.index != frame
+        {
+            atlas.index = frame;
+        }
+    }
+}
+
+/// Flames as a row of `FIRE_FRAMES` frames: tongues from a scrolling noise
+/// that tiles in time (it rises by exactly one period over the row, so the
+/// loop has no seam), white-hot at the root, red at the tips, charred logs
+/// under them and an ink rim so they read on any ground.
+fn fire_frames() -> Image {
+    let (w, h, n) = (FIRE_W as i32, FIRE_H as i32, FIRE_FRAMES as i32);
+    // Value noise on a grid that wraps every `period` rows.
+    let period = 32;
+    let cell = 4;
+    let lattice = |x: i32, y: i32| -> f32 {
+        let y = y.rem_euclid(period / cell);
+        let mut v = (x as u32).wrapping_mul(0x9E37_79B9) ^ (y as u32).wrapping_mul(0x85EB_CA6B);
+        v ^= v >> 15;
+        v = v.wrapping_mul(0x2C1B_3C6D);
+        v ^= v >> 12;
+        (v & 0xFFFF) as f32 / 65535.0
+    };
+    let noise = |x: f32, y: f32| -> f32 {
+        let (gx, gy) = ((x / cell as f32).floor(), (y / cell as f32).floor());
+        let (fx, fy) = (x / cell as f32 - gx, y / cell as f32 - gy);
+        let (sx, sy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
+        let (gx, gy) = (gx as i32, gy as i32);
+        let top = lattice(gx, gy) * (1.0 - sx) + lattice(gx + 1, gy) * sx;
+        let bottom = lattice(gx, gy + 1) * (1.0 - sx) + lattice(gx + 1, gy + 1) * sx;
+        top * (1.0 - sy) + bottom * sy
+    };
+    let mut image = Image::new_fill(
+        Extent3d {
+            width: FIRE_W * FIRE_FRAMES,
+            height: FIRE_H,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0, 0, 0, 0],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    let width = (FIRE_W * FIRE_FRAMES) as usize;
+    let data = image.data.as_mut().expect("new_fill allocates pixel data");
+    let logs = h - 4;
+    for f in 0..n {
+        // How far the noise has risen by this frame: one period in all.
+        let rise = (f * period / n) as f32;
+        let mut heat = vec![0u8; (w * h) as usize];
+        for y in 0..logs {
+            for x in 0..w {
+                // 0 at the root, 1 at the top; -1..1 across.
+                let up = 1.0 - y as f32 / (logs - 1) as f32;
+                let across = (x as f32 - (w - 1) as f32 / 2.0) / ((w - 1) as f32 / 2.0);
+                let body = 1.1 - up * 1.0 - across.abs() * (1.0 + 0.8 * up);
+                let lick = noise(x as f32 * 1.3, y as f32 + rise) - 0.5;
+                let t = body + lick * (0.5 + 0.7 * up);
+                heat[(y * w + x) as usize] = match t {
+                    t if t > 0.82 => 4,
+                    t if t > 0.55 => 3,
+                    t if t > 0.3 => 2,
+                    t if t > 0.12 => 1,
+                    _ => 0,
+                };
+            }
+        }
+        for y in 0..h {
+            for x in 0..w {
+                let here = heat[(y * w + x) as usize];
+                let px: [u8; 4] = if y >= logs {
+                    // Charred logs across the root, embers in them.
+                    let edge = (x - w / 2).abs() > w / 3 - (y - logs);
+                    if edge {
+                        continue;
+                    }
+                    match (x + y * 3 + f) % 7 {
+                        0 => [255, 140, 40, 255],
+                        1 | 4 => [70, 40, 26, 255],
+                        _ => [44, 26, 20, 255],
+                    }
+                } else {
+                    match here {
+                        4 => [255, 246, 200, 255],
+                        3 => [255, 196, 64, 255],
+                        2 => [244, 120, 32, 255],
+                        1 => [196, 52, 28, 255],
+                        _ => {
+                            // An ink rim round the flames.
+                            let near = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|(dx, dy)| {
+                                let (nx, ny) = (x + dx, y + dy);
+                                nx >= 0
+                                    && ny >= 0
+                                    && nx < w
+                                    && ny < logs
+                                    && heat[(ny * w + nx) as usize] > 0
+                            });
+                            if !near {
+                                continue;
+                            }
+                            [60, 16, 12, 255]
+                        }
+                    }
+                };
+                let i = (y as usize * width + (f * w + x) as usize) * 4;
+                data[i..i + 4].copy_from_slice(&px);
+            }
+        }
+    }
+    image
 }
 
 /// Tiles are drawn at this share of their size so the grid reads.
@@ -1175,24 +1325,6 @@ const SACK_ROWS: [&str; 10] = [
     "#dffffff#.",
     ".#dddddd#.",
     "..######..",
-];
-
-/// Flames: a light core in the fire's colour, ink round it.
-const FIRE_ROWS: [&str; 14] = [
-    "......#.......",
-    ".....#f#......",
-    ".....#f#...#..",
-    "....#ff#..#f#.",
-    "..#.#fFf#.#f#.",
-    ".#f##fFf##ff#.",
-    ".#ff#fFFf#ff#.",
-    "#fffffFFfffff#",
-    "#ffFfFFFFfFff#",
-    "#fFFFFooFFFff#",
-    "#fFFFooooFFFf#",
-    ".#fFFooooFFf#.",
-    "..#ffFFFFff#..",
-    "...########...",
 ];
 
 /// A building's sign on a post, its plank in the building's colour.

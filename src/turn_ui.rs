@@ -65,14 +65,14 @@ struct TasteChip;
 struct TasteTip;
 
 #[derive(Component)]
-struct ActionBar;
+pub(crate) struct ActionBar;
 
 #[derive(Component)]
 struct Splash;
 
 /// Seconds left on the human's clock (server matches only, §17.1).
 #[derive(Component)]
-struct ClockChip;
+pub(crate) struct ClockChip;
 
 #[derive(Component, Clone, Copy, PartialEq)]
 enum ActionButton {

@@ -51,6 +51,9 @@ pub(crate) struct EffectSprites {
     pop: [Handle<Image>; 5],
     pub spark: Handle<Image>,
     steam: Handle<Image>,
+    /// Lost health over a champion: a heart, an arrow down and the number,
+    /// by amount (index 0 is −1, the last stands for anything more).
+    harm: Vec<Handle<Image>>,
 }
 
 #[derive(Component)]
@@ -178,7 +181,92 @@ fn make_sprites(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         pop,
         spark,
         steam,
+        harm: (1..=HARM_SHOWN).map(|n| images.add(harm_badge(n))).collect(),
     });
+}
+
+/// The most lost health a badge spells out; more shows as this.
+const HARM_SHOWN: u8 = 9;
+/// How long a badge rises before it goes.
+const HARM_LIFE: f32 = 1.7;
+
+/// "♥▼N": a red heart, an arrow down and the number of health lost, with an
+/// ink rim round all of it so it reads over any ground.
+fn harm_badge(amount: u8) -> Image {
+    const HEART: [&str; 8] = [
+        ".rrr.rrr.",
+        "rwwrrrrrr",
+        "rwrrrrrrr",
+        "rrrrrrrrr",
+        ".rrrrrrr.",
+        "..rrrrr..",
+        "...rrr...",
+        "....r....",
+    ];
+    const ARROW: [&str; 4] = ["aaaaaaa", ".aaaaa.", "..aaa..", "...a..."];
+    const DIGITS: [[&str; 7]; 10] = [
+        [".nnn.", "nn.nn", "nn.nn", "nn.nn", "nn.nn", "nn.nn", ".nnn."],
+        ["..nn.", ".nnn.", "..nn.", "..nn.", "..nn.", "..nn.", ".nnnn"],
+        [".nnn.", "nn.nn", "...nn", "..nn.", ".nn..", "nn...", "nnnnn"],
+        ["nnnn.", "...nn", "...nn", ".nnn.", "...nn", "...nn", "nnnn."],
+        ["nn.nn", "nn.nn", "nn.nn", "nnnnn", "...nn", "...nn", "...nn"],
+        ["nnnnn", "nn...", "nnnn.", "...nn", "...nn", "nn.nn", ".nnn."],
+        [".nnn.", "nn...", "nnnn.", "nn.nn", "nn.nn", "nn.nn", ".nnn."],
+        ["nnnnn", "...nn", "..nn.", "..nn.", ".nn..", ".nn..", ".nn.."],
+        [".nnn.", "nn.nn", "nn.nn", ".nnn.", "nn.nn", "nn.nn", ".nnn."],
+        [".nnn.", "nn.nn", "nn.nn", ".nnnn", "...nn", "..nn.", ".nn.."],
+    ];
+    let (w, h) = (27usize, 10usize);
+    let mut grid = vec![b'.'; w * h];
+    let mut put = |rows: &[&str], x0: usize, y0: usize| {
+        for (y, row) in rows.iter().enumerate() {
+            for (x, c) in row.bytes().enumerate() {
+                if c != b'.' {
+                    grid[(y0 + y) * w + x0 + x] = c;
+                }
+            }
+        }
+    };
+    put(&HEART, 1, 1);
+    put(&ARROW, 11, 3);
+    put(&DIGITS[amount.min(9) as usize], 20, 2);
+    // The rim: every empty pixel beside a drawn one.
+    let drawn = grid.clone();
+    for y in 0..h {
+        for x in 0..w {
+            if drawn[y * w + x] != b'.' {
+                continue;
+            }
+            let near = [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .any(|(dx, dy)| {
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    nx >= 0
+                        && ny >= 0
+                        && (nx as usize) < w
+                        && (ny as usize) < h
+                        && drawn[ny as usize * w + nx as usize] != b'.'
+                });
+            if near {
+                grid[y * w + x] = b'k';
+            }
+        }
+    }
+    let rows: Vec<String> = grid
+        .chunks(w)
+        .map(|r| String::from_utf8_lossy(r).into_owned())
+        .collect();
+    let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
+    pixels(
+        &rows,
+        &[
+            (b'k', INK),
+            (b'r', [214, 40, 48, 255]),
+            (b'w', [255, 170, 170, 255]),
+            (b'a', [236, 70, 60, 255]),
+            (b'n', [255, 236, 226, 255]),
+        ],
+    )
 }
 
 pub(crate) fn sprite(image: Handle<Image>) -> impl Bundle {
@@ -238,8 +326,12 @@ fn burst(
     // The element of each seat's last poison: a bite that takes the last
     // stack leaves none in the view to colour it by.
     mut known: Local<Vec<Option<Element>>>,
+    // Health lost while a fight or a trial is on screen: shown once it is
+    // over, or the badge would tell the outcome before the dice land.
+    mut harm_held: Local<Vec<(PlayerId, u8)>>,
 ) {
-    if game.effects.is_empty() {
+    let fight_up = game.battle.is_some() || game.trial.is_some();
+    if game.effects.is_empty() && (harm_held.is_empty() || fight_up) {
         return;
     }
     let events = std::mem::take(&mut game.bypass_change_detection().effects);
@@ -248,6 +340,23 @@ fn burst(
     let mut spawn = |image: &Handle<Image>, at: Vec3, p: Particle| {
         commands.spawn((p, sprite(image.clone()), Transform::from_translation(at)));
     };
+    harm_held.extend(events.iter().filter_map(|e| match *e {
+        Event::Damaged { player, amount, .. } if amount > 0 => Some((player, amount)),
+        _ => None,
+    }));
+    if !fight_up {
+        for (player, amount) in harm_held.drain(..) {
+            let Some(feet) = anchor(&game, player, &tokens, towards) else {
+                continue;
+            };
+            let badge = &sprites.harm[(amount.min(HARM_SHOWN) - 1) as usize];
+            spawn(
+                badge,
+                feet + Vec3::Y * (HEAD + 0.55),
+                Particle::new(Vec3::Y * 0.6, 0.3, HARM_LIFE),
+            );
+        }
+    }
     for event in &events {
         let player = match *event {
             Event::Poisoned { player, .. }
@@ -331,7 +440,8 @@ fn burst(
 /// Dev aid: `NECROMY_FX=poison` plays the poison effects over the human's
 /// token in a loop, for screenshots. Looks only: the rules never hear of it.
 fn demo(time: Res<Time>, mut game: ResMut<Match>, mut next: Local<(f32, usize)>) {
-    if std::env::var("NECROMY_FX").as_deref() != Ok("poison") {
+    let fx = std::env::var("NECROMY_FX").ok();
+    if !matches!(fx.as_deref(), Some("poison" | "harm")) {
         return;
     }
     let (wait, step) = &mut *next;
@@ -346,6 +456,12 @@ fn demo(time: Res<Time>, mut game: ResMut<Match>, mut next: Local<(f32, usize)>)
         .champion(player)
         .map_or(Element::Earth, |c| c.god.element().quenches());
     let event = match *step % 4 {
+        // `=harm`: lost health, one more each time.
+        n if fx.as_deref() == Some("harm") => Event::Damaged {
+            player,
+            amount: n as u8 + 1,
+            hp: 1,
+        },
         0 => Event::Poisoned {
             player,
             element,
