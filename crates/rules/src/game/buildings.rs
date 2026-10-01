@@ -71,11 +71,18 @@ impl Game {
             all.push(Building::Arena);
         }
         all.push(Building::Shrine([own, own]));
-        // A shrine of two where the land touches another god's.
+        // A shrine of two where the land touches another god's; a quenching
+        // pair's lands never touch, so theirs stands within two of both (the
+        // deed of Reconciliation, §21.7).
+        let quenching = |g: God| {
+            (g.index() + 5 - own.index()) % 5 == 2 || (own.index() + 5 - g.index()) % 5 == 2
+        };
         let mut others: Vec<God> = at
-            .all_neighbors()
-            .iter()
-            .filter_map(|&n| self.board.tile(n).and_then(|t| t.region))
+            .range(2)
+            .filter_map(|n| {
+                let g = self.board.tile(n)?.region?;
+                (n.unsigned_distance_to(at) == 1 || quenching(g)).then_some(g)
+            })
             .filter(|&g| g != own)
             .collect();
         others.sort_by_key(|g| g.index());

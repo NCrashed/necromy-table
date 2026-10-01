@@ -19,6 +19,7 @@ use crate::ui_skin::{Accent, Frame};
 
 const GOLD: Color = Color::srgb(1.0, 0.82, 0.3);
 const HINT: Color = Color::srgb(0.72, 0.70, 0.64);
+const STEP: Color = Color::srgb(1.0, 0.80, 0.35);
 /// How long the "your turn" splash stays, fading out.
 const SPLASH_SECS: f32 = 1.6;
 
@@ -73,7 +74,7 @@ struct Splash;
 #[derive(Component)]
 struct ClockChip;
 
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, PartialEq)]
 enum ActionButton {
     EndTurn,
     Pass,
@@ -508,7 +509,27 @@ fn rebuild_action(
             },
         ))
         .id();
-    commands.entity(texts).add_children(&[main, hint]);
+    // On the human's own turn, the next step of their deed (the path).
+    let step = (moves && game.gate.is_none())
+        .then(|| g.next_step(human))
+        .flatten();
+    if let Some(step) = &step {
+        let (what, _) = names::step(g, human, step);
+        let next = commands
+            .spawn((
+                Text::new(format!("Дальше: {what}")),
+                font.bold(12.0),
+                TextColor(STEP),
+                Node {
+                    width: px(250.0),
+                    ..default()
+                },
+            ))
+            .id();
+        commands.entity(texts).add_children(&[main, next, hint]);
+    } else {
+        commands.entity(texts).add_children(&[main, hint]);
+    }
     commands.entity(panel).add_child(texts);
 
     // What this spot offers besides (§21.8): a burden to take or lay down,
@@ -681,7 +702,16 @@ fn rebuild_action(
     }
     // What this spot offers stays behind one button; the list opens under
     // the bar, over what lies there, until an action or the button again.
-    let mut in_bar: Vec<(ActionButton, String)> = primary.into_iter().collect();
+    let mut in_bar: Vec<(ActionButton, String)> = Vec::new();
+    // The move the path asks for here comes out of the list, first.
+    if let Some(necromy_rules::path::StepWhat::Do(intent)) = step.as_ref().map(|s| &s.what)
+        && let Some(i) = buttons
+            .iter()
+            .position(|(b, _)| button_of(intent) == Some(*b))
+    {
+        in_bar.push(buttons.remove(i));
+    }
+    in_bar.extend(primary);
     if !buttons.is_empty() {
         let arrow = if place.0 { "▴" } else { "▾" };
         in_bar.push((
@@ -936,4 +966,35 @@ fn show_clock(
         INK
     };
     color.set_if_neq(TextColor(tint));
+}
+
+/// The button of the action bar that sends `intent`, if one does.
+fn button_of(intent: &Intent) -> Option<ActionButton> {
+    Some(match *intent {
+        Intent::Rebuild => ActionButton::Rebuild,
+        Intent::Take => ActionButton::Take,
+        Intent::Lay => ActionButton::Lay,
+        Intent::Build { building } => ActionButton::Build(building),
+        Intent::Quarter { hex } => ActionButton::Quarter(hex),
+        Intent::Recruit { mob } => ActionButton::Recruit(mob),
+        Intent::Pave => ActionButton::Pave,
+        Intent::Sow => ActionButton::Sow,
+        Intent::Feast => ActionButton::Feast,
+        Intent::Fair => ActionButton::Fair,
+        Intent::DrawCircle => ActionButton::DrawCircle,
+        Intent::Delve { work } => ActionButton::Delve(work),
+        Intent::Challenge { rival } => ActionButton::Challenge(rival),
+        Intent::BetOn { rival, .. } => ActionButton::BetOn(rival),
+        Intent::Tether { element } => ActionButton::Tether(element),
+        Intent::Consecrate => ActionButton::Consecrate,
+        Intent::DigPit => ActionButton::DigPit,
+        Intent::SettlePit { raise } => ActionButton::SettlePit(raise),
+        Intent::Gift { hex } => ActionButton::Gift(hex),
+        Intent::Betroth { a, b } => ActionButton::Betroth(a, b),
+        Intent::Coronation => ActionButton::Coronation,
+        Intent::Discord => ActionButton::Discord,
+        Intent::Kindle { hex } => ActionButton::Kindle(hex),
+        Intent::Douse { hex } => ActionButton::Douse(hex),
+        _ => return None,
+    })
 }

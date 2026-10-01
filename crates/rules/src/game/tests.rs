@@ -6512,3 +6512,157 @@ fn a_wish_can_be_paid_with_a_burden_a_companion_or_a_thing_worn() {
         );
     }
 }
+
+/// The path in bot games: what kind of step each deed shows at the start
+/// of its champion's turns, how far a step to walk lies, and how often a
+/// step is done (the plan's measures, docs/storyteller-plan.md).
+#[test]
+#[ignore]
+fn path_in_bot_games() {
+    use crate::path::StepWhat;
+    for mode in [Mode::Full, Mode::Creation] {
+        // Per deed: Do, Go, Wish, Spirit, Hold, Wait; Go distances; steps done.
+        let mut by_deed: std::collections::BTreeMap<GreatDeed, [u32; 6]> = Default::default();
+        let mut far = 0u64;
+        let mut gos = 0u64;
+        let mut done = 0u32;
+        let mut turns = 0u32;
+        let mut longest_dry = 0u32;
+        let mut waits: std::collections::BTreeMap<(GreatDeed, String), u32> = Default::default();
+        for seed in 0..20 {
+            let (mut g, _) = Game::new(Setup {
+                seed,
+                champions: God::ALL.to_vec(),
+                mode,
+            });
+            let mut seen_round = [0u32; 5];
+            let mut last_done = [1u32; 5];
+            for _ in 0..6000 {
+                if g.winner().is_some() {
+                    break;
+                }
+                let p = g.awaiting()[0];
+                let i = p.0 as usize;
+                if g.free_to_act(p) && seen_round[i] != g.round() {
+                    seen_round[i] = g.round();
+                    if let (Some(deed), Some(step)) = (g.deed(p), g.next_step(p)) {
+                        turns += 1;
+                        let k = match step.what {
+                            StepWhat::Do(_) => 0,
+                            StepWhat::Go(_) => {
+                                gos += 1;
+                                far += u64::from(
+                                    step.at
+                                        .unwrap()
+                                        .unsigned_distance_to(g.champion(p).unwrap().hex),
+                                );
+                                1
+                            }
+                            StepWhat::Wish { .. } => 2,
+                            StepWhat::Spirit(_) => 3,
+                            StepWhat::Hold => 4,
+                            StepWhat::Wait(_) => {
+                                *waits
+                                    .entry((deed, format!("{:?}", step.check)))
+                                    .or_insert(0u32) += 1;
+                                5
+                            }
+                        };
+                        by_deed.entry(deed).or_default()[k] += 1;
+                        longest_dry = longest_dry.max(g.round().saturating_sub(last_done[i]));
+                    }
+                }
+                let intent = crate::bot::choose(&g, p);
+                for e in g.apply(p, intent).unwrap() {
+                    if let Event::StepDone { player } = e {
+                        done += 1;
+                        last_done[player.0 as usize] = g.round();
+                    }
+                }
+            }
+        }
+        println!(
+            "{mode:?}: {turns} turns with a deed, {done} steps done ({:.2} a turn), \
+             walks {:.1} hexes, longest dry {longest_dry} rounds",
+            f64::from(done) / f64::from(turns.max(1)),
+            far as f64 / gos.max(1) as f64
+        );
+        println!("  deed: do go wish spirit hold wait");
+        for (deed, k) in by_deed {
+            println!("  {deed:?}: {k:?}");
+        }
+        println!("  waits: {waits:?}");
+    }
+}
+
+#[test]
+fn every_chosen_deed_shows_a_next_step() {
+    for seed in 0..4 {
+        let (mut g, _) = Game::new(Setup {
+            seed,
+            champions: God::ALL.to_vec(),
+            mode: Mode::Creation,
+        });
+        for _ in 0..400 {
+            let p = g.awaiting()[0];
+            let intent = crate::bot::choose(&g, p);
+            g.apply(p, intent).unwrap();
+        }
+        for p in g.players() {
+            if g.deed(p).is_some() {
+                let step = g.next_step(p).expect("a step");
+                assert_eq!(step.god, g.deed(p).unwrap().patron());
+            }
+        }
+    }
+}
+
+#[test]
+fn a_step_on_ones_own_path_pays_a_style_once_a_round() {
+    let (mut g, me, _) = duel(3);
+    g.chosen[me.0 as usize] = Some(GreatDeed::Legion);
+    g.path_marks[me.0 as usize] = (g.nearness(me), 0);
+    // An undead follows: the legion grows.
+    g.champ_mut(me).companions.push(Companion::Undead);
+    let before = g.style(me);
+    let mut events = Vec::new();
+    g.note_step(me, &mut events);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::StepDone { player } if *player == me))
+    );
+    assert_eq!(g.style(me), before + 1);
+    // Another the same round is not paid again.
+    g.champ_mut(me).companions.push(Companion::Undead);
+    let mut events = Vec::new();
+    g.note_step(me, &mut events);
+    assert!(events.is_empty());
+    assert_eq!(g.style(me), before + 1);
+}
+
+#[test]
+fn a_shrine_of_a_quenching_pair_stands_within_two_of_both_lands() {
+    let (mut g, me, _) = duel(3);
+    // A settlement of Bhava's land with Zaga's (Bhava's quenching pair)
+    // two hexes off: their lands never touch.
+    let town = Hex::new(0, 1);
+    settled(&mut g, me, town);
+    for h in town.range(2) {
+        if let Some(t) = g.board.tile_mut(h) {
+            t.region = Some(God::Bhava);
+        }
+    }
+    let far = town + Hex::new(2, 0);
+    g.board.tile_mut(far).unwrap().region = Some(God::Zaga);
+    assert!(
+        g.may_build(me)
+            .contains(&Building::Shrine([God::Bhava, God::Zaga]))
+    );
+    // Another god two off is no neighbour: no shrine of the two.
+    g.board.tile_mut(far).unwrap().region = Some(God::Trishna);
+    assert!(
+        !g.may_build(me)
+            .contains(&Building::Shrine([God::Bhava, God::Trishna]))
+    );
+}

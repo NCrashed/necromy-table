@@ -138,6 +138,56 @@ fn rebuild_conditions(
         .id();
     let title = stats::label(&mut commands, &font, "Великие деяния", 14.0, true);
     commands.entity(sheet).add_child(title);
+    // The human's next step first: one plain thing to do, and where.
+    if let Some(step) = g.next_step(game.human) {
+        let (what, why) = names::step(g, game.human, &step);
+        let block = commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::axes(px(8.0), px(6.0)),
+                    row_gap: px(2.0),
+                    ..default()
+                },
+                Frame::Tip,
+                Accent(GOLD),
+            ))
+            .id();
+        let head = stats::label(
+            &mut commands,
+            &font,
+            &format!("Дальше ({}):", names::god(step.god)),
+            11.0,
+            false,
+        );
+        let line = commands
+            .spawn((
+                Text::new(what),
+                font.bold(13.0),
+                TextColor(INK),
+                Node {
+                    width: px(248.0),
+                    ..default()
+                },
+            ))
+            .id();
+        commands.entity(block).add_children(&[head, line]);
+        if !why.is_empty() {
+            let why = commands
+                .spawn((
+                    Text::new(why),
+                    font.text(11.0),
+                    TextColor(DIM),
+                    Node {
+                        width: px(248.0),
+                        ..default()
+                    },
+                ))
+                .id();
+            commands.entity(block).add_child(why);
+        }
+        commands.entity(sheet).add_child(block);
+    }
     // The human's first, then the rivals': all are open (§21.7).
     let mut seats: Vec<PlayerId> = g.players().collect();
     seats.sort_by_key(|&p| p != game.human);

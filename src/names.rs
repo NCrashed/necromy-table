@@ -148,6 +148,7 @@ pub fn style_reason(reason: necromy_rules::StyleReason) -> &'static str {
         StyleReason::Variety => "разнообразие дел",
         StyleReason::Feast => "пир",
         StyleReason::Fair => "торг на ярмарке",
+        StyleReason::Path => "шаг к деянию",
     }
 }
 
@@ -1330,4 +1331,132 @@ pub fn god_act(act: necromy_rules::GodAct) -> &'static str {
         Flood => "поднялись воды",
         Land => "земля бога разрослась",
     }
+}
+
+/// The next step of the human's deed (the path, `necromy_rules::path`) in
+/// words: what to do, plainly, then a short line of why.
+pub fn step(
+    g: &necromy_rules::Game,
+    me: necromy_rules::PlayerId,
+    step: &necromy_rules::path::Step,
+) -> (String, String) {
+    use necromy_rules::path::{Errand, StepWhat, Why};
+    use necromy_rules::{Intent, Target};
+    let here = g.champion(me).map(|c| c.hex);
+    let far = match (step.at, here) {
+        (Some(at), Some(h)) if at != h => format!(" · {} кл.", at.unsigned_distance_to(h)),
+        _ => String::new(),
+    };
+    let why = step
+        .check
+        .map(|c| format!("ради: {}", check(c).to_lowercase()))
+        .unwrap_or_default();
+    let what = match &step.what {
+        StepWhat::Hold => {
+            return (
+                "Деяние готово: удержи его до заката".into(),
+                "соперники попытаются сорвать канун".into(),
+            );
+        }
+        StepWhat::Spirit(n) => format!("Накопи Дух: нужно {n} (копится за ход)"),
+        StepWhat::Wait(why) => match why {
+            Why::Dusk => "Жди заката: мир сдвинется сам".into(),
+            Why::Goods => "Жди заката: товар появится в поселениях".into(),
+            Why::Duel => "Жди на арене: вызванный должен прийти до заката".into(),
+            Why::Bets => "Жди заката: пари рассчитаются".into(),
+        },
+        StepWhat::Wish { god: whom, act } => format!(
+            "На закате попроси {}: «{}»",
+            god_accusative(*whom),
+            wish(act.kind()).to_lowercase()
+        ),
+        StepWhat::Go(errand) => match errand {
+            Errand::Dissolve => "Иди в край, что растворяешь, и зови туда мглу".into(),
+            Errand::HeroGrove => "Иди к роще из тела чемпиона и береги её".into(),
+            Errand::RiverEnd => "Иди к концу реки: продли её к краю мира".into(),
+            Errand::Spring => "Иди к Столу: пусть вода пойдёт к нему".into(),
+            Errand::Stones => "Иди к камням силы: начерти там круг".into(),
+            Errand::Body => "Иди к телу и подними его".into(),
+            Errand::Circle => "Неси тело в свой круг".into(),
+            Errand::Monster => "Иди к своему чудовищу и сразись с ним".into(),
+            Errand::MountainTrial => "Иди к испытанию на горе: награда — яйцо".into(),
+            Errand::Nest => "Неси яйцо в лес и положи там".into(),
+            Errand::EggFire => "Встань у яйца: подожги лес вокруг".into(),
+            Errand::Egg => "Подними своё яйцо снова".into(),
+            Errand::BuildSite(b) => format!(
+                "Иди в своё поселение: построй {}",
+                building(*b).to_lowercase()
+            ),
+            Errand::Arena => "Иди на свою арену".into(),
+            Errand::Delve => "Иди к своему ходу под землю".into(),
+            Errand::Ruins => "Иди к руинам: открой ход вниз".into(),
+            Errand::Grove => "Иди к роще: разбуди её".into(),
+            Errand::Pen => "Веди зверя в свой загон и привяжи".into(),
+            Errand::Beast => "Иди к зверю нужной стихии и приручи".into(),
+            Errand::Guest => "Иди к гостю из-за мглы: он пойдёт за тобой".into(),
+            Errand::Table => "Иди к Столу".into(),
+            Errand::Consecrate => "Иди к кладбищу: освяти землю рядом".into(),
+            Errand::Bury => "Неси тело на кладбище и положи".into(),
+            Errand::Pit => "Иди к своей чумной яме".into(),
+            Errand::Undead => "Упокой мертвеца в краю Заги".into(),
+            Errand::Enlist => "Иди к мертвецу: возьми его в легион".into(),
+            Errand::Ruler => "Иди к правителю: поднеси дар".into(),
+            Errand::Match => "Иди к правителю, что к тебе расположен: сосватай".into(),
+            Errand::Vassal => "Иди к вассалу: посей раздор".into(),
+            Errand::Settlement => "Займи поселение".into(),
+            Errand::FairSite => "Иди в своё поселение: открой ярмарку".into(),
+            Errand::Fair => "Неси товар на свою ярмарку".into(),
+            Errand::Goods => "Подними товар, которого нет на ярмарке".into(),
+            Errand::GoodsTown => {
+                "Иди к поселению края, чьего товара нет: он появится на закате".into()
+            }
+            Errand::Hall => "Иди в свой зал: жди гостей на пир".into(),
+            Errand::Store => "Неси еду в своё поселение".into(),
+            Errand::Field => "Иди к равнине у своего поселения: засей".into(),
+            Errand::Food => "Подними урожай с поля".into(),
+            Errand::Burn => "Иди к лесу края, где ещё не горело: подожги".into(),
+            Errand::Border => {
+                "Иди в поселение у двух враждующих земель: построй святилище обоих".into()
+            }
+            Errand::BorderLand => "Иди туда, где сходятся враждующие земли".into(),
+            Errand::Prey => "Иди к ослабшему сопернику: тело чемпиона вырастит рощу".into(),
+        },
+        StepWhat::Do(intent) => match intent {
+            Intent::Build { building: b } => {
+                format!("Построй здесь: {}", building(*b).to_lowercase())
+            }
+            Intent::Quarter { .. } => "Построй новый квартал".into(),
+            Intent::Recruit { .. } => "Возьми его к себе".into(),
+            Intent::Sow => "Засей поле здесь".into(),
+            Intent::Feast => "Устрой пир".into(),
+            Intent::Fair => "Открой здесь ярмарку".into(),
+            Intent::DrawCircle => "Начерти здесь круг".into(),
+            Intent::Delve { work } => delve_work(*work).replace('\n', " "),
+            Intent::Challenge { .. } => "Вызови соперника на поединок".into(),
+            Intent::BetOn { .. } => "Заключи пари на соперника".into(),
+            Intent::Tether { .. } => "Привяжи зверя в загоне".into(),
+            Intent::Consecrate => "Освяти здесь кладбище".into(),
+            Intent::DigPit => "Вырой здесь чумную яму".into(),
+            Intent::SettlePit { .. } => "Упокой яму".into(),
+            Intent::Gift { .. } => "Поднеси дар правителю".into(),
+            Intent::Betroth { .. } => "Сосватай правителей".into(),
+            Intent::Coronation => "Коронуйся на Столе".into(),
+            Intent::Discord => "Посей раздор между вассалами".into(),
+            Intent::Kindle { .. } => "Подожги".into(),
+            Intent::Douse { .. } => "Потуши огонь".into(),
+            Intent::Take => "Подними ношу".into(),
+            Intent::Lay => "Положи ношу здесь".into(),
+            Intent::Pave => "Замости дорогу".into(),
+            Intent::Play { card, target } => {
+                let on = match target {
+                    Target::Hex(_) => " на клетку",
+                    Target::Champion(_) => " на чемпиона",
+                    Target::None => "",
+                };
+                format!("Сыграй «{}»{on}", g.card_name(*card))
+            }
+            _ => "Сделай ход".into(),
+        },
+    };
+    (format!("{what}{far}"), why)
 }

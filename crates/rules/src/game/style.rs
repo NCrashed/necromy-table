@@ -149,6 +149,8 @@ pub enum StyleReason {
     Feast,
     /// Goods sold at a fair.
     Fair,
+    /// A step on the path to one's deed.
+    Path,
 }
 
 /// Threat at which the royal guard comes out (§6.5).

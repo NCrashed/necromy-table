@@ -208,6 +208,8 @@ struct MarkerSprites {
     trails: [Handle<Image>; 5],
     /// Over the goal of the human's quest (§8).
     quest: Handle<Image>,
+    /// Over the place of the next step of the human's deed (the path).
+    step: Handle<Image>,
     /// A trial (§20.2), per god: a rune circle on the ground in its colour,
     /// and the die face it asks for, framed in that colour, floating above.
     trial_rings: [Handle<Image>; 5],
@@ -351,6 +353,7 @@ fn spawn_board(
         flags: God::ALL.map(|g| images.add(pixel_sprite(&FLAG_ROWS, g.accent()))),
         trails: God::ALL.map(|g| images.add(pixel_sprite(&TRAIL_ROWS, g.accent()))),
         quest: images.add(pixel_sprite(&QUEST_ROWS, [250, 214, 120])),
+        step: images.add(pixel_sprite(&STEP_ROWS, [255, 196, 64])),
         pouch: assets.load("items/ground-pouch.png"),
         road: images.add(pixel_sprite(&ROAD_ROWS, [0; 3])),
         fire: images.add(pixel_sprite(&FIRE_ROWS, [236, 110, 36])),
@@ -591,6 +594,8 @@ fn sync_tiles(
             _ => None,
         })
         .chain(focus.hexes.iter().copied())
+        // And the place of the next step of the human's deed (the path).
+        .chain(step_hex(&game))
         .collect();
     for (tile, material) in &tiles {
         let lit = if targets.contains(&tile.0) {
@@ -749,6 +754,15 @@ fn sync_markers(
                 false,
             )
         })
+        .chain(step_hex(&game).map(|h| {
+            (
+                h,
+                sprites.step.clone(),
+                Vec3::new(-0.3, 0.9, -0.1),
+                TEXELS,
+                false,
+            )
+        }))
         .collect();
     // Items on the ground: a pouch lying by the hex's edge, once loaded.
     let ground: Vec<_> = game
@@ -1219,6 +1233,29 @@ const QUEST_ROWS: [&str; 22] = [
     "...###...",
 ];
 
+/// A golden diamond over a short stake: the place of the next step of the
+/// human's deed (the path).
+const STEP_ROWS: [&str; 18] = [
+    "....#....",
+    "...#F#...",
+    "..#FFf#..",
+    ".#FFfff#.",
+    "#FFffffd#",
+    ".#ffffd#.",
+    "..#ffd#..",
+    "...#d#...",
+    "....#....",
+    ".........",
+    "....#....",
+    "...#x#...",
+    "...#x#...",
+    "...#x#...",
+    "...#x#...",
+    "...#x#...",
+    "..#xxx#..",
+    "..#####..",
+];
+
 /// A question mark in the hidden rival's colour: last seen here.
 const TRAIL_ROWS: [&str; 14] = [
     "..#####..",
@@ -1533,4 +1570,17 @@ fn trial_badge(god: God) -> Image {
         }
     }
     image
+}
+
+/// Where the next step of the human's deed is to be done, when it is
+/// somewhere else than where they stand (the path).
+fn step_hex(game: &Match) -> Option<Hex> {
+    if game.gate.is_some() {
+        return None;
+    }
+    let here = game.game.champion(game.human)?.hex;
+    game.game
+        .next_step(game.human)
+        .and_then(|s| s.at)
+        .filter(|&h| h != here)
 }

@@ -453,6 +453,11 @@ impl Game {
             return Err(RuleError::InvalidDeed);
         }
         self.chosen[player.0 as usize] = Some(deed);
+        // What the world already holds of it is no step of theirs.
+        let near = self.nearness(player);
+        if let Some(m) = self.path_marks.get_mut(player.0 as usize) {
+            m.0 = near;
+        }
         events.push(Event::DeedChosen { player, deed });
         // The walking grove needs its card in the deck (§21.8).
         if deed == GreatDeed::WalkingForest
@@ -935,6 +940,27 @@ impl Game {
                 events.push(Event::Victory { player: p, deed });
                 return;
             }
+        }
+    }
+}
+
+impl Game {
+    /// After `player`'s intent: if it took their deed on, a step of the
+    /// path is done, +1 Style once a round; a step back is remembered too.
+    pub(super) fn note_step(&mut self, player: PlayerId, events: &mut Vec<Event>) {
+        if self.deed(player).is_none() || self.winner.is_some() {
+            return;
+        }
+        let near = self.nearness(player);
+        let round = self.round;
+        let Some(&(before, paid)) = self.path_marks.get(player.0 as usize) else {
+            return;
+        };
+        self.path_marks[player.0 as usize].0 = near;
+        if near > before && paid != round {
+            self.path_marks[player.0 as usize].1 = round;
+            events.push(Event::StepDone { player });
+            self.add_style(player, 1, super::StyleReason::Path, events);
         }
     }
 }

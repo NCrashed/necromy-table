@@ -1219,6 +1219,11 @@ pub enum Event {
         player: PlayerId,
         deed: victory::GreatDeed,
     },
+    /// `player`'s own move took their deed a step on: +1 Style, once a
+    /// round (the path).
+    StepDone {
+        player: PlayerId,
+    },
     /// Every step of `player`'s deed holds: done at the next dusk, if it
     /// still does.
     DeedEve {
@@ -1537,6 +1542,9 @@ pub struct Game {
     chosen: Vec<Option<victory::GreatDeed>>,
     eves: Vec<Option<u32>>,
     dusks: u32,
+    /// Each player's nearness to their deed after their last intent, and
+    /// the round a step of it was last paid (the path, `note_step`).
+    path_marks: Vec<(u16, u32)>,
     /// Groves grown from champions' bodies (a World Tree).
     hero_groves: std::collections::BTreeSet<(i32, i32)>,
     progress: Vec<victory::Progress>,
@@ -1736,6 +1744,7 @@ impl Game {
             chosen: vec![None; champions_len],
             eves: vec![None; champions_len],
             dusks: 0,
+            path_marks: vec![(0, 0); champions_len],
             hero_groves: Default::default(),
             progress: vec![victory::Progress::default(); champions_len],
             winner: None,
@@ -2298,6 +2307,7 @@ impl Game {
         self.note_life(&events);
         self.settle_story(&mut events);
         self.check_victory(&mut events);
+        self.note_step(player, &mut events);
         self.log.extend(events.iter().cloned());
         Ok(events)
     }

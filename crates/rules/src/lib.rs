@@ -18,6 +18,7 @@ pub use board::{Board, Corpse, Terrain, Tile};
 pub mod cards;
 pub mod features;
 pub mod items;
+pub mod path;
 
 pub use cards::{CardDef, CardId, CardKind, CardMod, DefId, Effect, TargetRule, Timing};
 pub use features::{Feature, Mode, World};
