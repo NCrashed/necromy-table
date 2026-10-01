@@ -6,8 +6,9 @@
 //! (the god's answer, a story line's voice) are colour.
 
 use necromy_rules::{
-    Act, Bet, Building, Element, Feature, Game, God, GreatDeed, Hex, Line, LineKind, MAX_ACTS,
-    MobKind, PlayerId, Price, Said, Slot, Terrain, TimeOfDay, Wish, WishKind,
+    Act, Bet, Building, Doing, Element, Feature, Game, Goal, God, GreatDeed, Hex, Hook,
+    LINE_ROUNDS, Line, LineKind, MAX_ACTS, MobKind, PlayerId, Price, Said, Slot, Terrain,
+    TimeOfDay, Wish, WishKind,
 };
 
 use crate::client::Message;
@@ -939,21 +940,124 @@ fn line_ask(kind: LineKind) -> &'static str {
     }
 }
 
-/// Messages for a god telling a story line: plain text.
+/// What a line's goal asks, in the god's plain words (the model's input).
+fn goal_words(game: &Game, goal: Goal) -> String {
+    match goal {
+        Goal::ReachHex(h) => match game.board().tile(h).and_then(|t| t.region) {
+            Some(god) => format!("прийти в храм в краю {}", god_genitive(god)),
+            None => "прийти к Столу".into(),
+        },
+        Goal::Offer { god, .. } => format!("принести подношения богу {}", god_name(god)),
+        Goal::WinBattle => "выиграть бой".into(),
+        Goal::Claim => "занять поселение".into(),
+        Goal::Body => "сыграть карту на тело — распорядиться мёртвым".into(),
+        Goal::AvoidBattle => "не вступать в бой до срока".into(),
+        Goal::PassTrial(_) => "пройти испытание рядом".into(),
+        Goal::Bring(f) => format!("принести в мир {}", feature_words(f)),
+        Goal::Thwart(p) => format!("сорвать Великое деяние чемпиона {}", champion_name(game, p)),
+        Goal::Do(d) => doing_words(d).into(),
+    }
+}
+
+fn doing_words(d: Doing) -> &'static str {
+    match d {
+        Doing::Build => "построить что-нибудь в своём поселении",
+        Doing::Kindle => "поджечь лес или чужое поселение",
+        Doing::Bury => "похоронить тело на кладбище",
+        Doing::Gift => "поднести дар правителю",
+        Doing::Tame => "приручить зверя или взять мертвеца в легион",
+        Doing::Sell => "продать товар на ярмарке",
+        Doing::OpenFair => "открыть ярмарку",
+        Doing::Rebuild => "отстроить поселение из руин",
+        Doing::FellMob => "сразить зверя, мертвеца или чудовище",
+        Doing::Hide => "скрыться из виду",
+        Doing::StoreFood => "отнести еду в закрома",
+        Doing::Douse => "потушить огонь",
+        Doing::Seize => "отнять ношу у соперника",
+        Doing::Delve => "открыть ход под руинами",
+        Doing::Seed => "засеять тело",
+        Doing::Fuel => "сжечь тело",
+        Doing::Rest => "упокоить тело",
+        Doing::Dissolve => "растворить тело",
+        Doing::Raise => "поднять тело в легион",
+    }
+}
+
+/// What the storyteller saw, for a case.
+fn hook_words(hook: Hook) -> &'static str {
+    match hook {
+        Hook::Blaze => "у поселения рядом с ним горит огонь",
+        Hook::Prowler => "у ворот поселения рядом бродит зверь",
+        Hook::RestlessDead => "рядом кучей лежат тела, они скоро встанут",
+        Hook::Caravan => "соперник рядом несёт добро",
+        Hook::Masterless => "рядом поселение без хозяина, его правитель колеблется",
+        Hook::Stranger => "из мглы рядом вышел путник",
+        Hook::Marauder => "мертвец бредёт к жилью рядом",
+        Hook::Ruins => "рядом лежат руины",
+    }
+}
+
+/// Messages for a god telling a story line, or writing a letter: plain
+/// text. The rules chose what and where; the god says it in its voice.
 pub fn line_voice(game: &Game, line: &Line) -> Vec<Message> {
+    let far = line
+        .at
+        .zip(game.champion(line.owner).map(|c| c.hex))
+        .map(|(a, h)| match a.unsigned_distance_to(h) {
+            0..=2 => " (это рядом с ним)",
+            3..=4 => " (это неподалёку)",
+            _ => " (это далеко от него)",
+        })
+        .unwrap_or_default();
+    let seen = match line.kind {
+        LineKind::Case(hook) => format!(" Ты видишь: {}.", hook_words(hook)),
+        _ => String::new(),
+    };
+    let fork = line
+        .fork
+        .map(|f| {
+            format!(
+                " Можно иначе: {} — но это порадует уже бога {}; скажи об этом с ревностью или насмешкой.",
+                goal_words(game, f.goal),
+                god_name(f.god)
+            )
+        })
+        .unwrap_or_default();
+    let ask = match line.kind {
+        LineKind::QuietCrown | LineKind::Trial | LineKind::Thwart | LineKind::Invitation => {
+            line_ask(line.kind).to_string()
+        }
+        LineKind::Case(Hook::Stranger) => "повести путника из-за мглы за собой".into(),
+        _ => goal_words(game, line.goal),
+    };
+    // How soon, in words: the model repeats numbers it is given.
+    let left = if line.deadline > 0 {
+        line.deadline.saturating_sub(game.round())
+    } else {
+        LINE_ROUNDS
+    };
+    let until = if left <= 2 {
+        "скоро, пока не поздно"
+    } else {
+        "в ближайшие дни"
+    };
+    let what = if line.letter {
+        "Напиши ему письмо"
+    } else {
+        "Зови его"
+    };
     vec![
         Message::system(format!(
             "{}\nТы рассказчик за игровым столом: зовёшь чемпиона в сюжет. Скажи одно-два \
              предложения от первого лица, по-русски, в своём характере, без кавычек и \
-             пояснений. Не называй числа и правила.",
+             пояснений, без заголовков и разметки, не длиннее тридцати слов. Назови само \
+             дело, но не числа и не правила.",
             persona(line.god)
         )),
         Message::user(format!(
-            "{}\n\nЗови чемпиона {}: пусть он {} до раунда {}.{}",
+            "{}\n\n{what}, чемпиону {}:{seen} пусть он {ask}{far}, {until}.{fork}{}",
             situation(game, line.owner),
             champion_name(game, line.owner),
-            line_ask(line.kind),
-            line.deadline,
             thread_note(line)
         )),
     ]
@@ -1152,4 +1256,82 @@ mod tests {
         assert!(read_wish(&g, PlayerId(1), God::Bhava, "x", r#"{"kind":"fly"}"#).is_err());
         assert!(read_wish(&g, PlayerId(1), God::Bhava, "x", r#"{"acts":[]}"#).is_err());
     }
+}
+
+#[cfg(test)]
+mod voice_tests {
+    use super::*;
+    use necromy_rules::{Fork, PlayerId, Setup};
+
+    #[test]
+    fn a_letter_is_voiced_with_its_deed_its_place_and_its_other_way() {
+        let (g, _) = Game::new(Setup {
+            seed: 3,
+            champions: God::ALL.to_vec(),
+            mode: Default::default(),
+        });
+        let me = PlayerId(1);
+        let at = g.champion(me).unwrap().hex;
+        let line = Line {
+            id: 1,
+            owner: me,
+            god: God::Bhava,
+            kind: LineKind::Errand,
+            goal: Goal::Do(Doing::Tame),
+            deadline: 0,
+            style: 2,
+            stake: 0,
+            fork: Some(Fork {
+                goal: Goal::Do(Doing::FellMob),
+                god: God::Trishna,
+            }),
+            at: Some(at + Hex::new(2, 0)),
+            letter: true,
+            chapter: 2,
+            betrays: None,
+        };
+        let m = line_voice(&g, &line);
+        let user = &m[1].content;
+        assert!(user.contains("Напиши ему письмо"), "{user}");
+        assert!(user.contains("приручить зверя"), "{user}");
+        assert!(user.contains("рядом с ним"), "{user}");
+        assert!(
+            user.contains("сразить") && user.contains("Тришна"),
+            "{user}"
+        );
+        assert!(user.contains("Голосом"), "{user}");
+        assert!(m[0].content.contains("Бхава"));
+        // A case says what was seen.
+        let case = Line {
+            kind: LineKind::Case(Hook::Blaze),
+            goal: Goal::Do(Doing::Douse),
+            letter: false,
+            chapter: 0,
+            deadline: 5,
+            ..line
+        };
+        assert!(line_voice(&g, &case)[1].content.contains("горит огонь"));
+    }
+}
+
+/// "в краю Бхавы": a god's name in the genitive.
+fn god_genitive(god: God) -> &'static str {
+    match god {
+        God::Bhava => "Бхавы",
+        God::Trishna => "Тришны",
+        God::Zaga => "Заги",
+        God::Ahamar => "Ахамара",
+        God::Maya => "Майи",
+    }
+}
+
+/// A god's spoken words as the table shows them: no markdown, no title
+/// line the model likes to put first.
+pub fn tidy_voice(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with("Дело:") && !l.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace(['*', '_', '`'], "")
 }

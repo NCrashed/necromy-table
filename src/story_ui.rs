@@ -264,9 +264,19 @@ fn rebuild_lines(
                 218.0,
             );
             let take = button(&mut commands, &font, "Взять", LetterButton(Some(i as u8)));
-            commands
-                .entity(card)
-                .add_children(&[head, what, gain, take]);
+            commands.entity(card).add_child(head);
+            // The god's own words, once the model has written them.
+            if let Some(words) = game.oracle.line_voices.get(&line.id) {
+                let said = text(
+                    &mut commands,
+                    font.text(11.0),
+                    format!("«{}»", words.trim()),
+                    VOICE,
+                    218.0,
+                );
+                commands.entity(card).add_child(said);
+            }
+            commands.entity(card).add_children(&[what, gain, take]);
             commands.entity(sheet).add_child(card);
         }
         let lie = button(&mut commands, &font, "Отложить", LetterButton(None));

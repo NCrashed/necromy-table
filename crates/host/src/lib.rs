@@ -782,13 +782,29 @@ impl Table {
                     };
                     self.job(purpose, |id| voice_job(id, messages));
                 }
-                Event::LineTold { line } if self.seats[line.owner.0 as usize].watched() => {
+                // A letter was voiced when it came; taken, it keeps its words.
+                Event::LineTold { line }
+                    if self.seats[line.owner.0 as usize].watched() && !line.letter =>
+                {
                     let messages = prompt::line_voice(&self.game, line);
                     let purpose = Purpose::LineVoice {
                         owner: line.owner,
                         line: line.id,
                     };
                     self.job(purpose, |id| voice_job(id, messages));
+                }
+                // Each god writes its letter in its own words.
+                Event::LettersCame { player, letters }
+                    if self.seats[player.0 as usize].watched() =>
+                {
+                    for line in letters {
+                        let messages = prompt::line_voice(&self.game, line);
+                        let purpose = Purpose::LineVoice {
+                            owner: *player,
+                            line: line.id,
+                        };
+                        self.job(purpose, |id| voice_job(id, messages));
+                    }
                 }
                 _ => {}
             }
@@ -851,20 +867,23 @@ impl Table {
                     let news = OracleNews::WishVoice {
                         serial,
                         player,
-                        text: text.trim().to_string(),
+                        text: prompt::tidy_voice(&text),
                     };
                     for i in 0..self.seats.len() {
                         self.send(PlayerId(i as u8), FromTable::Oracle(news.clone()));
                     }
                 }
-                (Purpose::LineVoice { owner, line }, Ok(text)) => {
+                // Nothing left once tidied: the prepared words stay.
+                (Purpose::LineVoice { owner, line }, Ok(text))
+                    if !prompt::tidy_voice(&text).is_empty() =>
+                {
                     let news = OracleNews::LineVoice {
                         line,
-                        text: text.trim().to_string(),
+                        text: prompt::tidy_voice(&text),
                     };
                     self.send(owner, FromTable::Oracle(news));
                 }
-                (_, Err(_)) => {}
+                _ => {}
             }
         }
     }
@@ -875,7 +894,7 @@ fn voice_job(id: u64, messages: Vec<necromy_oracle::Message>) -> Job {
         id,
         messages,
         schema: None,
-        max_tokens: 90,
+        max_tokens: 140,
         temperature: 0.8,
     }
 }
