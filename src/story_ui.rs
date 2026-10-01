@@ -120,7 +120,21 @@ fn spawn(mut commands: Commands) {
 }
 
 fn reward(line: &Line) -> String {
-    if line.stake > 0 {
+    if let Some(v) = line.betrays {
+        format!(
+            "+{} Стиля; {} отвернётся (−{} благосклонности)",
+            line.style,
+            names::god(v),
+            necromy_rules::BETRAYAL
+        )
+    } else if line.chapter > 0 {
+        format!(
+            "+{} Стиля; станешь {} {}",
+            line.style,
+            names::patronage_instrumental(names::chapter_rung(line.chapter)),
+            names::god_genitive(line.god)
+        )
+    } else if line.stake > 0 {
         format!("+{} Стиля; провал — −{}", line.style, line.stake)
     } else {
         format!(
@@ -142,10 +156,14 @@ fn rounds_left(line: &Line, g: &Game) -> String {
 
 /// The god's words for a line: the model's when they came, else the template.
 fn voice_of<'a>(game: &'a Match, line: &Line) -> &'a str {
-    game.oracle
-        .line_voices
-        .get(&line.id)
-        .map_or(names::line_voice(line.kind), String::as_str)
+    game.oracle.line_voices.get(&line.id).map_or(
+        if line.betrays.is_some() {
+            "Ты служишь не тому. Сделай это — и я запомню, кому ты верен на деле."
+        } else {
+            names::line_voice(line.kind)
+        },
+        String::as_str,
+    )
 }
 
 fn text(commands: &mut Commands, font: TextFont, s: String, color: Color, width: f32) -> Entity {
@@ -209,28 +227,23 @@ fn rebuild_lines(
                         ..default()
                     },
                     Frame::Tip,
-                    Accent(crate::gods_ui::god_color(line.god)),
+                    // A temptation burns red.
+                    Accent(if line.betrays.is_some() {
+                        Color::srgb(0.85, 0.25, 0.2)
+                    } else {
+                        crate::gods_ui::god_color(line.god)
+                    }),
                 ))
                 .id();
-            let head = stats::row(&mut commands);
-            let icon = stats::icon_node(
+            // Wrapped, and alone on its row: a wrapped text beside an icon
+            // grows the row tall (flex min-content); the rim has the colour.
+            let head = text(
                 &mut commands,
-                art.gods[line.god.index()].clone(),
-                18.0,
-                true,
+                font.bold(13.0),
+                format!("{} · {}", names::god(line.god), names::letter_head(line)),
+                INK,
+                218.0,
             );
-            let name = stats::label(
-                &mut commands,
-                &font,
-                &format!(
-                    "{} · {}",
-                    names::god(line.god),
-                    names::line_title(line.kind)
-                ),
-                13.0,
-                true,
-            );
-            commands.entity(head).add_children(&[icon, name]);
             let at = line
                 .at
                 .zip(g.champion(game.human).map(|c| c.hex))
@@ -305,13 +318,7 @@ fn rebuild_lines(
             18.0,
             true,
         );
-        let name = stats::label(
-            &mut commands,
-            &font,
-            names::line_title(line.kind),
-            13.0,
-            true,
-        );
+        let name = stats::label(&mut commands, &font, &names::line_head(line), 13.0, true);
         commands.entity(head).add_children(&[icon, name]);
         let left = line.deadline.saturating_sub(g.round());
         let body = text(

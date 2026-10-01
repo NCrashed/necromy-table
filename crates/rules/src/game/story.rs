@@ -127,6 +127,11 @@ pub struct Line {
     pub at: Option<Hex>,
     /// Taken from a god's letter (one open at a time).
     pub letter: bool,
+    /// The chapter of the god's thread it is (1..=3: Sign, Voice, Chosen);
+    /// 0 when it is no letter.
+    pub chapter: u8,
+    /// A temptation: done, it betrays this god (its favour falls).
+    pub betrays: Option<God>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -300,6 +305,9 @@ impl Game {
             );
             // The god remembers who answered, and gives from the loot (§20.3).
             self.offer(Some(line.owner), line.god, 1, events);
+            // A letter's chapter raises its god's patronage to its step; a
+            // temptation done turns the betrayed god away.
+            self.letter_done(&line, events);
             self.gain_loot(line.owner, events);
             // And the story's end changes the world (§21.3).
             self.story_gift(line.owner, line.god, events);
@@ -440,6 +448,8 @@ impl Game {
             fork: None,
             at: None,
             letter: false,
+            chapter: 0,
+            betrays: None,
         };
         self.lines.push(line);
         events.push(Event::LineTold { line });
@@ -477,10 +487,20 @@ impl Game {
                 let i = self.rng.below(gods.len() as u32) as usize;
                 picked.push(gods.remove(i));
             }
+            // A god jealous of the last letter taken writes first: a
+            // temptation to betray the one it envies.
             let mut letters: Vec<Line> = Vec::new();
+            if let Some((jealous, victim)) = self.grudges[p.0 as usize].take()
+                && let Some(line) = self.temptation(p, jealous, victim)
+            {
+                letters.push(line);
+            }
             for god in picked {
                 if letters.len() >= LETTERS {
                     break;
+                }
+                if letters.iter().any(|l| l.god == god) {
+                    continue;
                 }
                 if let Some(line) = self.letter(p, god) {
                     letters.push(line);
@@ -495,7 +515,7 @@ impl Game {
 
     /// A letter from `god` to `p`: one of the things the god likes done
     /// that can be done near them now, maybe with another god's way out.
-    fn letter(&mut self, p: PlayerId, god: God) -> Option<Line> {
+    pub(super) fn letter(&mut self, p: PlayerId, god: God) -> Option<Line> {
         use super::Feature;
         let me = self.hex_of(p);
         let near = |hexes: Vec<Hex>, reach: u32| {
@@ -710,32 +730,140 @@ impl Game {
         if options.is_empty() && temple.unsigned_distance_to(me) > 1 {
             options.push((Goal::ReachHex(temple), None, Some(temple)));
         }
-        if options.is_empty() {
+        // A thing of its own the world lacks: ask for it at dusk, and the
+        // thread teaches wishes (§21.2).
+        if let Some(&f) = self.awakenable(god).iter().find(|f| f.domain() == god) {
+            options.push((Goal::Bring(f), None, None));
+        }
+        // The god's stage colours what it asks: its light the gentle
+        // things, its dark the harsh ones (§8.4).
+        let stage = self.stage(god);
+        let toned: Vec<_> = options
+            .iter()
+            .copied()
+            .filter(|(goal, ..)| harsh(*goal) == (stage == 2))
+            .collect();
+        let pool = if stage != 1 && !toned.is_empty() {
+            toned
+        } else {
+            options
+        };
+        if pool.is_empty() {
             return None;
         }
-        let i = self.rng.below(options.len() as u32) as usize;
-        let &(goal, fork, at) = options.get(i)?;
+        let i = self.rng.below(pool.len() as u32) as usize;
+        let &(goal, fork, at) = pool.get(i)?;
+        // The chapter of its thread: the patronage it leads to.
+        let chapter = (self.patronage(p, god) as u8 + 1).min(3);
+        Some(self.letter_line(p, god, goal, fork, at, chapter, None))
+    }
+
+    /// A letter's line, not told yet.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn letter_line(
+        &mut self,
+        p: PlayerId,
+        god: God,
+        goal: Goal,
+        fork: Option<Fork>,
+        at: Option<Hex>,
+        chapter: u8,
+        betrays: Option<God>,
+    ) -> Line {
         let kind = match goal {
             Goal::ReachHex(_) => LineKind::Pilgrimage,
             Goal::WinBattle => LineKind::Spoils,
             Goal::Claim => LineKind::NewLand,
             Goal::PassTrial(_) => LineKind::Ordeal,
+            Goal::Bring(_) => LineKind::Bring,
             _ => LineKind::Errand,
         };
         self.next_line += 1;
-        Some(Line {
+        Line {
             id: self.next_line,
             owner: p,
             god,
             kind,
             goal,
             deadline: 0,
-            style: 2,
+            // A betrayal pays twice.
+            style: if betrays.is_some() { 4 } else { 2 },
             stake: 0,
             fork,
             at,
             letter: true,
-        })
+            chapter,
+            betrays,
+        }
+    }
+
+    /// The jealous god's letter: harm what `victim` holds dear, in its
+    /// land, for twice the Style; done, `victim` turns away.
+    pub(super) fn temptation(&mut self, p: PlayerId, jealous: God, victim: God) -> Option<Line> {
+        use super::Feature;
+        let me = self.hex_of(p);
+        let in_land = |g: &Game, f: &dyn Fn(Hex, &crate::board::Tile) -> bool| {
+            g.board
+                .land()
+                .filter(|(h, t)| {
+                    t.region == Some(victim) && h.unsigned_distance_to(me) <= 6 && f(*h, t)
+                })
+                .map(|(h, _)| h)
+                .min_by_key(|h| (h.unsigned_distance_to(me), h.x(), h.y()))
+        };
+        let holds =
+            |g: &Game, e: crate::cards::Effect| g.hand(p).iter().any(|&c| g.def(c).effect == e);
+        let corpse = in_land(self, &|_, t| t.corpse.is_some());
+        let fire = |g: &Game, settlements: bool| {
+            g.has(Feature::Fires)
+                .then(|| {
+                    in_land(g, &|h, t| {
+                        t.terrain.burns()
+                            && (!settlements || t.terrain == Terrain::Settlement)
+                            && g.owner(h) != Some(p)
+                    })
+                })
+                .flatten()
+                .map(|h| (Goal::Do(Doing::Kindle), Some(h)))
+        };
+        use crate::cards::Effect;
+        let (goal, at) = match victim {
+            // Bhava's woods burnt.
+            God::Bhava => fire(self, false),
+            // Trishna's own settlements taken from her table.
+            God::Trishna => in_land(self, &|h, t| {
+                t.terrain == Terrain::Settlement && self.owner(h) != Some(p)
+            })
+            .map(|h| (Goal::Claim, Some(h)))
+            .or_else(|| fire(self, false)),
+            // Zaga's dead disturbed.
+            God::Zaga => corpse
+                .and_then(|h| {
+                    if holds(self, Effect::BodyLegion) {
+                        Some((Goal::Do(Doing::Raise), Some(h)))
+                    } else if holds(self, Effect::BodyFuel) {
+                        Some((Goal::Do(Doing::Fuel), Some(h)))
+                    } else {
+                        None
+                    }
+                })
+                .or_else(|| fire(self, false)),
+            // Ahamar's order set alight.
+            God::Ahamar => fire(self, true).or_else(|| fire(self, false)),
+            // Maya's dead kept from dissolving.
+            God::Maya => corpse
+                .filter(|_| {
+                    self.has(Feature::Burial)
+                        && self
+                            .board
+                            .land()
+                            .any(|(_, t)| t.terrain == Terrain::Graveyard)
+                })
+                .map(|h| (Goal::Do(Doing::Bury), Some(h)))
+                .or_else(|| fire(self, false)),
+        }?;
+        let chapter = (self.patronage(p, jealous) as u8 + 1).min(3);
+        Some(self.letter_line(p, jealous, goal, None, at, chapter, Some(victim)))
     }
 
     /// `player` takes the letter at `index`: its line opens now.
@@ -750,6 +878,11 @@ impl Game {
         };
         line.deadline = self.round + LINE_ROUNDS;
         self.letters[player.0 as usize].clear();
+        // The god whose element quenches the one served takes it ill: its
+        // next letter tempts to betrayal (docs/storyteller-plan.md).
+        if line.betrays.is_none() {
+            self.grudges[player.0 as usize] = Some((quencher(line.god), line.god));
+        }
         self.lines.push(line);
         events.push(Event::LineTold { line });
         Ok(())
@@ -910,4 +1043,56 @@ fn doing(e: &Event) -> Option<(PlayerId, Doing)> {
         Event::FoodStored { player, .. } => (player, Doing::StoreFood),
         _ => return None,
     })
+}
+
+/// A harsh thing to ask: what a god in its dark stage asks for (§8.4).
+pub(super) fn harsh(goal: Goal) -> bool {
+    matches!(
+        goal,
+        Goal::WinBattle
+            | Goal::Claim
+            | Goal::Do(
+                Doing::Kindle | Doing::FellMob | Doing::Fuel | Doing::Dissolve | Doing::Raise
+            )
+    )
+}
+
+/// The god whose element quenches `god`'s: jealous of its favourites.
+pub fn quencher(god: God) -> God {
+    God::from_index(god.index() + 3)
+}
+
+/// Favour a betrayed god takes back.
+pub const BETRAYAL: u16 = 3;
+
+impl Game {
+    fn letter_done(&mut self, line: &Line, events: &mut Vec<Event>) {
+        if !line.letter {
+            return;
+        }
+        let p = line.owner;
+        if let Some(victim) = line.betrays {
+            let f = &mut self.favor[p.0 as usize][victim.index()];
+            *f = f.saturating_sub(BETRAYAL);
+            events.push(Event::Betrayed {
+                player: p,
+                god: victim,
+            });
+            return;
+        }
+        let step = [super::SIGN, super::VOICE, super::CHOSEN];
+        let Some(&tier) = step.get(usize::from(line.chapter.max(1)) - 1) else {
+            return;
+        };
+        let f = &mut self.favor[p.0 as usize][line.god.index()];
+        if *f < tier {
+            *f = tier;
+            let patronage = self.patronage(p, line.god);
+            events.push(Event::Patron {
+                player: p,
+                god: line.god,
+                patronage,
+            });
+        }
+    }
 }

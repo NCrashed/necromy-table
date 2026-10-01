@@ -1057,10 +1057,16 @@ fn letter_pick(game: &Game, player: PlayerId) -> Option<u8> {
         return None;
     }
     let me = hex_of(game, player);
+    let own = game.champion(player).map(|c| c.god);
     let patron = game.deed(player).map(|d| d.patron());
     letters
         .iter()
         .enumerate()
+        // It never betrays its deed's patron or its own god.
+        .filter(|(_, l)| {
+            l.betrays
+                .is_none_or(|b| Some(b) != patron && Some(b) != own)
+        })
         .min_by_key(|(i, l)| {
             (
                 Some(l.god) != patron,

@@ -1553,3 +1553,45 @@ pub fn doing(d: necromy_rules::Doing) -> &'static str {
         Doing::Raise => "подними тело в легион картой",
     }
 }
+
+/// "станешь Голосом": a rung of patronage in the instrumental.
+pub fn patronage_instrumental(p: necromy_rules::Patronage) -> &'static str {
+    use necromy_rules::Patronage::*;
+    match p {
+        None => "никем",
+        Sign => "Знаком",
+        Voice => "Голосом",
+        Chosen => "Избранником",
+    }
+}
+
+/// The rung a thread's chapter leads to (1 Sign, 2 Voice, 3 Chosen).
+pub fn chapter_rung(chapter: u8) -> necromy_rules::Patronage {
+    use necromy_rules::Patronage::*;
+    match chapter {
+        0 => None,
+        1 => Sign,
+        2 => Voice,
+        _ => Chosen,
+    }
+}
+
+/// A line's title with its place in a god's thread: a chapter, or a
+/// temptation (docs/storyteller-plan.md).
+pub fn line_head(line: &necromy_rules::Line) -> String {
+    match (line.betrays, line.chapter) {
+        (Some(v), _) => format!("Искушение: предать {}", god_accusative(v)),
+        (None, 0) => line_title(line.kind).to_string(),
+        (None, c) => format!("Глава {c}/3 → {}", patronage(chapter_rung(c))),
+    }
+}
+
+/// A letter's head: its chapter and the rung it leads to, a temptation, or
+/// what kind of line it is.
+pub fn letter_head(line: &necromy_rules::Line) -> String {
+    match (line.betrays, line.chapter) {
+        (Some(v), _) => format!("искушение: предать {}", god_accusative(v)),
+        (None, 0) => line_title(line.kind).to_string(),
+        (None, c) => format!("глава {c}/3 → {}", patronage(chapter_rung(c))),
+    }
+}

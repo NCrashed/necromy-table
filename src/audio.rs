@@ -880,6 +880,8 @@ fn hear_events(
             Event::TrialFailed { player, .. } => (Sound::new("trial-fail"), by(*player)),
             // A step of the path to a deed (docs/storyteller-plan.md).
             Event::StepDone { player } => (Sound::new("trial-pass").at(0.5), by(*player)),
+            Event::Patron { player, .. } => (Sound::new("stage-light"), by(*player)),
+            Event::Betrayed { player, .. } => (Sound::new("stage-dark"), by(*player)),
             Event::Hasted { player, .. } => (Sound::new("haste"), by(*player)),
             Event::Blinked { player, .. } => (Sound::new("blink"), by(*player)),
             Event::TrapSet { player, .. } => (Sound::new("trap-set"), by(*player)),

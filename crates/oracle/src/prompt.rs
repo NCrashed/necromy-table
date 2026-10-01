@@ -904,6 +904,23 @@ pub fn wish_speech(
     ]
 }
 
+/// Where the line stands in the god's thread with the champion: a chapter
+/// that makes them its Sign, Voice or Chosen, or a jealous temptation.
+fn thread_note(line: &Line) -> String {
+    if let Some(victim) = line.betrays {
+        return format!(
+            " Ты ревнуешь: он служит богу {}. Это искушение — пусть предаст его.",
+            god_name(victim)
+        );
+    }
+    match line.chapter {
+        1 => " Это первая глава вашей истории: исполнит — станет твоим Знаком.".into(),
+        2 => " Это вторая глава: исполнит — станет твоим Голосом.".into(),
+        3 => " Это последняя глава: исполнит — станет твоим Избранником.".into(),
+        _ => String::new(),
+    }
+}
+
 fn line_ask(kind: LineKind) -> &'static str {
     match kind {
         LineKind::Pilgrimage => "прийти в твой храм",
@@ -931,11 +948,12 @@ pub fn line_voice(game: &Game, line: &Line) -> Vec<Message> {
             persona(line.god)
         )),
         Message::user(format!(
-            "{}\n\nЗови чемпиона {}: пусть он {} до раунда {}.",
+            "{}\n\nЗови чемпиона {}: пусть он {} до раунда {}.{}",
             situation(game, line.owner),
             champion_name(game, line.owner),
             line_ask(line.kind),
-            line.deadline
+            line.deadline,
+            thread_note(line)
         )),
     ]
 }

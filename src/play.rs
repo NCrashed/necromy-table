@@ -1852,6 +1852,22 @@ impl Match {
                     from.join(", ")
                 )
             }
+            Event::Patron {
+                player,
+                god,
+                patronage,
+            } => format!(
+                "{}: глава исполнена — теперь {} {}.",
+                self.name(*player),
+                names::patronage(*patronage),
+                names::god_genitive(*god)
+            ),
+            Event::Betrayed { player, god } => format!(
+                "{} предаёт {}: −{} благосклонности.",
+                self.name(*player),
+                names::god_accusative(*god),
+                necromy_rules::BETRAYAL
+            ),
             Event::LineTold { line } => format!(
                 "{} даёт {} линию «{}» до раунда {}.",
                 names::god(line.god),

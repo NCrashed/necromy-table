@@ -1801,6 +1801,8 @@ fn line(g: &mut Game, owner: PlayerId, kind: LineKind, goal: Goal, stake: u8) ->
         fork: None,
         at: None,
         letter: false,
+        chapter: 0,
+        betrays: None,
     });
     id
 }
@@ -2970,6 +2972,8 @@ fn passing_the_trial_of_a_line_closes_it() {
         fork: None,
         at: None,
         letter: false,
+        chapter: 0,
+        betrays: None,
     });
     let cards = burn_all(&mut g, me, "Упокоить");
     g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
@@ -3249,6 +3253,8 @@ fn trials_and_story_lines_give_loot() {
         fork: None,
         at: None,
         letter: false,
+        chapter: 0,
+        betrays: None,
     });
     let loot = g.loot_len();
     g.apply(me, Intent::Move { to: Hex::new(1, 0) }).unwrap();
@@ -6519,6 +6525,7 @@ fn path_in_bot_games() {
         let mut turns = 0u32;
         let mut longest_dry = 0u32;
         let mut lines_done = 0u32;
+        let (mut patrons, mut betrayals, mut tempted) = (0u32, 0u32, 0u32);
         let mut waits: std::collections::BTreeMap<(GreatDeed, String), u32> = Default::default();
         for seed in 0..20 {
             let (mut g, _) = Game::new(Setup {
@@ -6569,6 +6576,15 @@ fn path_in_bot_games() {
                         done += 1;
                         last_done[player.0 as usize] = g.round();
                     }
+                    match &e {
+                        Event::Patron { .. } => patrons += 1,
+                        Event::Betrayed { .. } => betrayals += 1,
+                        Event::LettersCame { letters, .. } => {
+                            tempted +=
+                                letters.iter().filter(|l| l.betrays.is_some()).count() as u32;
+                        }
+                        _ => {}
+                    }
                     if let Event::LineDone { line } = e {
                         lines_done += 1;
                         last_done[line.owner.0 as usize] = g.round();
@@ -6581,6 +6597,9 @@ fn path_in_bot_games() {
              walks {:.1} hexes, longest dry {longest_dry} rounds",
             f64::from(done) / f64::from(turns.max(1)),
             far as f64 / gos.max(1) as f64
+        );
+        println!(
+            "  threads: {patrons} chapters, {tempted} temptations offered, {betrayals} betrayals"
         );
         println!("  deed: do go wish spirit hold wait");
         for (deed, k) in by_deed {
@@ -6753,4 +6772,110 @@ fn a_thing_done_closes_its_line_and_a_fork_closes_it_for_its_own_god() {
     }];
     g.story_events(&mut ev);
     assert!(!g.lines.iter().any(|l| l.id == build));
+}
+
+// ---- Threads of the gods (docs/storyteller-plan.md, stage 3) ----
+
+/// `me` holds a letter from `god` (chapter `chapter`) asking `goal`, taken.
+fn take(
+    g: &mut Game,
+    me: PlayerId,
+    god: God,
+    goal: Goal,
+    chapter: u8,
+    betrays: Option<God>,
+) -> u32 {
+    let line = g.letter_line(me, god, goal, None, None, chapter, betrays);
+    g.letters[me.0 as usize] = vec![line];
+    g.apply(me, Intent::TakeLetter { index: 0 }).unwrap();
+    line.id
+}
+
+#[test]
+fn a_letters_chapter_raises_its_gods_patronage() {
+    let (mut g, me, _) = duel(3);
+    let before = g.patronage(me, God::Ahamar);
+    assert_eq!(before, Patronage::None);
+    take(&mut g, me, God::Ahamar, Goal::Do(Doing::Build), 2, None);
+    let mut ev = vec![Event::Built {
+        player: me,
+        hex: Hex::ZERO,
+        building: Building::Forge,
+    }];
+    g.story_events(&mut ev);
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::Patron { player, god: God::Ahamar, patronage: Patronage::Voice } if *player == me
+    )));
+    assert_eq!(g.patronage(me, God::Ahamar), Patronage::Voice);
+}
+
+#[test]
+fn a_letter_taken_makes_the_quenching_god_jealous_and_it_tempts() {
+    let (mut g, me, _) = duel(3);
+    // Woods of Bhava's near: fuel for the temptation.
+    let at = g.champion(me).unwrap().hex;
+    for h in at.ring(2) {
+        if let Some(t) = g.board.tile_mut(h) {
+            t.terrain = Terrain::Forest;
+            t.region = Some(God::Bhava);
+        }
+    }
+    take(&mut g, me, God::Bhava, Goal::Do(Doing::Tame), 1, None);
+    let jealous = quencher(God::Bhava);
+    assert_eq!(g.grudges[me.0 as usize], Some((jealous, God::Bhava)));
+    // The line done, the next letters come with the jealous god's first.
+    g.lines.retain(|l| l.owner != me);
+    g.storyteller(&mut Vec::new());
+    let first = g.letters(me)[0];
+    assert_eq!(first.god, jealous);
+    assert_eq!(first.betrays, Some(God::Bhava));
+    assert_eq!(first.goal, Goal::Do(Doing::Kindle));
+    assert_eq!(
+        first.at.and_then(|h| g.board.tile(h)?.region),
+        Some(God::Bhava)
+    );
+    assert_eq!(g.grudges[me.0 as usize], None);
+}
+
+#[test]
+fn a_betrayal_pays_twice_and_the_betrayed_god_turns_away() {
+    let (mut g, me, _) = duel(3);
+    g.favor[me.0 as usize][God::Bhava.index()] = VOICE;
+    let jealous = quencher(God::Bhava);
+    take(
+        &mut g,
+        me,
+        jealous,
+        Goal::Do(Doing::Kindle),
+        1,
+        Some(God::Bhava),
+    );
+    let style = g.style(me);
+    let mut ev = vec![Event::FireStarted {
+        hex: Hex::ZERO,
+        by: Some(me),
+    }];
+    g.story_events(&mut ev);
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::Betrayed {
+            god: God::Bhava,
+            ..
+        }
+    )));
+    assert_eq!(g.favor(me, God::Bhava), VOICE - BETRAYAL);
+    assert!(g.style(me) >= style + 4);
+    // A betrayal makes nobody jealous in turn.
+    assert_eq!(g.grudges[me.0 as usize], None);
+}
+
+#[test]
+fn a_dark_god_asks_for_harsh_things() {
+    let (mut g, me, _) = duel(3);
+    g.pantheon.stages[God::Trishna.index()] = 2;
+    for _ in 0..10 {
+        let l = g.letter(me, God::Trishna).unwrap();
+        assert!(super::story::harsh(l.goal), "{:?}", l.goal);
+    }
 }

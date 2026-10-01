@@ -1230,6 +1230,17 @@ pub enum Event {
         player: PlayerId,
         letters: Vec<story::Line>,
     },
+    /// A chapter of a god's thread done: `player` is now its `patronage`.
+    Patron {
+        player: PlayerId,
+        god: God,
+        patronage: laws::Patronage,
+    },
+    /// `player` did what a jealous god tempted them to: `god` turns away.
+    Betrayed {
+        player: PlayerId,
+        god: God,
+    },
     /// `player` let tonight's letters lie.
     LettersSetAside {
         player: PlayerId,
@@ -1577,6 +1588,8 @@ pub struct Game {
     next_line: u32,
     /// Letters waiting for each player (docs/storyteller-plan.md).
     letters: Vec<Vec<story::Line>>,
+    /// A god jealous of the last letter each took, and the one it envies.
+    grudges: Vec<Option<(God, God)>>,
     /// Trials on the board (§20.2), the last id and throws so far.
     trials: Vec<trial::Trial>,
     /// The loot deck, top last, and items lying on the board (§20.3).
@@ -1772,6 +1785,7 @@ impl Game {
             lines: Vec::new(),
             next_line: 0,
             letters: vec![Vec::new(); champions_len],
+            grudges: vec![None; champions_len],
             trials: Vec::new(),
             loot: Self::loot_deck(setup.seed),
             ground: Vec::new(),
@@ -3887,7 +3901,10 @@ pub use roads::{PAVE_SPIRIT, ROAD_RUN};
 pub use rulers::{CROWN_VASSALS, FEUDING, MATCH_REGARD, OATH_REGARD, Ruler, UNION_LANDS};
 pub use scenario::{Scenario, SceneSeat, SceneWorld};
 pub use stealth::RevealReason;
-pub use story::{Doing, Fork, Goal, LETTERS, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir};
+pub use story::{
+    BETRAYAL, Doing, Fork, Goal, LETTERS, LINE_ROUNDS, Line, LineKind, MAX_OPEN, WorldStir,
+    quencher,
+};
 pub use style::{BodyVerb, Character, Deed, GUARD_THRESHOLD, StyleReason, Taste, TasteKind};
 pub use trade::{DEAD_FEASTS, FAIR_DUSKS, FAIR_SPIRIT, Fair};
 pub use trial::{Boon, TRIAL_ROUNDS, TRIALS_ON_BOARD, Trial, trial_face};
