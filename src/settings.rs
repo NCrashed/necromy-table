@@ -130,6 +130,8 @@ enum SettingsButton {
     Music(i8),
     Effects(i8),
     Fullscreen(bool),
+    /// Open the sound again on the present output (headphones plugged in).
+    Reconnect,
     Close,
 }
 
@@ -226,6 +228,7 @@ fn buttons(
     pressed: Query<(&Interaction, &SettingsButton), Changed<Interaction>>,
     mut settings: ResMut<Settings>,
     mut open: ResMut<SettingsOpen>,
+    mut reopen: MessageWriter<bevy::audio::ReopenAudioOutput>,
 ) {
     let step = |v: u8, d: i8| (v as i8 + d).clamp(0, STEPS as i8) as u8;
     for (interaction, button) in &pressed {
@@ -238,6 +241,9 @@ fn buttons(
             SettingsButton::Music(d) => settings.music = step(settings.music, d),
             SettingsButton::Effects(d) => settings.effects = step(settings.effects, d),
             SettingsButton::Fullscreen(on) => settings.fullscreen = on,
+            SettingsButton::Reconnect => {
+                reopen.write(bevy::audio::ReopenAudioOutput);
+            }
         }
     }
 }
@@ -363,6 +369,19 @@ fn rebuild(
     );
     commands.entity(row).add_children(&[label, windowed, full]);
     commands.entity(frame).add_child(row);
+
+    // The sound follows a new output by itself; this is for when it does not.
+    let output = self::row(&mut commands);
+    let label = fixed_label(&mut commands, &font, "Вывод", 100.0);
+    let reconnect = button(
+        &mut commands,
+        &font,
+        SettingsButton::Reconnect,
+        "Переподключить звук",
+        false,
+    );
+    commands.entity(output).add_children(&[label, reconnect]);
+    commands.entity(frame).add_child(output);
 
     let hint = commands
         .spawn((

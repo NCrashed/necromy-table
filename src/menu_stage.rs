@@ -430,7 +430,9 @@ pub(crate) fn scale(height: f32) -> f32 {
 }
 
 /// The panel's rectangle on screen, in logical pixels.
-fn panel_rect(panel: &Query<(&ComputedNode, &UiGlobalTransform), With<MenuPanel>>) -> Option<Rect> {
+pub(crate) fn panel_rect(
+    panel: &Query<(&ComputedNode, &UiGlobalTransform), With<MenuPanel>>,
+) -> Option<Rect> {
     let (node, at) = panel.iter().next()?;
     let centre = at.affine().translation * node.inverse_scale_factor();
     let size = node.size() * node.inverse_scale_factor();
@@ -1113,7 +1115,7 @@ fn cue_effect(
             commands.entity(root).add_child(feast);
             sounds.write(Sound::new("offer"));
             // Someone comes to the feast, and stays about.
-            let v = (visits.roll() * 12.0) as usize;
+            let v = world.animal_for(visits.roll());
             // Beside the cloth, not under it.
             world.add(Kind::Animal, v, (feet.x + 84.0 * s * facing) / w, 0.0);
         }
@@ -1121,7 +1123,8 @@ fn cue_effect(
             let x = feet.x + 44.0 * s * facing;
             // The tree stays in the menu's world, growing there from a
             // sprout; a bush springs up somewhere too.
-            world.add(Kind::Tree, 0, x / w, 0.0);
+            let v = (visits.roll() * Kind::Tree.variants() as f32) as usize;
+            world.add(Kind::Tree, v, x / w, 0.0);
             let v = (visits.roll() * 4.0) as usize;
             world.add(Kind::Bush, v, visits.roll(), 0.0);
             // Flowers spring up one after another around him and the tree.

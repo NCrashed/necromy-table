@@ -43,7 +43,9 @@
           version = "0.1.0";
           src = pkgs.lib.fileset.toSource {
             root = ./.;
-            fileset = pkgs.lib.fileset.unions [ ./Cargo.toml ./Cargo.lock ./crates ./src ];
+            # patches/: Cargo.toml patches bevy_audio, and cargo reads the patch
+            # even for a crate that does not use it.
+            fileset = pkgs.lib.fileset.unions [ ./Cargo.toml ./Cargo.lock ./crates ./src ./patches ];
           };
           cargoLock.lockFile = ./Cargo.lock;
           cargoBuildFlags = [ "-p" "necromy-server" ];

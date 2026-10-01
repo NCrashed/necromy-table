@@ -90,6 +90,9 @@ menu-pick	0.5	3	A small object is quickly plucked up by a hand: a light airy who
 menu-squeak	0.5	4	A tiny woodland animal is startled and lets out one short surprised squeak
 menu-thud	0.5	4	A small soft object lands on grass and soil: a short muffled thud
 menu-thump	0.6	3	A heavy chunk of stone and earth lands on the ground: a deep short thump with a scatter of pebbles and a rustle of leaves
+menu-swallow	1.2	3	A small object is sucked into a swirling void: a rising airy whoosh spiralling inward that ends in a soft deep pop
+menu-flap	0.6	4	A small songbird takes off: a quick flutter of feathered wings
+menu-love	1.0	3	A soft warm magical chime, two gentle bell notes rising, with a faint sparkle; cute and tender
 guard-hew	1.0	3	An armoured knight hews down a skeleton with one heavy sword blow: a steel swing, a crack of dry bones scattering and a short ghostly hiss
 # Creation mode (§21.8)
 fire-catch	1.2	3	Dry brush catches fire with a sudden whoosh, then crackling flames

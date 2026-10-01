@@ -239,6 +239,8 @@ enum FrontButton {
     Continue,
     /// The tutorial's list of chapters.
     Tutorial,
+    /// Close the game.
+    Quit,
     /// Play tutorial chapter `n` (0-based).
     Chapter(usize),
 }
@@ -425,6 +427,7 @@ fn buttons(
     pressed: Query<(&Interaction, &FrontButton), Changed<Interaction>>,
     mut front: ResMut<Front>,
     mut commands: Commands,
+    mut exit: MessageWriter<AppExit>,
 ) {
     for (interaction, button) in &pressed {
         if *interaction != Interaction::Pressed {
@@ -482,6 +485,9 @@ fn buttons(
                 front.go_back();
             }
             FrontButton::Continue => front.resume(&mut commands),
+            FrontButton::Quit => {
+                exit.write(AppExit::Success);
+            }
         }
     }
 }
@@ -758,6 +764,8 @@ fn menu(commands: &mut Commands, font: &UiFont, front: &Front, rows: &mut Vec<En
         ..default()
     });
     rows.push(settings);
+    let quit = button(commands, font, FrontButton::Quit, "Выйти из игры", false);
+    rows.push(quit);
 }
 
 /// Width of a chapter's tile in the tutorial list.
