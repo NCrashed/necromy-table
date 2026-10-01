@@ -53,6 +53,8 @@ impl Plugin for TutorialPlugin {
 pub struct Focus {
     pub hexes: Vec<Hex>,
     pub card: Option<&'static str>,
+    /// A prepared wish to make: its god and kind, marked in the wish panel.
+    pub wish: Option<(God, necromy_rules::WishKind)>,
 }
 
 type EventTest = Arc<dyn Fn(&Event, &Game) -> bool + Send + Sync>;
@@ -84,6 +86,7 @@ pub struct Step {
     refuse: &'static str,
     focus_hexes: Vec<Hex>,
     focus_card: Option<&'static str>,
+    focus_wish: Option<(God, necromy_rules::WishKind)>,
     rival: Option<Rival>,
     /// What the step asks for, as an intent: autoplay and tests make it.
     demo: Option<Demo>,
@@ -99,6 +102,7 @@ impl Step {
             refuse: "Сначала дочитай и нажми «Далее».",
             focus_hexes: Vec::new(),
             focus_card: None,
+            focus_wish: None,
             rival: None,
             demo: None,
         }
@@ -121,6 +125,7 @@ impl Step {
             refuse,
             focus_hexes: Vec::new(),
             focus_card: None,
+            focus_wish: None,
             rival: None,
             demo: Some(Arc::new(demo)),
         }
@@ -133,6 +138,11 @@ impl Step {
 
     fn card(mut self, name: &'static str) -> Step {
         self.focus_card = Some(name);
+        self
+    }
+
+    fn wish(mut self, god: God, kind: necromy_rules::WishKind) -> Step {
+        self.focus_wish = Some((god, kind));
         self
     }
 
@@ -661,11 +671,12 @@ fn land_steps() -> Vec<Step> {
         Step::act(
             "Раз в день, на закате, каждый загадывает желание одному из богов. \
              Загадать можно заранее: нажми «Загадать желание» под строкой хода, \
-             выбери бога и желание. Бог ценит то, что ему по вкусу, и не любит \
-             повторов.",
+             выбери бога и желание. Желания разложены по вкладкам, а звёзды \
+             показывают, как бог оценит: ему важно то, что по вкусу, и не нравятся \
+             повторы. Для начала попроси Тришну «Дай мне силы» (отмечено «←»).",
             |e, _| matches!(e, Event::WishSealed { player } if *player == ME),
             |_, _, i| matches!(i, Intent::Wish { .. }),
-            "Нажми «Загадать желание» и выбери желание в панели.",
+            "Нажми «Загадать желание», выбери Тришну и «Дай мне силы».",
             |_, _| {
                 Some(Intent::Wish {
                     god: God::Trishna,
@@ -673,7 +684,8 @@ fn land_steps() -> Vec<Step> {
                     said: None,
                 })
             },
-        ),
+        )
+        .wish(God::Trishna, necromy_rules::WishKind::Strength),
         Step::act(
             "Желание запечатано: соперники видят, что ты загадал, но не что. \
              Закончи ход — придёт закат, и боги ответят.",
@@ -910,7 +922,8 @@ fn win_steps() -> Vec<Step> {
                     said: None,
                 })
             },
-        ),
+        )
+        .wish(God::Maya, necromy_rules::WishKind::Cut),
         Step::act(
             "Закончи ход: на закате Майя ответит.",
             |e, _| matches!(e, Event::DeedEve { player, .. } if *player == ME),
@@ -1021,6 +1034,7 @@ fn run(
         focus.set_if_neq(Focus {
             hexes: step.focus_hexes.clone(),
             card: step.focus_card,
+            wish: step.focus_wish,
         });
         if let Some(events) = game.bypass_change_detection().lesson_events.as_mut() {
             events.clear();
@@ -1107,41 +1121,132 @@ fn spawn(mut commands: Commands) {
     ));
 }
 
-/// Over the battle, the panel moves up to the screen's top edge: the fight
-/// plays in the middle.
+/// Where the lesson stands: wherever on screen it covers least. Every other
+/// panel up (its outermost `Frame`), the hand along the bottom, and above
+/// all the human's champion and the hexes the step points at, which must
+/// stay in sight. It moves only when its place grows clearly worse than
+/// another, so it does not wander while panels come and go.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn place(
+    time: Res<Time>,
     game: Res<Match>,
-    mut panel: Single<&mut Node, (With<LessonPanel>, Without<crate::gods_ui::DuskPanel>)>,
+    focus: Res<Focus>,
+    board: Res<crate::board::Board>,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    camera: Single<(&Camera, &GlobalTransform), With<crate::TableCamera>>,
+    tokens: Query<(&crate::token::Token, &GlobalTransform)>,
+    mut panel: Single<
+        (Entity, &mut Node, &ComputedNode),
+        (With<LessonPanel>, Without<crate::gods_ui::DuskPanel>),
+    >,
+    frames: Query<
+        (
+            Entity,
+            &ComputedNode,
+            &UiGlobalTransform,
+            &InheritedVisibility,
+        ),
+        With<Frame>,
+    >,
+    parents: Query<&ChildOf>,
     mut dusk: Single<&mut Node, With<crate::gods_ui::DuskPanel>>,
+    mut next_look: Local<f32>,
 ) {
-    // The fight plays in the middle: up to the top edge. The wish panel
-    // fills the middle: the lesson goes to the column right of it.
-    let wishing = game.game.wishing().contains(&game.human);
-    let (left, right) = if wishing {
-        (Val::Auto, px(10.0))
-    } else {
-        (px(388.0), Val::Auto)
-    };
-    if panel.left != left || panel.right != right {
-        panel.left = left;
-        panel.right = right;
-    }
-    let top = if wishing {
-        300.0
-    } else if game.game.winner().is_some() {
-        // Under the end-of-match panel.
-        524.0
-    } else if game.battle.is_some() {
-        8.0
-    } else {
-        96.0
-    };
-    if panel.top != px(top) {
-        panel.top = px(top);
-    }
     // The dusk scene goes below the lesson.
     if dusk.top != px(316.0) {
         dusk.top = px(316.0);
+    }
+    let now = time.elapsed_secs();
+    if now < *next_look {
+        return;
+    }
+    *next_look = now + 0.2;
+    let (lesson, ref mut node, computed) = *panel;
+    let (w, h) = (window.width(), window.height());
+    let size = computed.size() * computed.inverse_scale_factor();
+    let size = if size.x > 0.0 {
+        size
+    } else {
+        Vec2::new(456.0, 200.0)
+    };
+
+    // Other panels, but not the lesson's own frames, nor frames inside
+    // another frame (they only add weight to what is already counted).
+    let framed = |e: Entity| frames.contains(e);
+    let busy: Vec<Rect> = frames
+        .iter()
+        .filter(|(e, c, _, v)| v.get() && c.size().x > 0.0 && *e != lesson)
+        .filter(|(e, ..)| !parents.iter_ancestors(*e).any(|a| a == lesson || framed(a)))
+        .map(|(_, c, at, _)| {
+            let k = c.inverse_scale_factor();
+            Rect::from_center_size(at.affine().translation * k, c.size() * k)
+        })
+        // The hand's cards rise from the bottom edge.
+        .chain([Rect::new(w * 0.25, h - 150.0, w * 0.75, h)])
+        .collect();
+    // What must stay in sight: the human's champion and the step's hexes.
+    let (camera, eye) = *camera;
+    let on_screen = |at: Vec3| camera.world_to_viewport(eye, at).ok();
+    let mut keep: Vec<Rect> = focus
+        .hexes
+        .iter()
+        .filter_map(|&hex| on_screen(board.hex_to_world(hex)))
+        .map(|p| Rect::from_center_size(p - Vec2::Y * 30.0, Vec2::new(150.0, 170.0)))
+        .collect();
+    if let Some((_, at)) = tokens.iter().find(|(t, _)| t.player == game.human)
+        && let Some(p) = on_screen(at.translation())
+    {
+        keep.push(Rect::from_center_size(
+            p - Vec2::Y * 50.0,
+            Vec2::new(110.0, 150.0),
+        ));
+    }
+    let cost = |at: Vec2| {
+        let r = Rect::from_corners(at, at + size);
+        let over = |o: &Rect| {
+            let i = r.intersect(*o);
+            if i.is_empty() {
+                0.0
+            } else {
+                i.width() * i.height()
+            }
+        };
+        busy.iter().map(over).sum::<f32>() + 6.0 * keep.iter().map(over).sum::<f32>()
+            // Near the top, all else equal: where eyes go first.
+            + at.y * 2.0
+    };
+    let margin = 8.0;
+    let (max_x, max_y) = (
+        (w - size.x - margin).max(margin),
+        (h - size.y - margin).max(margin),
+    );
+    let mut best = (f32::INFINITY, Vec2::splat(margin));
+    let mut y = margin;
+    while y <= max_y {
+        let mut x = margin;
+        while x <= max_x {
+            let c = cost(Vec2::new(x, y));
+            if c < best.0 {
+                best = (c, Vec2::new(x, y));
+            }
+            x += 24.0;
+        }
+        y += 24.0;
+    }
+    let here = match (node.left, node.top) {
+        (Val::Px(x), Val::Px(y)) => Some(Vec2::new(x.min(max_x), y.min(max_y))),
+        _ => None,
+    };
+    let stay = here.is_some_and(|p| cost(p) <= best.0 + 6000.0);
+    let to = if stay {
+        here.expect("stay means placed")
+    } else {
+        best.1
+    };
+    if node.left != px(to.x) || node.top != px(to.y) || node.right != Val::Auto {
+        node.left = px(to.x);
+        node.top = px(to.y);
+        node.right = Val::Auto;
     }
 }
 

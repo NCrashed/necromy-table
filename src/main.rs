@@ -1,6 +1,7 @@
 mod ambient;
 mod audio;
 mod battle_ui;
+mod beacon;
 mod board;
 mod camera;
 mod card_art;
@@ -101,7 +102,11 @@ fn main() {
             menu_stage::MenuStagePlugin,
             menu_world::MenuWorldPlugin,
         ))
-        .add_plugins((mobs_ui::MobsUiPlugin, clash::ClashPlugin))
+        .add_plugins((
+            mobs_ui::MobsUiPlugin,
+            clash::ClashPlugin,
+            beacon::BeaconPlugin,
+        ))
         .add_plugins(AutoScreenshotPlugin)
         .add_systems(Startup, setup_scene)
         .run();

@@ -522,6 +522,56 @@ pub fn wish(kind: necromy_rules::WishKind) -> &'static str {
     }
 }
 
+/// What a prepared wish does, in a line for the wish panel.
+pub fn wish_effect(kind: necromy_rules::WishKind) -> &'static str {
+    use necromy_rules::WishKind;
+    match kind {
+        WishKind::Strength => "Здоровье, Дух и оберег тебе.",
+        WishKind::Weaken => "Соперник теряет здоровье и застревает на месте.",
+        WishKind::Land => "Земля этого бога поднимается вокруг тебя.",
+        WishKind::Dead => "Вокруг тебя появляются тела.",
+        WishKind::Peace => "Твоя Угроза падает.",
+        WishKind::Fortune => "Богатство напрямую. Грубое: бог урежет и проклянёт.",
+        WishKind::Doom => "Победа напрямую. Грубое: бог урежет и проклянёт.",
+        WishKind::Secret => "Узнаешь, что соперник загадал на этот закат.",
+        WishKind::Hand => "Один раз увидишь карты в руке соперника.",
+        WishKind::Bless => "Карта в твоей руке дешевле и сильнее.",
+        WishKind::Blight => "Карта соперника дороже и слабее.",
+        WishKind::Forge => "Новая карта этого бога тебе в руку.",
+        WishKind::Truce => "До заката вы с соперником не сражаетесь.",
+        WishKind::Swap => "Ты и соперник меняетесь местами.",
+        WishKind::Tribute => "Каждый соперник отдаёт тебе карту или берёт Угрозу.",
+        WishKind::Wager => "Ставка на день соперника; расчёт на закате.",
+        WishKind::Hallow => "Карты одной стихии в колоде становятся лучше.",
+        WishKind::Rot => "Карты одной стихии в колоде становятся хуже.",
+        WishKind::Plant => "В колоде прячется проклятие для того, кто его вытянет.",
+        WishKind::Foresee => "Увидишь верх колоды.",
+        WishKind::Rise => "На краю земель бога вырастает новая земля.",
+        WishKind::Veil => "Мгла забирает землю вокруг соперника или тебя.",
+        WishKind::Unveil => "Мгла рядом с тобой отступает, земля возвращается.",
+        WishKind::Cut => "Мгла отрезает твою землю от остального мира.",
+        WishKind::Settle => "Рядом с тобой появляется поселение.",
+        WishKind::Stones => "Рядом с тобой встаёт круг камней силы.",
+        WishKind::River => "От ближних гор к краю мира течёт река.",
+        WishKind::Flood => "Ближняя к тебе вода разливается.",
+        WishKind::Road => "Дорога реестра продолжается от Стола.",
+        WishKind::Fire => "Ближний к тебе лес загорается.",
+        WishKind::Awaken => "В мир приходит то, чего в нём ещё нет.",
+        WishKind::Treasure => "Тебе достаётся вещь, если есть — вещь этого бога.",
+        WishKind::Ordeal => "Бог ставит рядом с тобой испытание.",
+        WishKind::Poison => "Соперник отравлен стихией этого бога.",
+        WishKind::Beast => "Зверь-спутник тебе.",
+        WishKind::Undead => "Рядом с соперником встаёт мертвец.",
+        WishKind::Guard => "Гвардия получает приказ на соперника.",
+        WishKind::Debt => "Соперник становится твоим должником.",
+        WishKind::Build => "В твоём поселении появляется постройка.",
+        WishKind::Sway => "Ближний правитель склоняется к тебе.",
+        WishKind::Harvest => "Поля рядом с тобой приносят урожай.",
+        WishKind::Fair => "В твоём поселении открывается ярмарка.",
+        WishKind::WakeGrove => "Ближняя роща просыпается и идёт.",
+    }
+}
+
 /// A mechanic of the world (§21.2): its name and what it brings, as the
 /// table tells it when it comes in.
 pub fn feature(f: necromy_rules::Feature) -> (&'static str, &'static str) {

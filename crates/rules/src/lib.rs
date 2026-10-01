@@ -28,6 +28,7 @@ pub use game::EARLIEST_EVE;
 pub use game::GodAct;
 pub use game::LEGION;
 pub use game::RIVER_RUN;
+pub use game::taste_for;
 pub use game::{ARENA_WINS, BET_STAKE, DEBTORS, DUEL_ROUNDS, Debt, Duel, PlayerBet};
 pub use game::{
     Act, BEAST_DICE, BEAST_HEALTH, BEAST_RANGE, Bet, BodyVerb, Boon, CHOSEN, Champion, Character,

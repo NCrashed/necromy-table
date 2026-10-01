@@ -42,13 +42,14 @@ impl Plugin for WishUiPlugin {
         app.init_resource::<WishDraft>()
             .init_resource::<Typing>()
             .add_systems(Startup, spawn)
-            .add_systems(crate::InGame, (dev_wish, type_wish, buttons))
+            .add_systems(crate::InGame, (dev_panel, dev_wish, type_wish, buttons))
             .add_systems(
                 crate::InGame,
-                rebuild_panel
-                    .after(type_wish)
-                    .after(buttons)
-                    .run_if(resource_changed::<Match>.or_else(resource_changed::<WishDraft>)),
+                rebuild_panel.after(type_wish).after(buttons).run_if(
+                    resource_changed::<Match>
+                        .or_else(resource_changed::<WishDraft>)
+                        .or_else(resource_changed::<crate::tutorial::Focus>),
+                ),
             )
             .add_systems(
                 crate::InGame,
@@ -77,6 +78,8 @@ struct WishDraft {
     text: String,
     /// The human chose the prepared wishes even with the voice up.
     prepared: bool,
+    /// The prepared wishes' tab (`Theme`); `None` picks one.
+    theme: Option<Theme>,
     /// Opened by day, before dusk asks for it.
     open: bool,
 }
@@ -114,12 +117,93 @@ enum WishButton {
     Target(PlayerId),
     Make,
     Refuse,
+    /// A tab of the prepared wishes.
+    Theme(Theme),
     /// Switch between free words and the prepared wishes.
     Prepared(bool),
     /// Open the panel by day.
     Open,
     /// Close it again: the wish can wait until dusk.
     Later,
+}
+
+/// The prepared wishes come in tabs: what the chosen god likes first, then
+/// by what they are about.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Theme {
+    /// What the chosen god likes, the best grade first.
+    Liked,
+    Me,
+    Rivals,
+    Deals,
+    Deck,
+    Land,
+    People,
+}
+
+impl Theme {
+    const ALL: [Theme; 7] = [
+        Theme::Liked,
+        Theme::Me,
+        Theme::Rivals,
+        Theme::Deals,
+        Theme::Deck,
+        Theme::Land,
+        Theme::People,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Theme::Liked => "По вкусу богу",
+            Theme::Me => "Себе",
+            Theme::Rivals => "Соперникам",
+            Theme::Deals => "Сделки",
+            Theme::Deck => "Колода",
+            Theme::Land => "Земля",
+            Theme::People => "Люди",
+        }
+    }
+
+    /// The tab a wish sits in (besides `Liked`).
+    fn of(kind: WishKind) -> Theme {
+        use WishKind::*;
+        match kind {
+            Strength | Peace | Bless | Forge | Treasure | Ordeal | Beast | Fortune | Doom => {
+                Theme::Me
+            }
+            Weaken | Secret | Hand | Blight | Poison | Undead | Guard => Theme::Rivals,
+            Truce | Swap | Tribute | Wager | Debt => Theme::Deals,
+            Hallow | Rot | Plant | Foresee => Theme::Deck,
+            Land | Dead | Rise | Veil | Unveil | Cut | Stones | River | Flood | Road | Fire
+            | Awaken | WakeGrove => Theme::Land,
+            Settle | Build | Sway | Harvest | Fair => Theme::People,
+        }
+    }
+
+    /// The wishes on this tab; `Liked` needs the god.
+    fn kinds(self, game: &necromy_rules::Game, god: Option<God>) -> Vec<WishKind> {
+        match self {
+            Theme::Liked => {
+                let Some(god) = god else { return Vec::new() };
+                let mut liked: Vec<WishKind> = WishKind::ALL
+                    .into_iter()
+                    .filter(|&k| necromy_rules::taste_for(god, k) > 0)
+                    .collect();
+                // Stable: the best grade first, else the usual order.
+                liked.sort_by_key(|&k| std::cmp::Reverse(game.wish_grade(god, k)));
+                liked
+            }
+            theme => WishKind::ALL
+                .into_iter()
+                .filter(|&k| Theme::of(k) == theme)
+                .collect(),
+        }
+    }
+}
+
+/// How the god would grade a wish (§7.4), as stars out of three.
+fn stars(grade: u8) -> String {
+    (0..3).map(|i| if i < grade { '★' } else { '☆' }).collect()
 }
 
 fn spawn(mut commands: Commands) {
@@ -213,6 +297,7 @@ fn rebuild_panel(
     art: Res<StatArt>,
     font: Res<UiFont>,
     panel: Single<(Entity, &mut Visibility), With<WishPanel>>,
+    focus: Res<crate::tutorial::Focus>,
 ) {
     let (panel, mut visibility) = panel.into_inner();
     commands.entity(panel).despawn_related::<Children>();
@@ -224,7 +309,9 @@ fn rebuild_panel(
     let crowned = g.dominant() == Some(game.human);
     let dusk = g.wishing().contains(&game.human);
     visibility.set_if_neq(Visibility::Inherited);
-    let free = game.oracle.online && !draft.prepared;
+    // The tutorial may point at a prepared wish: then the prepared ones.
+    let pointed = focus.wish;
+    let free = game.oracle.online && !draft.prepared && pointed.is_none();
 
     let frame = commands
         .spawn((
@@ -319,7 +406,16 @@ fn rebuild_panel(
             &mut commands,
             &font,
             WishButton::God(god),
-            &format!("{} · {}", names::god(god), names::stage(god, g.stage(god))),
+            &format!(
+                "{} · {}{}",
+                names::god(god),
+                names::stage(god, g.stage(god)),
+                if pointed.is_some_and(|(p, _)| p == god) && draft.god != Some(god) {
+                    " ←"
+                } else {
+                    ""
+                }
+            ),
             draft.god == Some(god),
         );
         let icon = stats::icon_node(&mut commands, art.gods[god.index()].clone(), 20.0, true);
@@ -380,21 +476,67 @@ fn rebuild_panel(
         commands.entity(field).add_child(words);
         rows.push(field);
     } else {
-        // Prepared wishes.
-        let kinds = commands
+        // Prepared wishes, in tabs. The tutorial may point at one.
+
+        let theme = draft.theme.unwrap_or_else(|| match (pointed, draft.god) {
+            (Some((_, kind)), _) => Theme::of(kind),
+            (None, Some(_)) => Theme::Liked,
+            (None, None) => Theme::Me,
+        });
+        let tabs = commands
             .spawn(Node {
                 flex_wrap: FlexWrap::Wrap,
-                column_gap: px(6.0),
-                row_gap: px(6.0),
+                column_gap: px(4.0),
+                row_gap: px(4.0),
                 ..default()
             })
             .id();
-        for kind in WishKind::ALL {
-            let text = if kind.is_crude() {
-                format!("«{}» · грубое", names::wish(kind))
+        for t in Theme::ALL {
+            let count = t.kinds(g, draft.god).len();
+            if count == 0 {
+                continue;
+            }
+            let here = pointed.is_some_and(|(_, k)| Theme::of(k) == t) && t != theme;
+            let label = if here {
+                format!("{} · {count} ←", t.label())
             } else {
-                format!("«{}»", names::wish(kind))
+                format!("{} · {count}", t.label())
             };
+            let b = button(
+                &mut commands,
+                &font,
+                WishButton::Theme(t),
+                &label,
+                t == theme,
+            );
+            commands.entity(tabs).add_child(b);
+        }
+        rows.push(tabs);
+        let kinds = commands
+            .spawn((
+                Node {
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: px(6.0),
+                    row_gap: px(6.0),
+                    padding: UiRect::all(px(8.0)),
+                    width: px(610.0),
+                    ..default()
+                },
+                Frame::Inset,
+            ))
+            .id();
+        for kind in theme.kinds(g, draft.god) {
+            let mut text = format!("«{}»", names::wish(kind));
+            if let Some(god) = draft.god {
+                text.push(' ');
+                text.push_str(&stars(g.wish_grade(god, kind)));
+            }
+            if kind.is_crude() {
+                text.push_str(" · грубое");
+            }
+            if pointed.is_some_and(|(_, k)| k == kind) {
+                text.push_str(" ←");
+            }
             let b = button(
                 &mut commands,
                 &font,
@@ -405,6 +547,23 @@ fn rebuild_panel(
             commands.entity(kinds).add_child(b);
         }
         rows.push(kinds);
+        let about = match (draft.kind, draft.god) {
+            (Some(kind), Some(god)) => {
+                let taste = match necromy_rules::taste_for(god, kind) {
+                    1.. => format!(" {} это по вкусу.", names::god(god)),
+                    ..=-1 => format!(" {} такое не любит.", names::god(god)),
+                    0 => String::new(),
+                };
+                format!("{}{taste}", names::wish_effect(kind))
+            }
+            (Some(kind), None) => names::wish_effect(kind).to_string(),
+            (None, Some(_)) => {
+                "Звёзды — как бог оценит желание: по вкусу и впервые — ★★★, повтор или нелюбимое — меньше. Чем выше оценка, тем полнее исполнение и больше Стиля."
+                    .to_string()
+            }
+            (None, None) => "Сначала выбери бога: у каждого свой вкус.".to_string(),
+        };
+        rows.push(text_block(&mut commands, &font, &about, 12.0, VOICE));
 
         if draft.kind.is_some_and(WishKind::needs_target) {
             let rivals = stats::row(&mut commands);
@@ -503,6 +662,23 @@ fn rebuild_panel(
 
     commands.entity(frame).add_children(&rows);
     commands.entity(panel).add_child(frame);
+}
+
+/// Dev aid: `NECROMY_WISH_PANEL=1` opens the wish panel once the human may
+/// wish, `=1:<god index>` also picks that god (for screenshots).
+fn dev_panel(game: Res<Match>, mut draft: ResMut<WishDraft>, mut done: Local<bool>) {
+    if *done || !game.game.may_wish(game.human) {
+        return;
+    }
+    *done = true;
+    let Ok(want) = std::env::var("NECROMY_WISH_PANEL") else {
+        return;
+    };
+    draft.open = true;
+    draft.prepared = true;
+    draft.god = want
+        .split_once(':')
+        .and_then(|(_, g)| God::ALL.get(g.parse::<usize>().ok()?).copied());
 }
 
 /// Dev aid: `NECROMY_WISH=<god index>:<words>` writes the human's first wish
@@ -609,6 +785,7 @@ fn buttons(
                 }
             }
             WishButton::Target(p) => draft.target = Some(p),
+            WishButton::Theme(theme) => draft.theme = Some(theme),
             WishButton::Prepared(on) => draft.prepared = on,
             WishButton::Open => draft.open = true,
             WishButton::Later => draft.open = false,
